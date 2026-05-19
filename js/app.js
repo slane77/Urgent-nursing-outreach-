@@ -145,13 +145,8 @@ async function initAuth() {
   });
 }
 
-async function signIn(email) {
-  const { error } = await sb.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: window.location.origin + window.location.pathname
-    }
-  });
+async function signIn(email, password) {
+  const { error } = await sb.auth.signInWithPassword({ email, password });
   return error;
 }
 
@@ -164,22 +159,25 @@ async function signOut() {
   render();
 }
 
-function renderAuthScreen(errorMsg, infoMsg) {
+function renderAuthScreen(errorMsg, infoMsg, savedEmail) {
   return `
     <div class="auth-container">
       <div class="auth-card">
         <img src="data:image/webp;base64,${window.LOGO_B64}" alt="Urgent Nursing" />
         <h1>Outreach Manager</h1>
-        <div class="subtitle">Sign in with your work email to continue</div>
+        <div class="subtitle">Sign in to continue</div>
         <div class="field">
-          <input type="email" id="auth-email" placeholder="firstname.surname@daywebster.com" autofocus />
+          <input type="email" id="auth-email" placeholder="firstname.surname@daywebster.com" value="${esc(savedEmail || '')}" autofocus />
         </div>
-        <button id="auth-submit">Send sign-in link</button>
+        <div class="field">
+          <input type="password" id="auth-password" placeholder="Password" />
+        </div>
+        <button id="auth-submit">Sign in</button>
         ${errorMsg ? `<div class="error">${esc(errorMsg)}</div>` : ''}
         ${infoMsg ? `<div class="info">${esc(infoMsg)}</div>` : `
           <div class="info">
-            We'll email you a one-tap sign-in link. No password needed.
-            Only authorised Day Webster Group emails can access this system.
+            Only authorised Day Webster Group users can access this system.
+            Contact Scott Lane if you need an account.
           </div>
         `}
       </div>
@@ -189,30 +187,40 @@ function renderAuthScreen(errorMsg, infoMsg) {
 
 function bindAuthEvents() {
   const btn = $('#auth-submit');
-  const input = $('#auth-email');
-  if (!btn || !input) return;
+  const emailInput = $('#auth-email');
+  const passwordInput = $('#auth-password');
+  if (!btn || !emailInput || !passwordInput) return;
 
   const submit = async () => {
-    const email = input.value.trim();
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
     if (!email || !email.includes('@')) {
-      $('#app').innerHTML = renderAuthScreen('Please enter a valid email address.');
+      $('#app').innerHTML = renderAuthScreen('Please enter a valid email address.', null, email);
+      bindAuthEvents();
+      return;
+    }
+    if (!password) {
+      $('#app').innerHTML = renderAuthScreen('Please enter your password.', null, email);
       bindAuthEvents();
       return;
     }
     btn.disabled = true;
-    btn.textContent = 'Sending...';
-    const error = await signIn(email);
+    btn.textContent = 'Signing in...';
+    const error = await signIn(email, password);
     if (error) {
-      $('#app').innerHTML = renderAuthScreen('Sign-in failed: ' + error.message);
+      // Friendlier message for the most common failure
+      const msg = (error.message || '').toLowerCase().includes('invalid')
+        ? 'Wrong email or password. Try again, or contact Scott Lane if you need a reset.'
+        : 'Sign-in failed: ' + error.message;
+      $('#app').innerHTML = renderAuthScreen(msg, null, email);
       bindAuthEvents();
-    } else {
-      $('#app').innerHTML = renderAuthScreen(null,
-        `Check your inbox at ${email}. Click the link in the email to sign in. You can close this tab — the link will open in a new one.`);
     }
+    // On success, the onAuthStateChange listener triggers bootApp()
   };
 
   btn.addEventListener('click', submit);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  emailInput.addEventListener('keydown', e => { if (e.key === 'Enter') passwordInput.focus(); });
+  passwordInput.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
 }
 
 // ============================================================================
