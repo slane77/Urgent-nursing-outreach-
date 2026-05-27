@@ -58,6 +58,15 @@ const state = {
   modal: null,
   // Loading flags
   loadingPage: false,
+  // User profile
+  userProfile: null,
+  // Team management
+  teamUsers: [],
+  teamLoading: false,
+  inviteEmail: '',
+  inviteName: '',
+  inviteSources: [],
+  inviteResult: null,
   // Import / scraper
   importSpecialty: 'physiotherapy',
   importRegion: '',
@@ -65,6 +74,8 @@ const state = {
   importLimit: 20,
   importRunning: false,
   importResult: null,
+  careHomeRunning: false,
+  careHomeResult: null,
   pharmacyRunning: false,
   pharmacyResult: null,
   agencyCsvText: null,
@@ -295,6 +306,8 @@ async function loadSourceStatusCounts() {
     pharmacy:        'Source: Pharmacy Outreach',
     ahp:             'Source: NHS Jobs AHP',
     private_theatre: 'Source: Private Theatre',
+    care_home:       'Source: Care Home',
+    care_home:       'Source: Care Home',
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
@@ -343,7 +356,7 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, gpRes, ahpRes, agencyRes, pharmRes, theatreRes] = await Promise.all([
+  const [allRes, chRes, gpRes, ahpRes, agencyRes, pharmRes, theatreRes, careHomeRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
@@ -351,6 +364,7 @@ async function loadSourceCounts() {
     sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Agency Outreach%'),
     sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Pharmacy Outreach%'),
     sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Private Theatre%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Care Home%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .not('notes', 'ilike', '%Ofsted Register%')
       .not('notes', 'ilike', '%Source: Agency%')
@@ -427,6 +441,8 @@ async function loadContactsPage() {
     query = query.ilike('notes', '%Source: NHS Staff Bank%');
   } else if (sf === 'camhs') {
     query = query.ilike('notes', '%Source: CAMHS%');
+  } else if (sf === 'care_home') {
+    query = query.ilike('notes', '%Source: Care Home%');
   }
   // sf === 'all' — no filter applied
   // ──────────────────────────────────────────────────────────────────────────
@@ -552,6 +568,8 @@ function applyComposeSourceFilter(q, source) {
     pharmacy:        'Source: Pharmacy Outreach',
     ahp:             'Source: NHS Jobs AHP',
     private_theatre: 'Source: Private Theatre',
+    care_home:       'Source: Care Home',
+    care_home:       'Source: Care Home',
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
@@ -600,6 +618,17 @@ async function previewComposeCounts() {
 
 async function bootApp() {
   $('#app').innerHTML = '<div style="padding:40px;text-align:center;color:#6B7280;">Loading data...</div>';
+  // Load user profile to determine access level
+  const { data: { session: bootSession } } = await sb.auth.getSession();
+  if (bootSession) {
+    const profileRes = await fetch(`${SB_URL}/functions/v1/user-manager`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + bootSession.access_token },
+      body: JSON.stringify({ action: 'me' }),
+    });
+    const profileData = await profileRes.json();
+    state.userProfile = profileData.profile || null;
+  }
   await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
   await loadContactsPage();
   render();
@@ -665,12 +694,17 @@ function renderFollowUpDate(d) {
 }
 
 function renderDatabase() {
+  // Filter sources based on user permissions
+  const userSources = state.userProfile?.allowed_sources || [];
+  const isAdmin = !state.userProfile || state.userProfile.role === 'admin' || userSources.length === 0;
+
   const SOURCES = [
     { key: 'all',             label: 'All Sources',        live: true  },
     { key: 'gp_surgery',      label: 'GP Surgeries',       live: true  },
     { key: 'children_homes',  label: "Children's Homes",   live: true  },
     { key: 'agency',          label: 'Agency Outreach',    live: true  },
     { key: 'ahp',             label: 'NHS Jobs AHP',       live: true  },
+    { key: 'care_home',       label: 'Care Homes',         live: true  },
     { key: 'pharmacy',        label: 'Pharmacy',           live: true  },
     { key: 'bms',             label: 'BMS',                live: false },
     { key: 'sterile',         label: 'Sterile Services',   live: false },
@@ -688,7 +722,7 @@ function renderDatabase() {
 
   return `
     <div class="source-tabs">
-      ${SOURCES.map(s => `
+      ${SOURCES.filter(s => s.key === 'all' || isAdmin || userSources.includes(s.key)).map(s => `
         <button class="source-tab${state.sourceFilter === s.key ? ' active' : ''}${!s.live ? ' soon' : ''}"
           data-source="${s.key}"${!s.live ? ' disabled title="Coming soon"' : ''}>
           ${esc(s.label)}
@@ -879,6 +913,42 @@ function renderTemplates() {
 
 
 
+async function loadTeamUsers() {
+  state.teamLoading = true; render();
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session?.access_token },
+      body: JSON.stringify({ action: 'list' }),
+    });
+    const data = await res.json();
+    state.teamUsers = data.users || [];
+  } catch(e) { console.error('loadTeamUsers:', e); }
+  state.teamLoading = false; render();
+}
+
+async function sendInvite() {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session?.access_token },
+    body: JSON.stringify({
+      action: 'invite',
+      email: state.inviteEmail,
+      full_name: state.inviteName,
+      role: 'user',
+      allowed_sources: state.inviteSources,
+    }),
+  });
+  state.inviteResult = await res.json();
+  if (state.inviteResult.success) {
+    state.inviteEmail = ''; state.inviteName = ''; state.inviteSources = [];
+    await loadTeamUsers();
+  }
+  render();
+}
+
 async function sendFilteredViaBrevo() {
   const template = state.templates.find(t => t.id === state.composeTemplateId);
   if (!template) return toast('Select a template first');
@@ -1014,6 +1084,7 @@ function renderCompose() {
               {k:'pharmacy',       l:'Pharmacy'},
               {k:'private_theatre',l:'Private Theatres'},
               {k:'ahp',            l:'AHP (NHS Jobs)'},
+              {k:'care_home',     l:'Care Homes'},
               {k:'bms',            l:'BMS'},
               {k:'sterile',        l:'Sterile Services'},
               {k:'nhs_staffbank',  l:'NHS Staff Banks'},
@@ -1303,6 +1374,26 @@ async function previewAgencyCSV(csvText) {
   render();
 }
 
+
+async function runCareHomeScrape() {
+  const region = document.getElementById('ch-region')?.value || '';
+  const care_type = document.getElementById('ch-type')?.value || 'all';
+  const limit = parseInt(document.getElementById('ch-limit')?.value || '20');
+  state.careHomeRunning = true; state.careHomeResult = null; render();
+  try {
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/care-home-scraper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      body: JSON.stringify({ region, care_type, limit }),
+    });
+    state.careHomeResult = await res.json();
+    if (state.careHomeResult.success && state.careHomeResult.inserted > 0) {
+      await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+    }
+  } catch(e) { state.careHomeResult = { success: false, error: e.message }; }
+  state.careHomeRunning = false; render();
+}
+
 async function runPharmacyScrape() {
   const region = document.getElementById('ph-region')?.value || '';
   const limit = parseInt(document.getElementById('ph-limit')?.value || '20');
@@ -1587,6 +1678,62 @@ function renderImport() {
         </div>` : ''}
       </div>
 
+
+
+      <!-- Care Homes Scraper -->
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">🏡</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">Care Homes — Registered Managers</div>
+            <div class="import-card-sub">Claude agent finds registered care home managers across England with email addresses. Covers residential, nursing, dementia and supported living.</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+        <div class="import-form">
+          <div class="import-form-row">
+            <div class="field">
+              <label>Region</label>
+              <select class="select" id="ch-region">
+                <option value="">All England</option>
+                ${['North West','North East, Yorkshire and The Humber','West Midlands','East Midlands','East of England','South East','London','South West'].map(r => `<option value="${r}">${r}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Care Type</label>
+              <select class="select" id="ch-type">
+                <option value="all">All Types</option>
+                <option value="residential">Residential</option>
+                <option value="nursing">Nursing</option>
+                <option value="dementia">Dementia</option>
+                <option value="learning_disability">Learning Disability</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Max Contacts</label>
+              <select class="select" id="ch-limit">
+                ${[10,20,30,50].map(n => `<option value="${n}" ${n===20?'selected':''}>${n}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="import-form-actions">
+            <button class="btn primary" id="run-carehome-btn" ${state.careHomeRunning ? 'disabled' : ''}>
+              ${state.careHomeRunning ? '<span class="spinner-inline"></span> Searching&hellip;' : '&#9654; Run Care Home Scraper'}
+            </button>
+            <span class="import-hint">Searches for care home registered managers with email addresses. Takes 2&ndash;4 minutes per run.</span>
+          </div>
+        </div>
+        ${state.careHomeRunning ? '<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>' : ''}
+        ${state.careHomeResult ? `<div class="import-result ${state.careHomeResult.success ? 'ok' : 'err'}">
+          ${state.careHomeResult.success ? `
+            <div class="import-result-stats">
+              <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.found}</div><div class="import-stat-lbl">Found</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.skipped_dup}</div><div class="import-stat-lbl">Dupe</div></div>
+            </div>` : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.careHomeResult.error || 'Error')}</p>`}
+        </div>` : ''}
+      </div>
 
       <!-- Pharmacy Scraper -->
       <div class="import-card">
@@ -2271,6 +2418,7 @@ function bindEvents() {
       if (state.view === 'compose') { state.composePreviewCounts = null; state.composeBrevoResult = null; }
       if (state.view === 'import') state.importResult = null;
       if (state.view === 'responses') { loadResponsesData(); return; }
+      if (state.view === 'settings' && state.userProfile?.role === 'admin') { loadTeamUsers(); }
       render();
     };
   });
@@ -2282,6 +2430,11 @@ function bindEvents() {
       state.page = 1;
       state.search = '';
       state.regionFilter = '';
+      // Reset source filter for unsubs/live so all contacts are visible
+      if (t.dataset.subtab === 'unsubscribed' || t.dataset.subtab === 'live') {
+        state.sourceFilter = 'all';
+        state.sourceStatusCounts = { lead: null, live: null, unsubscribed: null };
+      }
       await loadContactsPage();
       render();
     };
@@ -2406,6 +2559,35 @@ function bindEvents() {
   const syncM365Btn = $('#sync-m365-btn');
   if (syncM365Btn) syncM365Btn.onclick = () => { if (!state.m365Syncing) syncM365Replies(); };
 
+  // Team management bindings
+  if (state.view === 'settings' && state.userProfile?.role === 'admin' && state.teamUsers.length === 0) {
+    loadTeamUsers();
+  }
+  const sendInviteBtn = $('#send-invite-btn');
+  if (sendInviteBtn) sendInviteBtn.onclick = () => { if (state.inviteEmail) sendInvite(); };
+  const inviteNameInput = $('#invite-name');
+  if (inviteNameInput) inviteNameInput.oninput = e => { state.inviteName = e.target.value; };
+  const inviteEmailInput = $('#invite-email');
+  if (inviteEmailInput) inviteEmailInput.oninput = e => { state.inviteEmail = e.target.value; };
+  document.querySelectorAll('.invite-source-cb').forEach(cb => {
+    cb.onchange = () => {
+      if (cb.checked) { state.inviteSources = [...new Set([...state.inviteSources, cb.value])]; }
+      else { state.inviteSources = state.inviteSources.filter(s => s !== cb.value); }
+    };
+  });
+  document.querySelectorAll('[data-delete-user]').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('Remove ' + btn.dataset.userEmail + ' from the team?')) return;
+      const { data: { session } } = await sb.auth.getSession();
+      await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session?.access_token },
+        body: JSON.stringify({ action: 'delete', target_user_id: btn.dataset.deleteUser }),
+      });
+      await loadTeamUsers();
+    };
+  });
+
   const m365DaysSelect = $('#m365-days');
   if (m365DaysSelect) m365DaysSelect.onchange = e => { state.m365DaysBack = parseInt(e.target.value); };
 
@@ -2453,6 +2635,8 @@ function bindEvents() {
   const agencyUploadBtn = $('#agency-upload-btn');
   if (agencyUploadBtn) agencyUploadBtn.onclick = () => { if (!state.agencyUploading) runAgencyCSVUpload(); };
 
+  const runCareHomeBtn = $('#run-carehome-btn');
+  if (runCareHomeBtn) runCareHomeBtn.onclick = () => { if (!state.careHomeRunning) runCareHomeScrape(); };
   const runPharmacyBtn = $('#run-pharmacy-btn');
   if (runPharmacyBtn) runPharmacyBtn.onclick = () => { if (!state.pharmacyRunning) runPharmacyScrape(); };
   const runTheatreBtn = $('#run-theatre-btn');
