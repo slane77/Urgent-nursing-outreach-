@@ -727,6 +727,59 @@ function renderTemplates() {
 }
 
 
+
+async function sendFilteredViaBrevo() {
+  const template = state.templates.find(t => t.id === state.composeTemplateId);
+  if (!template) return toast('Select a template first');
+
+  state.composeBrevoSending = true;
+  state.composeBrevoResult = null;
+  render();
+
+  try {
+    // Build queue from current filters
+    const queue = await buildComposeQueueFromDb();
+    if (!queue.length) {
+      state.composeBrevoResult = { error: 'No contacts match your current filters' };
+      state.composeBrevoSending = false;
+      render();
+      return;
+    }
+
+    const ids = queue.map(c => c.id);
+    const { data: { session } } = await sb.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('Not authenticated');
+
+    const batchId = 'batch_' + Date.now();
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token,
+      },
+      body: JSON.stringify({
+        templateId: template.id,
+        contactIds: ids,
+        batchId,
+        senderEmail: 'scott.lane@daywebster.com',
+        senderName: 'Day Webster Group',
+      }),
+    });
+
+    state.composeBrevoResult = await res.json();
+    if (state.composeBrevoResult.sent > 0) {
+      await Promise.all([loadStatusCounts(), loadSourceCounts(), loadContactsPage()]);
+      toast(state.composeBrevoResult.sent + ' emails sent via Brevo ✓');
+    }
+  } catch(e) {
+    state.composeBrevoResult = { error: e.message };
+  }
+
+  state.composeBrevoSending = false;
+  render();
+}
+
 async function sendSelectedViaBrevo() {
   const ids = state.composeSelectedIds;
   if (!ids?.length) return;
@@ -862,22 +915,45 @@ function renderCompose() {
       <div class="muted" style="margin-top:8px;">Unsubscribed contacts are automatically excluded — their status puts them in a separate bucket from Leads/Live.</div>
     </div>
 
-    <div class="compose-step">
-      <h3>4. Pick output mode</h3>
-      <div class="stat-row">
-        <button class="btn primary" id="start-one-by-one" ${!template || !previewMatch ? 'disabled' : ''}>
-          📧 One-by-one Copy Mode
+    <div class="compose-step brevo-panel">
+      <h3 style="margin:0 0 8px;">4. Send via Brevo</h3>
+      <p class="muted" style="margin:0 0 14px;font-size:12px;">Sends personalised emails to each contact using your template. Each contact auto-advances to <strong>Contacted</strong> stage with a 14-day follow-up date.</p>
+
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <button class="btn primary" id="brevo-filter-send-btn" ${!template || !previewMatch ? 'disabled' : ''}>
+          ${state.composeBrevoSending ? '<span class="spinner-inline"></span> Sending&hellip;' : '&#9654;&nbsp;Send ' + Math.min(previewMatch, state.composeBatchSize) + ' Emails via Brevo'}
         </button>
-        <button class="btn accent" id="start-csv" ${!template || !previewMatch ? 'disabled' : ''}>
-          📊 Mail Merge CSV Export
-        </button>
+        ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
+        ${!previewMatch ? '<span class="muted" style="font-size:12px;">No contacts match — adjust filters</span>' : ''}
       </div>
-      <div class="muted" style="margin-top:8px;">
-        <strong>One-by-one</strong>: cycles through each contact, you copy & paste personalised emails into Outlook (safest for NHS).<br>
-        <strong>CSV Export</strong>: downloads filtered list + email body for use with Word Mail Merge (faster for big sends).
-      </div>
+
+      ${state.composeBrevoSending ? `
+        <div class="import-progress" style="margin-top:12px;">
+          <div class="progress-bar"><div class="fill import-pulse"></div></div>
+          <p class="muted" style="margin-top:6px;font-size:12px;">Sending personalised emails via Brevo&hellip;</p>
+        </div>` : ''}
+
+      ${state.composeBrevoResult && !state.composeBrevoSending && !state.composeSelectedIds ? `
+      <div class="import-result ${state.composeBrevoResult.error ? 'err' : 'ok'}" style="margin-top:12px;">
+        ${state.composeBrevoResult.error
+          ? `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.composeBrevoResult.error)}</p>`
+          : `<div class="import-result-stats">
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.sent || 0}</div><div class="import-stat-lbl">Sent</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.failed || 0}</div><div class="import-stat-lbl">Failed</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.total || 0}</div><div class="import-stat-lbl">Total</div></div>
+            </div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; Done — contacts advanced to <strong>Contacted</strong> with 14-day follow-up set.</p>`}
+      </div>` : ''}
+
+      <details style="margin-top:14px;">
+        <summary style="font-size:11px;color:var(--grey-500);cursor:pointer;">Advanced: one-by-one copy mode or CSV export</summary>
+        <div class="stat-row" style="margin-top:10px;gap:8px;">
+          <button class="btn small" id="start-one-by-one" ${!template || !previewMatch ? 'disabled' : ''}>📧 One-by-one Copy</button>
+          <button class="btn small" id="start-csv" ${!template || !previewMatch ? 'disabled' : ''}>📊 CSV Export</button>
+        </div>
+      </details>
     </div>
-  `;
+  \`;
 }
 
 function renderBrevoSend() {
@@ -1775,6 +1851,9 @@ function bindEvents() {
   const impLimit = $('#imp-limit');
   if (impLimit) impLimit.onchange = e => { state.importLimit = parseInt(e.target.value); };
   // Direct Brevo send panel bindings
+  const bRevoFilterBtn = $('#brevo-filter-send-btn');
+  if (bRevoFilterBtn) bRevoFilterBtn.onclick = () => { if (!state.composeBrevoSending) sendFilteredViaBrevo(); };
+
   const bRevoBtn = $('#brevo-send-btn');
   if (bRevoBtn) bRevoBtn.onclick = () => { if (!state.composeBrevoSending) sendSelectedViaBrevo(); };
 
