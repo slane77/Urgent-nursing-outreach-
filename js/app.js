@@ -334,11 +334,14 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, gpRes, ahpRes] = await Promise.all([
+  const [allRes, chRes, gpRes, ahpRes, agencyRes, pharmRes, theatreRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
     sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: NHS Jobs AHP%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Agency Outreach%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Pharmacy Outreach%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Private Theatre%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .not('notes', 'ilike', '%Ofsted Register%')
       .not('notes', 'ilike', '%Source: Agency%')
@@ -351,10 +354,13 @@ async function loadSourceCounts() {
       .not('notes', 'ilike', '%Source: CAMHS%'),
   ]);
   state.sourceCounts = {
-    all:            allRes.count  || 0,
-    gp_surgery:     gpRes.count   || 0,
-    children_homes: chRes.count   || 0,
-    ahp:            ahpRes.count  || 0,
+    all:            allRes.count    || 0,
+    gp_surgery:     gpRes.count     || 0,
+    children_homes: chRes.count     || 0,
+    ahp:            ahpRes.count    || 0,
+    agency:         agencyRes.count || 0,
+    pharmacy:       pharmRes.count  || 0,
+    private_theatre: theatreRes.count || 0,
   };
 }
 
@@ -675,6 +681,7 @@ function renderDatabase() {
           ${s.live && state.sourceCounts[s.key] != null
             ? `<span class="source-count">${Number(state.sourceCounts[s.key]).toLocaleString()}</span>`
             : !s.live ? '<span class="source-soon">soon</span>' : ''}
+          ${s.key === 'children_homes' && s.live ? '<span class="source-warn" title="Most have placeholder emails — run enrichment">⚠</span>' : ''}
         </button>
       `).join('')}
     </div>
@@ -1657,7 +1664,7 @@ function renderDashboard() {
 
   const pipelineStages = [
     { key: 'new',       label: 'New',       count: p.new       || 0, color: '#6B7280', action: () => { state.view='database'; state.dbStage='new'; loadContactsPage().then(render); } },
-    { key: 'contacted', label: 'Contacted', count: p.contacted || 0, color: '#3B82F6', action: () => { state.view='database'; state.dbStage='contacted'; loadContactsPage().then(render); } },
+    { key: 'contacted', label: 'Contacted', count: p.contacted || 0, color: '#3B82F6', action: () => { state.view='database'; state.sourceFilter='all'; state.dbStage='contacted'; loadContactsPage().then(render); } },
     { key: 'responded', label: 'Responded', count: p.responded || 0, color: '#F59E0B', action: () => { state.view='database'; state.dbStage='responded'; loadContactsPage().then(render); } },
     { key: 'meeting',   label: 'Meeting',   count: p.meeting   || 0, color: '#8B5CF6', action: () => { state.view='database'; state.dbStage='meeting';   loadContactsPage().then(render); } },
     { key: 'live',      label: 'Live',      count: p.live      || 0, color: '#10B981', action: () => { state.view='database'; state.subTab='live'; state.dbStage='all'; loadContactsPage().then(render); } },
@@ -1897,7 +1904,7 @@ function bindEvents() {
       state.page = 1;
       if (state.view === 'dashboard') { loadDashboard(); return; }
       if (state.view === 'database') await loadContactsPage();
-      if (state.view === 'compose') state.composePreviewCounts = null;
+      if (state.view === 'compose') { state.composePreviewCounts = null; state.composeBrevoResult = null; }
       if (state.view === 'import') state.importResult = null;
       render();
     };
@@ -1963,6 +1970,7 @@ function bindEvents() {
     t.onclick = async () => {
       state.sourceFilter = t.dataset.source;
       state.ahpSpecialtyFilter = 'all';
+      state.selected = new Set();
       state.page = 1;
       state.search = '';
       state.regionFilter = '';
