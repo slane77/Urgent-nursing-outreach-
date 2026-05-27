@@ -81,6 +81,7 @@ const state = {
   // Source filter
   sourceFilter: 'all',
   sourceCounts: {},
+  sourceStatusCounts: { lead: null, live: null, unsubscribed: null },
   // Multi-select
   selected: new Set()
 };
@@ -264,6 +265,60 @@ async function loadStatusCounts() {
   statuses.forEach((s, i) => {
     state.counts[s] = results[i].count || 0;
   });
+}
+
+
+async function loadSourceStatusCounts() {
+  // Load lead/live/unsub counts filtered by current source
+  const sf = state.sourceFilter;
+  if (sf === 'all') {
+    // Reset to null so subtabs show global counts
+    state.sourceStatusCounts = { lead: null, live: null, unsubscribed: null };
+    return;
+  }
+
+  const SOURCE_TAGS = {
+    gp_surgery:      null, // special case
+    children_homes:  'Ofsted Register',
+    agency:          'Source: Agency Outreach',
+    pharmacy:        'Source: Pharmacy Outreach',
+    ahp:             'Source: NHS Jobs AHP',
+    private_theatre: 'Source: Private Theatre',
+    bms:             'Source: BMS Outreach',
+    sterile:         'Source: Sterile Services',
+    nhs_staffbank:   'Source: NHS Staff Bank',
+    camhs:           'Source: CAMHS',
+  };
+
+  function applyFilter(q) {
+    if (sf === 'gp_surgery') {
+      return q
+        .not('notes', 'ilike', '%Ofsted Register%')
+        .not('notes', 'ilike', '%Source: Agency%')
+        .not('notes', 'ilike', '%Source: Pharmacy%')
+        .not('notes', 'ilike', '%Source: BMS%')
+        .not('notes', 'ilike', '%Source: Sterile%')
+        .not('notes', 'ilike', '%Source: Private Theatre%')
+        .not('notes', 'ilike', '%Source: NHS Staff Bank%')
+        .not('notes', 'ilike', '%Source: CAMHS%')
+        .not('notes', 'ilike', '%Source: NHS Jobs AHP%');
+    }
+    const tag = SOURCE_TAGS[sf];
+    if (tag) return q.ilike('notes', `%${tag}%`);
+    return q;
+  }
+
+  const [leadRes, liveRes, unsubRes] = await Promise.all([
+    applyFilter(sb.from('contacts').select('id', { count: 'exact', head: true })).eq('status', 'lead'),
+    applyFilter(sb.from('contacts').select('id', { count: 'exact', head: true })).eq('status', 'live'),
+    applyFilter(sb.from('contacts').select('id', { count: 'exact', head: true })).eq('status', 'unsubscribed'),
+  ]);
+
+  state.sourceStatusCounts = {
+    lead:         leadRes.count  || 0,
+    live:         liveRes.count  || 0,
+    unsubscribed: unsubRes.count || 0,
+  };
 }
 
 async function loadFilterOptions() {
@@ -512,7 +567,7 @@ async function previewComposeCounts() {
 
 async function bootApp() {
   $('#app').innerHTML = '<div style="padding:40px;text-align:center;color:#6B7280;">Loading data...</div>';
-  await Promise.all([loadStatusCounts(), loadSourceCounts(), loadTemplates(), loadFilterOptions()]);
+  await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
   await loadContactsPage();
   render();
   // Load dashboard data in background (non-blocking)
@@ -620,8 +675,9 @@ function renderDatabase() {
       ].map(s => `<button class="stage-tab${state.dbStage===s.k?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
     </div>
     <div class="subtabs">
-      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">Leads<span class="count">${state.counts.lead}</span></div>
-      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">Live<span class="count">${state.counts.live}</span></div>
+      ${state.sourceFilter !== 'all' ? `<div class="source-filter-label">Showing: <strong>${state.sourceFilter.replace(/_/g,' ')}</strong></div>` : ''}
+      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">Leads<span class="count">${state.sourceFilter !== 'all' && state.sourceStatusCounts.lead !== null ? state.sourceStatusCounts.lead : state.counts.lead}</span></div>
+      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">Live<span class="count">${state.sourceFilter !== 'all' && state.sourceStatusCounts.live !== null ? state.sourceStatusCounts.live : state.counts.live}</span></div>
       <div class="subtab ${state.subTab === 'unsubscribed' ? 'active' : ''}" data-subtab="unsubscribed">Unsubscribes<span class="count">${state.counts.unsubscribed}</span></div>
     </div>
     <div class="toolbar">
@@ -1811,7 +1867,7 @@ function bindEvents() {
       state.page = 1;
       state.search = '';
       state.regionFilter = '';
-      await loadContactsPage();
+      await Promise.all([loadSourceStatusCounts(), loadContactsPage()]);
       render();
     };
   });
