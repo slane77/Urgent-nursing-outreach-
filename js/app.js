@@ -624,26 +624,37 @@ async function previewComposeCounts() {
 
 async function bootApp() {
   $('#app').innerHTML = '<div style="padding:40px;text-align:center;color:#6B7280;">Loading data...</div>';
-  // Load user profile to determine access level
-  const { data: { session: bootSession } } = await sb.auth.getSession();
-  if (bootSession) {
-    const profileRes = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + bootSession.access_token },
-      body: JSON.stringify({ action: 'me' }),
-    });
-    const profileData = await profileRes.json();
-    state.userProfile = profileData.profile || null;
-    if (profileData.profile) {
-      state.senderEmail = profileData.profile.sender_email || '';
-      state.senderName  = profileData.profile.sender_name  || '';
+  try {
+    // Load user profile (non-fatal — app works without it)
+    try {
+      const { data: { session: bootSession } } = await sb.auth.getSession();
+      if (bootSession) {
+        const profileRes = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + bootSession.access_token },
+          body: JSON.stringify({ action: 'me' }),
+        });
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          state.userProfile = profileData.profile || null;
+          if (profileData.profile) {
+            state.senderEmail = profileData.profile.sender_email || '';
+            state.senderName  = profileData.profile.sender_name  || '';
+          }
+        }
+      }
+    } catch(profileErr) {
+      console.warn('Profile load failed (non-fatal):', profileErr.message);
     }
+
+    await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
+    await loadContactsPage();
+    render();
+    loadDashboard(); // non-blocking background load
+  } catch(bootErr) {
+    console.error('bootApp error:', bootErr);
+    render(); // render anyway so user isn't stuck on Loading
   }
-  await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
-  await loadContactsPage();
-  render();
-  // Load dashboard data in background (non-blocking)
-  loadDashboard();
 }
 
 function render() {
@@ -656,8 +667,13 @@ function render() {
     bindAuthEvents();
     return;
   }
-  $('#app').innerHTML = renderAppShell();
-  bindEvents();
+  try {
+    $('#app').innerHTML = renderAppShell();
+    bindEvents();
+  } catch(renderErr) {
+    console.error('Render error:', renderErr);
+    $('#app').innerHTML = '<div style="padding:40px;text-align:center;color:#DC2626;">App error: ' + renderErr.message + '<br><br><button onclick="location.reload()" style="margin-top:10px;padding:8px 16px;background:#1a7a4a;color:white;border:none;border-radius:6px;cursor:pointer;">Reload</button></div>';
+  }
   if (state.modal) renderModal();
 }
 
