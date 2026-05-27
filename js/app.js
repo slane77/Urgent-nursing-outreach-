@@ -289,6 +289,7 @@ async function loadSourceStatusCounts() {
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
+    ahp:             'Source: NHS Jobs AHP',
     camhs:           'Source: CAMHS',
   };
 
@@ -333,10 +334,11 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, gpRes] = await Promise.all([
+  const [allRes, chRes, gpRes, ahpRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: NHS Jobs AHP%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .not('notes', 'ilike', '%Ofsted Register%')
       .not('notes', 'ilike', '%Source: Agency%')
@@ -349,9 +351,10 @@ async function loadSourceCounts() {
       .not('notes', 'ilike', '%Source: CAMHS%'),
   ]);
   state.sourceCounts = {
-    all:            allRes.count || 0,
-    gp_surgery:     gpRes.count  || 0,
-    children_homes: chRes.count  || 0,
+    all:            allRes.count  || 0,
+    gp_surgery:     gpRes.count   || 0,
+    children_homes: chRes.count   || 0,
+    ahp:            ahpRes.count  || 0,
   };
 }
 
@@ -391,6 +394,7 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: CAMHS%');
   } else if (sf !== 'all') {
     const SOURCE_TAG = {
+      ahp:             'Source: NHS Jobs AHP',
       agency:          'Source: Agency Outreach',
       pharmacy:        'Source: Pharmacy Outreach',
       bms:             'Source: BMS Outreach',
@@ -533,6 +537,7 @@ function applyComposeSourceFilter(q, source) {
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
+    ahp:             'Source: NHS Jobs AHP',
     camhs:           'Source: CAMHS',
   };
   const tag = SOURCE_TAGS[source];
@@ -625,6 +630,12 @@ function renderAppShell() {
         renderSettings()}
     </div>
   `;
+}
+
+function extractSpecialty(notes) {
+  if (!notes) return '—';
+  const m = notes.match(/Specialty: ([^|]+)/);
+  return m ? m[1].trim().replace(/_/g,' ') : '—';
 }
 
 function renderFollowUpDate(d) {
@@ -750,15 +761,16 @@ function renderDatabase() {
             <th style="width:36px;text-align:center">
               <input type="checkbox" id="select-all-cb" ${allPageSel ? 'checked' : ''} />
             </th>
-            <th data-sort="org">Surgery / Org</th>
-            <th data-sort="first_name">Contact</th>
-            <th data-sort="job_title">Role</th>
-            <th data-sort="email">Email</th>
-            <th data-sort="town">Town</th>
-            <th data-sort="region">Region</th>
+            ${state.sourceFilter !== 'ahp' ? `<th data-sort="org">Surgery / Org</th><th data-sort="first_name">Contact</th><th data-sort="job_title">Role</th><th data-sort="email">Email</th><th data-sort="town">Town</th><th data-sort="region">Region</th>` : ''}
             ${state.sourceFilter === 'ahp' ? `
+              <th>Contact Name</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th>NHS Trust</th>
               <th>Department</th>
-              <th>Band</th>` : `
+              <th>Specialty</th>
+              <th>Band</th>
+              <th>Date Added</th>` : `
               <th data-sort="last_emailed_at">Last Emailed</th>
               <th data-sort="follow_up_date">Follow-up</th>`}
             <th>Actions</th>
@@ -770,14 +782,22 @@ function renderDatabase() {
               <td style="width:36px;text-align:center">
                 <input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />
               </td>
+              ${state.sourceFilter !== 'ahp' ? `
               <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
               <td>${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' '))}</td>
               <td>${esc(c.job_title)}</td>
               <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
               <td>${esc(c.town)}</td>
-              <td>${esc(c.region)}</td>
+              <td>${esc(c.region)}</td>` : ''}
               ${state.sourceFilter === 'ahp'
-                ? `<td>${esc(c.department || '—')}</td><td>${esc(c.band_requested || '—')}</td>`
+                ? `<td>${esc(([c.first_name,c.last_name].filter(Boolean).join(' ')) || '—')}</td>
+                   <td class="ellipsis" title="${esc(c.email)}">${esc(c.email || '—')}</td>
+                   <td>${esc(c.phone || '—')}</td>
+                   <td class="ellipsis" title="${esc(c.org)}">${esc(c.org || '—')}</td>
+                   <td>${esc(c.department || '—')}</td>
+                   <td>${esc(extractSpecialty(c.notes))}</td>
+                   <td>${esc(c.band_requested || '—')}</td>
+                   <td>${c.created_at ? esc(c.created_at.slice(0,10)) : '—'}</td>`
                 : `<td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
                 <td>${renderFollowUpDate(c.follow_up_date)}</td>`}
               <td class="actions">
