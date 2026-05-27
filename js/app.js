@@ -627,6 +627,12 @@ function renderAppShell() {
   `;
 }
 
+function renderFollowUpDate(d) {
+  if (!d) return '<span class="muted">—</span>';
+  const due = d <= new Date().toISOString().split('T')[0];
+  return '<span class="followup-date' + (due ? ' followup-due' : '') + '">' + esc(d) + '</span>';
+}
+
 function renderDatabase() {
   const SOURCES = [
     { key: 'all',             label: 'All Sources',        live: true  },
@@ -770,11 +776,10 @@ function renderDatabase() {
               <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
               <td>${esc(c.town)}</td>
               <td>${esc(c.region)}</td>
-              ${state.sourceFilter === 'ahp' ? `
-                <td>${esc(c.department || '—')}</td>
-                <td>${esc(c.band_requested || '—')}</td>` : `
-                <td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
-                <td>${c.follow_up_date ? \`<span class="followup-date \${c.follow_up_date <= new Date().toISOString().split('T')[0] ? 'followup-due' : ''}">\${esc(c.follow_up_date)}</span>\` : '<span class="muted">—</span>'}</td>`}
+              ${state.sourceFilter === 'ahp'
+                ? `<td>${esc(c.department || '—')}</td><td>${esc(c.band_requested || '—')}</td>`
+                : `<td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
+                <td>${renderFollowUpDate(c.follow_up_date)}</td>`}
               <td class="actions">
                 <button class="btn small" data-action="edit" data-id="${c.id}">Edit</button>
                 ${c.status !== 'lead' ? `<button class="btn small" data-action="move-lead" data-id="${c.id}">→ Leads</button>` : ''}
