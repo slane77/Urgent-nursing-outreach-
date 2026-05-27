@@ -953,7 +953,7 @@ function renderCompose() {
         </div>
       </details>
     </div>
-  \`;
+  `;
 }
 
 function renderBrevoSend() {
