@@ -40,6 +40,7 @@ const state = {
   templates: [],
   // Compose
   composeTemplateId: null,
+  composeSourceFilter: 'all',
   composeListFilter: 'lead',
   composeRegionFilter: '',
   composeCountryFilter: '',
@@ -444,8 +445,41 @@ async function logBatchSends(contactIds, templateId, batchId) {
   }
 }
 
+// Apply source filter to a Supabase query (same logic as database view)
+function applyComposeSourceFilter(q, source) {
+  if (source === 'gp_surgery') {
+    return q
+      .not('notes', 'ilike', '%Ofsted Register%')
+      .not('notes', 'ilike', '%Source: Agency%')
+      .not('notes', 'ilike', '%Source: Pharmacy%')
+      .not('notes', 'ilike', '%Source: BMS%')
+      .not('notes', 'ilike', '%Source: Sterile%')
+      .not('notes', 'ilike', '%Source: Private Theatre%')
+      .not('notes', 'ilike', '%Source: NHS Staff Bank%')
+      .not('notes', 'ilike', '%Source: NHS Theatre%')
+      .not('notes', 'ilike', '%Source: CAMHS%')
+      .not('notes', 'ilike', '%Source: NHS Jobs AHP%');
+  }
+  const SOURCE_TAGS = {
+    children_homes:  'Ofsted Register',
+    agency:          'Source: Agency Outreach',
+    pharmacy:        'Source: Pharmacy Outreach',
+    ahp:             'Source: NHS Jobs AHP',
+    private_theatre: 'Source: Private Theatre',
+    bms:             'Source: BMS Outreach',
+    sterile:         'Source: Sterile Services',
+    nhs_staffbank:   'Source: NHS Staff Bank',
+    nhs_theatre:     'Source: NHS Theatre',
+    camhs:           'Source: CAMHS',
+  };
+  const tag = SOURCE_TAGS[source];
+  if (tag) return q.ilike('notes', `%${tag}%`);
+  return q; // 'all' — no filter
+}
+
 async function buildComposeQueueFromDb() {
   let query = sb.from('contacts').select('*').eq('status', state.composeListFilter);
+  query = applyComposeSourceFilter(query, state.composeSourceFilter);
   if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
@@ -466,6 +500,7 @@ async function previewComposeCounts() {
   // Count matching the current filters
   let q = sb.from('contacts').select('*', { count: 'exact', head: true })
     .eq('status', state.composeListFilter);
+  q = applyComposeSourceFilter(q, state.composeSourceFilter);
   if (state.composeRegionFilter) q = q.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) q = q.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) q = q.ilike('town', `%${state.composeTownFilter}%`);
@@ -768,7 +803,26 @@ function renderCompose() {
       <h3>2. Pick your audience</h3>
       <div class="field-row">
         <div class="field">
-          <label>From list</label>
+          <label>Source</label>
+          <select class="select" id="compose-source">
+            ${[
+              {k:'all',            l:'All Sources'},
+              {k:'gp_surgery',     l:'GP Surgeries'},
+              {k:'children_homes', l:"Children's Homes"},
+              {k:'agency',         l:'Agency Outreach'},
+              {k:'pharmacy',       l:'Pharmacy'},
+              {k:'private_theatre',l:'Private Theatres'},
+              {k:'ahp',            l:'AHP (NHS Jobs)'},
+              {k:'bms',            l:'BMS'},
+              {k:'sterile',        l:'Sterile Services'},
+              {k:'nhs_staffbank',  l:'NHS Staff Banks'},
+              {k:'nhs_theatre',    l:'NHS Theatres'},
+              {k:'camhs',          l:'CAMHS'},
+            ].map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Status</label>
           <select class="select" id="compose-list">
             <option value="lead" ${state.composeListFilter==='lead'?'selected':''}>Leads (${state.counts.lead})</option>
             <option value="live" ${state.composeListFilter==='live'?'selected':''}>Live (${state.counts.live})</option>
@@ -1863,6 +1917,8 @@ function bindEvents() {
   const composeTemplate = $('#compose-template');
   if (composeTemplate) composeTemplate.onchange = (e) => { state.composeTemplateId = e.target.value; render(); };
   const composeList = $('#compose-list');
+  const composeSource = $('#compose-source');
+  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composePreviewCounts = null; render(); };
   if (composeList) composeList.onchange = (e) => { state.composeListFilter = e.target.value; state.composePreviewCounts = null; render(); };
   const composeRegion = $('#compose-region');
   if (composeRegion) composeRegion.onchange = (e) => { state.composeRegionFilter = e.target.value; state.composePreviewCounts = null; render(); };
