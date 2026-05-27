@@ -53,7 +53,12 @@ const state = {
   // Modal
   modal: null,
   // Loading flags
-  loadingPage: false
+  loadingPage: false,
+  // Source filter
+  sourceFilter: 'all',
+  sourceCounts: {},
+  // Multi-select
+  selected: new Set()
 };
 
 const STATUS_LABEL = { lead: 'Leads', live: 'Live', unsubscribed: 'Unsubscribes' };
@@ -245,13 +250,68 @@ async function loadFilterOptions() {
   state.countries = Array.from(new Set((cData || []).map(r => r.country))).sort();
 }
 
+
+async function loadSourceCounts() {
+  const [allRes, chRes, gpRes] = await Promise.all([
+    sb.from('contacts').select('id', { count: 'exact', head: true }),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Ofsted Register%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .not('notes', 'ilike', '%Ofsted Register%')
+      .not('notes', 'ilike', '%Source: Agency%')
+      .not('notes', 'ilike', '%Source: Pharmacy%')
+      .not('notes', 'ilike', '%Source: BMS%')
+      .not('notes', 'ilike', '%Source: Sterile%')
+      .not('notes', 'ilike', '%Source: Private Theatre%')
+      .not('notes', 'ilike', '%Source: NHS Staff Bank%')
+      .not('notes', 'ilike', '%Source: NHS Theatre%')
+      .not('notes', 'ilike', '%Source: CAMHS%'),
+  ]);
+  state.sourceCounts = {
+    all:            allRes.count || 0,
+    gp_surgery:     gpRes.count  || 0,
+    children_homes: chRes.count  || 0,
+  };
+}
+
 async function loadContactsPage() {
   state.loadingPage = true;
+  state.selected = new Set();
   const start = (state.page - 1) * state.pageSize;
   const end = start + state.pageSize - 1;
 
   let query = sb.from('contacts_with_last_email').select('*', { count: 'exact' })
     .eq('status', state.subTab);
+
+  // ── Source filter ──────────────────────────────────────────────────────────
+  const sf = state.sourceFilter;
+  if (sf === 'children_homes') {
+    query = query.ilike('notes', '%Ofsted Register%');
+  } else if (sf === 'gp_surgery') {
+    query = query
+      .not('notes', 'ilike', '%Ofsted Register%')
+      .not('notes', 'ilike', '%Source: Agency Outreach%')
+      .not('notes', 'ilike', '%Source: Pharmacy Outreach%')
+      .not('notes', 'ilike', '%Source: BMS Outreach%')
+      .not('notes', 'ilike', '%Source: Sterile Services%')
+      .not('notes', 'ilike', '%Source: Private Theatre%')
+      .not('notes', 'ilike', '%Source: NHS Staff Bank%')
+      .not('notes', 'ilike', '%Source: NHS Theatre%')
+      .not('notes', 'ilike', '%Source: CAMHS%');
+  } else if (sf !== 'all') {
+    const SOURCE_TAG = {
+      agency:          'Source: Agency Outreach',
+      pharmacy:        'Source: Pharmacy Outreach',
+      bms:             'Source: BMS Outreach',
+      sterile:         'Source: Sterile Services',
+      private_theatre: 'Source: Private Theatre',
+      nhs_staffbank:   'Source: NHS Staff Bank',
+      nhs_theatre:     'Source: NHS Theatre',
+      camhs:           'Source: CAMHS',
+    };
+    if (SOURCE_TAG[sf]) query = query.ilike('notes', \`%\${SOURCE_TAG[sf]}%\`);
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   if (state.regionFilter) query = query.eq('region', state.regionFilter);
   if (state.countryFilter) query = query.eq('country', state.countryFilter);
@@ -388,7 +448,7 @@ async function previewComposeCounts() {
 
 async function bootApp() {
   $('#app').innerHTML = '<div style="padding:40px;text-align:center;color:#6B7280;">Loading data...</div>';
-  await Promise.all([loadStatusCounts(), loadTemplates(), loadFilterOptions()]);
+  await Promise.all([loadStatusCounts(), loadSourceCounts(), loadTemplates(), loadFilterOptions()]);
   await loadContactsPage();
   render();
 }
@@ -433,11 +493,49 @@ function renderAppShell() {
 }
 
 function renderDatabase() {
+  const SOURCES = [
+    { key: 'all',             label: 'All Sources',        live: true  },
+    { key: 'gp_surgery',      label: 'GP Surgeries',       live: true  },
+    { key: 'children_homes',  label: "Children's Homes",   live: true  },
+    { key: 'agency',          label: 'Agency Outreach',    live: false },
+    { key: 'pharmacy',        label: 'Pharmacy',           live: false },
+    { key: 'bms',             label: 'BMS',                live: false },
+    { key: 'sterile',         label: 'Sterile Services',   live: false },
+    { key: 'private_theatre', label: 'Private Theatres',   live: false },
+    { key: 'nhs_staffbank',   label: 'NHS Staff Banks',    live: false },
+    { key: 'nhs_theatre',     label: 'NHS Theatres',       live: false },
+    { key: 'camhs',           label: 'CAMHS',              live: false },
+  ];
+
   const total = state.totalRows;
   const start = (state.page - 1) * state.pageSize;
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+  const selN = state.selected.size;
+  const allPageSel = selN > 0 && selN === state.currentRows.length;
+  const somePageSel = selN > 0 && !allPageSel;
 
   return `
+    <div class="source-tabs">
+      ${SOURCES.map(s => `
+        <button class="source-tab${state.sourceFilter === s.key ? ' active' : ''}${!s.live ? ' soon' : ''}"
+          data-source="${s.key}"${!s.live ? ' disabled title="Coming soon"' : ''}>
+          ${esc(s.label)}
+          ${s.live && state.sourceCounts[s.key] != null
+            ? `<span class="source-count">${Number(state.sourceCounts[s.key]).toLocaleString()}</span>`
+            : !s.live ? '<span class="source-soon">soon</span>' : ''}
+        </button>
+      `).join('')}
+    </div>
+
+    ${selN > 0 ? `
+    <div class="batch-bar">
+      <span class="batch-count">${selN} selected</span>
+      <button class="btn small batch-btn" data-bulk="unsubscribe">⊘ Unsubscribe</button>
+      <button class="btn small batch-btn" data-bulk="restore">↺ Restore to Lead</button>
+      <button class="btn small batch-btn danger" data-bulk="delete">✕ Delete</button>
+      <button class="btn small batch-btn secondary" data-bulk="clear">Clear</button>
+    </div>` : ''}
+
     <div class="subtabs">
       <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">Leads<span class="count">${state.counts.lead}</span></div>
       <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">Live<span class="count">${state.counts.live}</span></div>
@@ -463,6 +561,9 @@ function renderDatabase() {
       <table class="table">
         <thead>
           <tr>
+            <th style="width:36px;text-align:center">
+              <input type="checkbox" id="select-all-cb" ${allPageSel ? 'checked' : ''} />
+            </th>
             <th data-sort="org">Surgery / Org</th>
             <th data-sort="first_name">Contact</th>
             <th data-sort="job_title">Role</th>
@@ -475,7 +576,10 @@ function renderDatabase() {
         </thead>
         <tbody>
           ${state.currentRows.map(c => `
-            <tr>
+            <tr class="${state.selected.has(c.id) ? 'row-selected' : ''}">
+              <td style="width:36px;text-align:center">
+                <input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />
+              </td>
               <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
               <td>${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' '))}</td>
               <td>${esc(c.job_title)}</td>
@@ -846,6 +950,72 @@ function bindEvents() {
     };
   });
 
+  // Source filter tabs
+  document.querySelectorAll('.source-tab:not([disabled])').forEach(t => {
+    t.onclick = async () => {
+      state.sourceFilter = t.dataset.source;
+      state.page = 1;
+      state.search = '';
+      state.regionFilter = '';
+      await loadContactsPage();
+      render();
+    };
+  });
+
+  // Select-all checkbox
+  const selectAllCb = document.getElementById('select-all-cb');
+  if (selectAllCb) {
+    const allPageSel = state.currentRows.length > 0 && state.selected.size === state.currentRows.length;
+    const somePageSel = state.selected.size > 0 && !allPageSel;
+    selectAllCb.indeterminate = somePageSel;
+    selectAllCb.onchange = () => {
+      if (selectAllCb.checked) {
+        state.currentRows.forEach(c => state.selected.add(c.id));
+      } else {
+        state.currentRows.forEach(c => state.selected.delete(c.id));
+      }
+      render();
+    };
+  }
+
+  // Row checkboxes
+  document.querySelectorAll('.row-cb').forEach(cb => {
+    cb.onclick = e => e.stopPropagation();
+    cb.onchange = () => {
+      cb.checked ? state.selected.add(cb.dataset.id) : state.selected.delete(cb.dataset.id);
+      render();
+    };
+  });
+
+  // Batch action buttons
+  document.querySelectorAll('[data-bulk]').forEach(btn => {
+    btn.onclick = async () => {
+      const action = btn.dataset.bulk;
+      if (action === 'clear') { state.selected = new Set(); render(); return; }
+      if (action === 'delete') {
+        state.modal = {
+          type: 'confirm',
+          title: `Delete ${state.selected.size} contact${state.selected.size !== 1 ? 's' : ''}?`,
+          message: 'This cannot be undone.',
+          confirmText: 'Delete', danger: true,
+          onConfirm: () => bulkAction('delete')
+        };
+        renderModal(); return;
+      }
+      if (action === 'unsubscribe') {
+        state.modal = {
+          type: 'confirm',
+          title: `Unsubscribe ${state.selected.size} contact${state.selected.size !== 1 ? 's' : ''}?`,
+          message: 'They will be moved to the Unsubscribes list.',
+          confirmText: 'Unsubscribe', danger: false,
+          onConfirm: () => bulkAction('unsubscribe')
+        };
+        renderModal(); return;
+      }
+      await bulkAction(action);
+    };
+  });
+
   const search = $('#search-input');
   if (search) {
     let timer;
@@ -1077,6 +1247,29 @@ function bindModalEvents() {
 // ============================================================================
 //  ACTIONS (Database row buttons, send-mode buttons)
 // ============================================================================
+
+async function bulkAction(action) {
+  const ids = [...state.selected];
+  if (!ids.length) return;
+
+  if (action === 'unsubscribe') {
+    const { error } = await sb.from('contacts').update({ status: 'unsubscribed' }).in('id', ids);
+    if (error) return toast('Error: ' + error.message);
+    toast(`${ids.length} contact${ids.length !== 1 ? 's' : ''} unsubscribed`);
+  } else if (action === 'restore') {
+    const { error } = await sb.from('contacts').update({ status: 'lead' }).in('id', ids);
+    if (error) return toast('Error: ' + error.message);
+    toast(`${ids.length} restored to Leads`);
+  } else if (action === 'delete') {
+    const { error } = await sb.from('contacts').delete().in('id', ids);
+    if (error) return toast('Error: ' + error.message);
+    toast(`${ids.length} contact${ids.length !== 1 ? 's' : ''} deleted`);
+  }
+
+  state.selected = new Set();
+  await Promise.all([loadStatusCounts(), loadSourceCounts(), loadContactsPage()]);
+  render();
+}
 
 async function handleAction(action, id) {
   if (action === 'edit') {
