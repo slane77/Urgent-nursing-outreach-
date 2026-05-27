@@ -627,7 +627,7 @@ async function bootApp() {
   // Load user profile to determine access level
   const { data: { session: bootSession } } = await sb.auth.getSession();
   if (bootSession) {
-    const profileRes = await fetch(`${SB_URL}/functions/v1/user-manager`, {
+    const profileRes = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + bootSession.access_token },
       body: JSON.stringify({ action: 'me' }),
@@ -2345,21 +2345,117 @@ function renderResponses() {
 
 
 function renderSettings() {
+  const sources = [
+    {k:'gp_surgery',label:'GP Surgeries'},
+    {k:'children_homes',label:"Children's Homes"},
+    {k:'agency',label:'Agency Outreach'},
+    {k:'ahp',label:'AHP (NHS Jobs)'},
+    {k:'pharmacy',label:'Pharmacy'},
+    {k:'private_theatre',label:'Private Theatres'},
+    {k:'care_home',label:'Care Homes'},
+    {k:'bms',label:'BMS'},
+    {k:'sterile',label:'Sterile Services'},
+    {k:'nhs_staffbank',label:'NHS Staff Banks'},
+  ];
+
+  const isAdmin = !state.userProfile || state.userProfile.role === 'admin';
+
   return `
-    <h2 class="section-title">Settings</h2>
-    <div class="settings-card">
-      <h3>📤 Export Data</h3>
-      <p>Download a backup of contacts as CSV. Useful for ad-hoc analysis or as a safety net.</p>
-      <button class="btn primary" id="export-csv-all">⬇ Export All Contacts as CSV</button>
-    </div>
-    <div class="settings-card">
-      <h3>👤 Account</h3>
-      <p>Signed in as <strong>${esc(state.user.email)}</strong></p>
-      <button class="btn danger" id="sign-out-btn-settings">Sign Out</button>
-    </div>
-    <div class="settings-card">
-      <h3>ℹ️ About</h3>
-      <p>Urgent Nursing Day Webster Outreach — Day Webster Group. Data lives in Supabase; access is restricted to authorised Day Webster Group email domains. Daily automated database backups run on the Supabase free tier (Dashboard → Database → Backups).</p>
+    <div class="settings-wrap">
+
+      <!-- My Sender Details (every user) -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">✉ My Sender Details</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:12px;">
+          Emails you send will come from this name and address. Must match a verified sender in Brevo.
+        </p>
+        <div class="import-form-row" style="max-width:520px;">
+          <div class="field">
+            <label>Your Name</label>
+            <input class="search" id="sender-name-input" placeholder="e.g. Chris Thompson - Day Webster Group"
+              value="${esc(state.senderName || '')}" />
+          </div>
+          <div class="field">
+            <label>Your Email Address</label>
+            <input class="search" id="sender-email-input" type="email"
+              placeholder="e.g. chris@daywebster.com"
+              value="${esc(state.senderEmail || '')}" />
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+          <button class="btn primary" id="save-sender-btn" ${state.senderSaving ? 'disabled' : ''}>
+            ${state.senderSaving ? '<span class="spinner-inline"></span> Saving&hellip;' : 'Save Sender Details'}
+          </button>
+          ${state.senderSaved ? '<span style="color:var(--green-dark);font-size:13px;">&#10003; Saved</span>' : ''}
+        </div>
+        <p class="muted" style="font-size:11px;margin-top:8px;">
+          &#9888; Your email must be verified in Brevo: Brevo &#x2192; Senders &#x2192; Add &amp; verify.
+        </p>
+      </div>
+
+      <!-- Team Management (admin only) -->
+      ${isAdmin ? `
+      <div class="settings-section">
+        <h3 class="settings-section-title">&#x1F465; Team Management</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:12px;">Invite team members and control which sources they can access.</p>
+        <div class="team-invite-form">
+          <div class="import-form-row">
+            <div class="field"><label>Full Name</label>
+              <input class="search" id="invite-name" placeholder="e.g. Chris Thompson" value="${esc(state.inviteName)}" /></div>
+            <div class="field"><label>Email</label>
+              <input class="search" id="invite-email" placeholder="chris@daywebster.com" value="${esc(state.inviteEmail)}" /></div>
+          </div>
+          <div class="import-form-row">
+            <div class="field"><label>Sender Name</label>
+              <input class="search" id="invite-sender-name" placeholder="Chris Thompson - Day Webster Group" /></div>
+            <div class="field"><label>Sender Email</label>
+              <input class="search" id="invite-sender-email" type="email" placeholder="chris@daywebster.com" /></div>
+          </div>
+          <div class="field" style="margin-bottom:10px;">
+            <label>Source Access (leave all unchecked = all sources)</label>
+            <div class="source-checkboxes">
+              ${sources.map(s => `<label class="source-checkbox-label">
+                <input type="checkbox" class="invite-source-cb" value="${s.k}" ${state.inviteSources.includes(s.k)?'checked':''}> ${s.label}
+              </label>`).join('')}
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn primary" id="send-invite-btn">&#x2709; Send Invite</button>
+            ${state.inviteResult ? `<span class="${state.inviteResult.success?'':'text-danger'}" style="font-size:13px;">
+              ${state.inviteResult.success ? '&#10003; Invite sent &mdash; they will receive a magic link' : '&#10005; ' + esc(state.inviteResult.error||'Error')}
+            </span>` : ''}
+          </div>
+        </div>
+        ${state.teamLoading ? '<p class="muted" style="margin-top:12px;">Loading team&hellip;</p>' : ''}
+        ${state.teamUsers.length > 0 ? `
+        <table class="table" style="margin-top:12px;">
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Sources</th><th>Sender Email</th><th>Last Login</th><th></th></tr></thead>
+          <tbody>
+            ${state.teamUsers.map(u => `<tr>
+              <td>${esc(u.full_name||'—')}</td>
+              <td>${esc(u.email||'—')}</td>
+              <td><span class="role-badge ${u.role==='admin'?'role-admin':'role-user'}">${u.role||'user'}</span></td>
+              <td class="muted" style="font-size:11px;">${!u.allowed_sources?.length?'All':''+u.allowed_sources.join(', ')}</td>
+              <td class="muted" style="font-size:11px;">${esc(u.sender_email||'—')}</td>
+              <td class="muted" style="font-size:11px;">${u.last_sign_in?new Date(u.last_sign_in).toLocaleDateString('en-GB'):'Never'}</td>
+              <td>${u.email!=='scott.lane@daywebster.com'?`<button class="btn small danger" data-delete-user="${esc(u.user_id)}" data-user-email="${esc(u.email)}">Remove</button>`:'<span class="muted">Admin</span>'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>` : '<p class="muted" style="font-size:12px;margin-top:12px;">No team members yet.</p>'}
+      </div>` : ''}
+
+      <!-- Standard settings -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">&#x1F4E4; Export Data</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:10px;">Download all contacts as CSV for backup or analysis.</p>
+        <button class="btn primary" id="export-csv-all">&#x2B07; Export All Contacts as CSV</button>
+      </div>
+      <div class="settings-section">
+        <h3 class="settings-section-title">&#x1F464; Account</h3>
+        <p class="muted" style="font-size:12px;margin-bottom:10px;">Signed in as <strong>${esc(state.user.email)}</strong></p>
+        <button class="btn danger" id="sign-out-btn-settings">Sign Out</button>
+      </div>
+
     </div>
   `;
 }
