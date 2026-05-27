@@ -169,6 +169,60 @@ body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--
 .user-pill button { background: none; border: none; color: var(--grey-500); font-size: 12px; cursor: pointer; padding: 0 0 0 4px; }
 .user-pill button:hover { color: var(--red); }
 
+
+  /* ── Source filter tabs ─────────────────────────────── */
+  .source-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 10px 16px 0;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #E5E7EB;
+    background: #F9FAFB;
+  }
+  .source-tab {
+    padding: 5px 11px;
+    border-radius: 6px 6px 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    color: #6B7280;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.12s;
+    margin-bottom: -1px;
+    white-space: nowrap;
+    font-family: inherit;
+  }
+  .source-tab:hover:not([disabled]) { background: #fff; color: #111827; border-color: #E5E7EB; }
+  .source-tab.active { background: #fff; color: #1D4ED8; border-color: #E5E7EB; border-bottom-color: #fff; font-weight: 600; }
+  .source-tab.soon, .source-tab[disabled] { opacity: 0.38; cursor: not-allowed; }
+  .source-count { background: #EFF6FF; color: #1D4ED8; border-radius: 10px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+  .source-soon  { font-size: 9px; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* ── Batch action bar ───────────────────────────────── */
+  .batch-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 16px;
+    background: #EFF6FF;
+    border-bottom: 1px solid #BFDBFE;
+    flex-wrap: wrap;
+  }
+  .batch-count { font-weight: 600; color: #1D4ED8; font-size: 13px; margin-right: 4px; }
+  .batch-btn { font-size: 12px !important; }
+  .batch-btn.danger   { background: #FEF2F2 !important; color: #DC2626 !important; border-color: #FECACA !important; }
+  .batch-btn.danger:hover { background: #FEE2E2 !important; }
+  .batch-btn.secondary { background: #F3F4F6 !important; color: #6B7280 !important; border-color: #E5E7EB !important; }
+
+  /* ── Row checkboxes & selected rows ────────────────── */
+  .row-cb, #select-all-cb { width: 14px; height: 14px; cursor: pointer; accent-color: #1D4ED8; }
+  tr.row-selected td { background: #EFF6FF !important; }
+
   </style>
 </head>
 <body>
