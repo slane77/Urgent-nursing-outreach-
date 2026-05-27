@@ -63,6 +63,10 @@ const state = {
   importResult: null,
   pharmacyRunning: false,
   pharmacyResult: null,
+  agencyCsvText: null,
+  agencyCsvPreview: null,
+  agencyUploading: false,
+  agencyResult: null,
   theatreRunning: false,
   theatreResult: null,
   // Dashboard
@@ -527,7 +531,7 @@ function renderDatabase() {
     { key: 'all',             label: 'All Sources',        live: true  },
     { key: 'gp_surgery',      label: 'GP Surgeries',       live: true  },
     { key: 'children_homes',  label: "Children's Homes",   live: true  },
-    { key: 'agency',          label: 'Agency Outreach',    live: false },
+    { key: 'agency',          label: 'Agency Outreach',    live: true  },
     { key: 'pharmacy',        label: 'Pharmacy',           live: true  },
     { key: 'bms',             label: 'BMS',                live: false },
     { key: 'sterile',         label: 'Sterile Services',   live: false },
@@ -867,6 +871,37 @@ function renderCsvExport() {
 
 
 
+
+async function runAgencyCSVUpload() {
+  if (!state.agencyCsvText) return;
+  state.agencyUploading = true; state.agencyResult = null; render();
+  try {
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      body: JSON.stringify({ csv: state.agencyCsvText, source: 'Agency Outreach' }),
+    });
+    state.agencyResult = await res.json();
+    if (state.agencyResult.success) {
+      await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+    }
+  } catch(e) { state.agencyResult = { success: false, error: e.message }; }
+  state.agencyUploading = false; render();
+}
+
+async function previewAgencyCSV(csvText) {
+  state.agencyCsvText = csvText;
+  try {
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      body: JSON.stringify({ csv: csvText, source: 'Agency Outreach', preview: true }),
+    });
+    state.agencyCsvPreview = await res.json();
+  } catch(e) { state.agencyCsvPreview = { error: e.message }; }
+  render();
+}
+
 async function runPharmacyScrape() {
   const region = document.getElementById('ph-region')?.value || '';
   const limit = parseInt(document.getElementById('ph-limit')?.value || '20');
@@ -970,6 +1005,61 @@ function renderImport() {
   return `
     <div class="import-wrap">
       <h2 class="section-title">Import Contacts</h2>
+
+      <!-- Agency Outreach CSV Upload -->
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">📂</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">Agency Outreach — CSV Upload</div>
+            <div class="import-card-sub">Upload your agency contact CSV. Auto-maps columns: name, email, org, job title, phone, region, town etc.</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+        <div class="import-form">
+          <div class="import-form-row" style="grid-template-columns:1fr;">
+            <div class="field">
+              <label>Select CSV file</label>
+              <input type="file" id="agency-csv-input" accept=".csv,.txt" style="font-size:13px;padding:6px 0;" />
+            </div>
+          </div>
+
+          ${state.agencyCsvPreview && state.agencyCsvPreview.success ? `
+          <div class="csv-preview">
+            <div class="csv-preview-header">
+              <strong>${state.agencyCsvPreview.totalRows} rows</strong> &nbsp;·&nbsp;
+              ${state.agencyCsvPreview.hasEmail ? '<span style="color:var(--green-dark)">✓ Email column detected</span>' : '<span style="color:var(--red)">⚠ No email column found</span>'}
+            </div>
+            <div class="csv-col-map">
+              ${state.agencyCsvPreview.headers.map((h, i) => `
+                <span class="csv-col ${state.agencyCsvPreview.mapped[i] ? 'mapped' : 'unmapped'}">
+                  ${esc(h)} ${state.agencyCsvPreview.mapped[i] ? '→ '+state.agencyCsvPreview.mapped[i] : '(ignored)'}
+                </span>`).join('')}
+            </div>
+          </div>` : ''}
+
+          <div class="import-form-actions">
+            <button class="btn primary" id="agency-upload-btn"
+              ${!state.agencyCsvText || state.agencyUploading ? 'disabled' : ''}>
+              ${state.agencyUploading ? '<span class="spinner-inline"></span> Uploading&hellip;' : '&#8593; Upload to Database'}
+            </button>
+            <span class="import-hint">Contacts tagged <code>Source: Agency Outreach</code>. Duplicates (same email) skipped automatically.</span>
+          </div>
+        </div>
+        ${state.agencyUploading ? '<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>' : ''}
+        ${state.agencyResult ? `<div class="import-result ${state.agencyResult.success ? 'ok' : 'err'}">
+          ${state.agencyResult.success
+            ? `<div class="import-result-stats">
+                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.total_rows}</div><div class="import-stat-lbl">Total rows</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.skipped_dup}</div><div class="import-stat-lbl">Duplicate</div></div>
+              </div>
+              <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${state.agencyResult.inserted} agency contacts added &mdash; view in Database &rarr; Agency Outreach</p>`
+            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.agencyResult.error || 'Upload failed')}</p>`}
+        </div>` : ''}
+      </div>
+
 
       <div class="import-card">
         <div class="import-card-header">
@@ -1530,6 +1620,24 @@ function bindEvents() {
   if (impLimit) impLimit.onchange = e => { state.importLimit = parseInt(e.target.value); };
   const runScrapeBtn = $('#run-scrape-btn');
   if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
+  // Agency CSV upload
+  const agencyCsvInput = $('#agency-csv-input');
+  if (agencyCsvInput) {
+    agencyCsvInput.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        state.agencyResult = null;
+        state.agencyCsvPreview = null;
+        previewAgencyCSV(ev.target.result);
+      };
+      reader.readAsText(file);
+    };
+  }
+  const agencyUploadBtn = $('#agency-upload-btn');
+  if (agencyUploadBtn) agencyUploadBtn.onclick = () => { if (!state.agencyUploading) runAgencyCSVUpload(); };
+
   const runPharmacyBtn = $('#run-pharmacy-btn');
   if (runPharmacyBtn) runPharmacyBtn.onclick = () => { if (!state.pharmacyRunning) runPharmacyScrape(); };
   const runTheatreBtn = $('#run-theatre-btn');
