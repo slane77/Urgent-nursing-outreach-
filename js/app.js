@@ -22,7 +22,7 @@ window.sb = sb;
 const state = {
   user: null,
   authLoading: true,
-  view: 'database',
+  view: 'dashboard',
   subTab: 'lead',
   search: '',
   regionFilter: '',
@@ -61,6 +61,11 @@ const state = {
   importLimit: 20,
   importRunning: false,
   importResult: null,
+  // Dashboard
+  dashboardLoading: false,
+  dashboardData: null,
+  // Database stage filter
+  dbStage: 'all',
   // Source filter
   sourceFilter: 'all',
   sourceCounts: {},
@@ -290,6 +295,14 @@ async function loadContactsPage() {
   let query = sb.from('contacts_with_last_email').select('*', { count: 'exact' })
     .eq('status', state.subTab);
 
+  // Stage filter
+  const today2 = new Date().toISOString().split('T')[0];
+  if (state.dbStage === 'followup') {
+    query = query.lte('follow_up_date', today2).not('follow_up_date', 'is', null);
+  } else if (state.dbStage && state.dbStage !== 'all') {
+    query = query.eq('stage', state.dbStage);
+  }
+
   // ── Source filter ──────────────────────────────────────────────────────────
   const sf = state.sourceFilter;
   if (sf === 'children_homes') {
@@ -458,6 +471,8 @@ async function bootApp() {
   await Promise.all([loadStatusCounts(), loadSourceCounts(), loadTemplates(), loadFilterOptions()]);
   await loadContactsPage();
   render();
+  // Load dashboard data in background (non-blocking)
+  loadDashboard();
 }
 
 function render() {
@@ -485,6 +500,7 @@ function renderAppShell() {
       <span class="user-pill">${esc(state.user.email)} <button id="sign-out-btn" title="Sign out">Sign out</button></span>
     </div>
     <div class="tabs">
+      <div class="tab ${state.view === 'dashboard' ? 'active' : ''}" data-view="dashboard">Dashboard</div>
       <div class="tab ${state.view === 'database' ? 'active' : ''}" data-view="database">Database</div>
       <div class="tab ${state.view === 'templates' ? 'active' : ''}" data-view="templates">Templates</div>
       <div class="tab ${state.view === 'compose' ? 'active' : ''}" data-view="compose">Compose</div>
@@ -492,7 +508,8 @@ function renderAppShell() {
       <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import">⬇ Import</div>
     </div>
     <div class="main" id="main">
-      ${state.view === 'database' ? renderDatabase() :
+      ${state.view === 'dashboard' ? renderDashboard() :
+        state.view === 'database' ? renderDatabase() :
         state.view === 'templates' ? renderTemplates() :
         state.view === 'compose' ? renderCompose() :
         state.view === 'import' ? renderImport() :
@@ -542,9 +559,22 @@ function renderDatabase() {
       <button class="btn small batch-btn" data-bulk="unsubscribe">⊘ Unsubscribe</button>
       <button class="btn small batch-btn" data-bulk="restore">↺ Restore to Lead</button>
       <button class="btn small batch-btn danger" data-bulk="delete">✕ Delete</button>
+      <div class="batch-sep"></div>
+      <button class="btn small batch-btn stage-btn" data-bulk="stage-responded">✓ Responded</button>
+      <button class="btn small batch-btn stage-btn" data-bulk="stage-meeting">📅 Meeting</button>
       <button class="btn small batch-btn secondary" data-bulk="clear">Clear</button>
     </div>` : ''}
 
+    <div class="stage-tabs">
+      ${[
+        {k:'all',       l:'All'},
+        {k:'new',       l:'New'},
+        {k:'contacted', l:'Contacted'},
+        {k:'responded', l:'Responded'},
+        {k:'meeting',   l:'Meeting'},
+        {k:'followup',  l:'Follow-up Due'},
+      ].map(s => `<button class="stage-tab${state.dbStage===s.k?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
+    </div>
     <div class="subtabs">
       <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">Leads<span class="count">${state.counts.lead}</span></div>
       <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">Live<span class="count">${state.counts.live}</span></div>
@@ -580,6 +610,7 @@ function renderDatabase() {
             <th data-sort="town">Town</th>
             <th data-sort="region">Region</th>
             <th data-sort="last_emailed_at">Last Emailed</th>
+            <th data-sort="follow_up_date">Follow-up</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -596,6 +627,7 @@ function renderDatabase() {
               <td>${esc(c.town)}</td>
               <td>${esc(c.region)}</td>
               <td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
+              <td>${c.follow_up_date ? `<span class="followup-date ${c.follow_up_date <= new Date().toISOString().split('T')[0] ? 'followup-due' : ''}">${esc(c.follow_up_date)}</span>` : '<span class="muted">—</span>'}</td>
               <td class="actions">
                 <button class="btn small" data-action="edit" data-id="${c.id}">Edit</button>
                 ${c.status !== 'lead' ? `<button class="btn small" data-action="move-lead" data-id="${c.id}">→ Leads</button>` : ''}
@@ -982,6 +1014,178 @@ function renderImport() {
   `;
 }
 
+// ============================================================================
+//  DASHBOARD
+// ============================================================================
+
+const CM_API = 'https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/contact-manager';
+const CM_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU';
+
+async function callCM(action, extra = {}) {
+  const res = await fetch(CM_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CM_ANON },
+    body: JSON.stringify({ action, ...extra }),
+  });
+  return res.json();
+}
+
+async function loadDashboard() {
+  state.dashboardLoading = true;
+  state.dashboardData = null;
+  render();
+  try {
+    state.dashboardData = await callCM('dashboard');
+  } catch(e) {
+    state.dashboardData = { error: e.message };
+  }
+  state.dashboardLoading = false;
+  render();
+}
+
+function renderDashboard() {
+  const d = state.dashboardData;
+  const loading = state.dashboardLoading;
+
+  if (loading || !d) {
+    return `<div class="dash-loading"><div class="dash-spinner"></div><p>Loading dashboard…</p></div>`;
+  }
+  if (d.error) {
+    return `<div class="dash-error">Failed to load dashboard: ${esc(d.error)}</div>`;
+  }
+
+  const t = d.totals || {};
+  const p = d.pipeline || {};
+  const s = d.sources || {};
+  const emailPct = t.all ? Math.round((t.emailable / t.all) * 100) : 0;
+
+  const pipelineStages = [
+    { key: 'new',       label: 'New',       count: p.new       || 0, color: '#6B7280', action: () => { state.view='database'; state.dbStage='new'; loadContactsPage().then(render); } },
+    { key: 'contacted', label: 'Contacted', count: p.contacted || 0, color: '#3B82F6', action: () => { state.view='database'; state.dbStage='contacted'; loadContactsPage().then(render); } },
+    { key: 'responded', label: 'Responded', count: p.responded || 0, color: '#F59E0B', action: () => { state.view='database'; state.dbStage='responded'; loadContactsPage().then(render); } },
+    { key: 'meeting',   label: 'Meeting',   count: p.meeting   || 0, color: '#8B5CF6', action: () => { state.view='database'; state.dbStage='meeting';   loadContactsPage().then(render); } },
+    { key: 'live',      label: 'Live',      count: p.live      || 0, color: '#10B981', action: () => { state.view='database'; state.subTab='live'; state.dbStage='all'; loadContactsPage().then(render); } },
+  ];
+  const pipelineTotal = Object.values(p).reduce((a, b) => a + b, 0) || 1;
+
+  const recent = d.recentSends || [];
+
+  return `
+    <div class="dash-wrap">
+
+      <!-- Stat cards -->
+      <div class="dash-stats">
+        <div class="dash-stat">
+          <div class="dash-stat-val">${(t.all || 0).toLocaleString()}</div>
+          <div class="dash-stat-lbl">Total contacts</div>
+          <div class="dash-stat-sub">${emailPct}% emailable</div>
+        </div>
+        <div class="dash-stat ${(t.followUpsDue || 0) > 0 ? 'dash-stat-alert' : ''}">
+          <div class="dash-stat-val">${(t.followUpsDue || 0).toLocaleString()}</div>
+          <div class="dash-stat-lbl">Follow-ups due</div>
+          <div class="dash-stat-sub">${(t.followUpsDue || 0) > 0 ? '<a class="dash-link" data-dash-action="followup">View list →</a>' : 'None due today'}</div>
+        </div>
+        <div class="dash-stat">
+          <div class="dash-stat-val">${(t.sentThisWeek || 0).toLocaleString()}</div>
+          <div class="dash-stat-lbl">Sent this week</div>
+          <div class="dash-stat-sub">${(t.sentThisMonth || 0).toLocaleString()} this month</div>
+        </div>
+        <div class="dash-stat">
+          <div class="dash-stat-val">${(p.live || 0).toLocaleString()}</div>
+          <div class="dash-stat-lbl">Live clients</div>
+          <div class="dash-stat-sub"><a class="dash-link" data-dash-action="compose">Send outreach →</a></div>
+        </div>
+      </div>
+
+      <div class="dash-cols">
+        <div class="dash-col-main">
+
+          <!-- Pipeline funnel -->
+          <div class="dash-card">
+            <div class="dash-card-title">Pipeline</div>
+            <div class="dash-pipeline">
+              ${pipelineStages.map(s => {
+                const pct = Math.max(4, Math.round((s.count / pipelineTotal) * 100));
+                return `
+                  <div class="dash-pipe-row" data-pipe-stage="${s.key}">
+                    <div class="dash-pipe-label">${s.label}</div>
+                    <div class="dash-pipe-bar-wrap">
+                      <div class="dash-pipe-bar" style="width:${pct}%;background:${s.color}"></div>
+                    </div>
+                    <div class="dash-pipe-count" style="color:${s.color}">${s.count.toLocaleString()}</div>
+                  </div>`;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Source health -->
+          <div class="dash-card">
+            <div class="dash-card-title">Data Sources</div>
+            <div class="dash-sources">
+              ${[
+                { key: 'gp_surgery', label: 'GP Surgeries', count: s.gp_surgery || 0, emailable: s.gp_surgery || 0, icon: '🏥' },
+                { key: 'children_homes', label: "Children's Homes", count: s.children_homes || 0, emailable: 0, icon: '🏠', warn: true },
+                { key: 'ahp', label: 'AHP (NHS Jobs)', count: s.ahp || 0, emailable: s.ahp || 0, icon: '⚕️' },
+              ].map(src => {
+                const pct = src.count ? Math.round((src.emailable / src.count) * 100) : 0;
+                const health = pct === 0 ? 'warn' : pct < 50 ? 'amber' : 'ok';
+                return `
+                  <div class="dash-source-row">
+                    <span class="dash-source-icon">${src.icon}</span>
+                    <span class="dash-source-name">${src.label}</span>
+                    <span class="dash-source-count">${src.count.toLocaleString()}</span>
+                    <span class="dash-source-health dash-health-${health}">${
+                      pct === 0 && src.count > 0 ? '⚠ No emails' : pct + '% emailable'
+                    }</span>
+                  </div>`;
+              }).join('')}
+            </div>
+            ${(s.children_homes || 0) > 0 ? `
+              <div class="dash-warn-banner">
+                ⚠ <strong>${(s.children_homes||0).toLocaleString()} Children's Homes</strong> have placeholder emails.
+                Add <code>ANTHROPIC_API_KEY</code> in Supabase Secrets then trigger the enrichment agent to find real emails.
+              </div>` : ''}
+          </div>
+        </div>
+
+        <div class="dash-col-side">
+
+          <!-- Quick actions -->
+          <div class="dash-card">
+            <div class="dash-card-title">Quick actions</div>
+            <div class="dash-actions">
+              <button class="btn primary dash-action-btn" data-dash-action="compose">✉ Send outreach batch</button>
+              <button class="btn dash-action-btn" data-dash-action="import">⬇ Import AHP contacts</button>
+              <button class="btn dash-action-btn" data-dash-action="database">📋 View all contacts</button>
+              <button class="btn dash-action-btn" data-dash-action="followup">🔔 Follow-ups due (${t.followUpsDue || 0})</button>
+            </div>
+          </div>
+
+          <!-- Recent activity -->
+          <div class="dash-card">
+            <div class="dash-card-title">Recent sends</div>
+            ${recent.length === 0
+              ? `<p class="muted" style="font-size:12px;padding:8px 0;">No emails sent yet.<br>Set up Brevo API key and send your first batch.</p>`
+              : `<div class="dash-recent">
+                  ${recent.map(r => {
+                    const c = r.contacts || {};
+                    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || 'Unknown';
+                    const when = r.sent_at ? new Date(r.sent_at).toLocaleDateString('en-GB', { day:'numeric', month:'short' }) : '';
+                    return `<div class="dash-recent-row">
+                      <div class="dash-recent-name">${esc(c.org || name)}</div>
+                      <div class="dash-recent-meta">${esc(name)} · ${when}</div>
+                    </div>`;
+                  }).join('')}
+                </div>`}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+
 function renderSettings() {
   return `
     <h2 class="section-title">Settings</h2>
@@ -1095,6 +1299,7 @@ function bindEvents() {
     t.onclick = async () => {
       state.view = t.dataset.view;
       state.page = 1;
+      if (state.view === 'dashboard') { loadDashboard(); return; }
       if (state.view === 'database') await loadContactsPage();
       if (state.view === 'compose') state.composePreviewCounts = null;
       if (state.view === 'import') state.importResult = null;
@@ -1105,11 +1310,45 @@ function bindEvents() {
   document.querySelectorAll('.subtab').forEach(t => {
     t.onclick = async () => {
       state.subTab = t.dataset.subtab;
+      state.dbStage = 'all';
       state.page = 1;
       state.search = '';
       state.regionFilter = '';
       await loadContactsPage();
       render();
+    };
+  });
+
+  // Stage filter tabs (database view)
+  document.querySelectorAll('[data-dstage]').forEach(btn => {
+    btn.onclick = async () => {
+      state.dbStage = btn.dataset.dstage;
+      state.page = 1;
+      await loadContactsPage();
+      render();
+    };
+  });
+
+  // Dashboard quick-action links
+  document.querySelectorAll('[data-dash-action]').forEach(el => {
+    el.onclick = () => {
+      const a = el.dataset.dashAction;
+      if (a === 'followup') {
+        state.view = 'database';
+        state.subTab = 'lead';
+        state.dbStage = 'followup';
+        loadContactsPage().then(render);
+      } else if (a === 'compose') {
+        state.view = 'compose';
+        render();
+      } else if (a === 'import') {
+        state.view = 'import';
+        render();
+      } else if (a === 'database') {
+        state.view = 'database';
+        state.dbStage = 'all';
+        loadContactsPage().then(render);
+      }
     };
   });
 
@@ -1167,6 +1406,7 @@ function bindEvents() {
     btn.onclick = async () => {
       const action = btn.dataset.bulk;
       if (action === 'clear') { state.selected = new Set(); render(); return; }
+      if (action.startsWith('stage-')) { await bulkAction(action); return; }
       if (action === 'delete') {
         state.modal = {
           type: 'confirm',
@@ -1435,6 +1675,14 @@ async function bulkAction(action) {
     const { error } = await sb.from('contacts').update({ status: 'lead' }).in('id', ids);
     if (error) return toast('Error: ' + error.message);
     toast(`${ids.length} restored to Leads`);
+  } else if (action === 'stage-responded') {
+    const { error } = await sb.from('contacts').update({ stage: 'responded' }).in('id', ids);
+    if (error) return toast('Error: ' + error.message);
+    toast(`${ids.length} marked as Responded`);
+  } else if (action === 'stage-meeting') {
+    const { error } = await sb.from('contacts').update({ stage: 'meeting' }).in('id', ids);
+    if (error) return toast('Error: ' + error.message);
+    toast(`${ids.length} marked as Meeting`);
   } else if (action === 'delete') {
     const { error } = await sb.from('contacts').delete().in('id', ids);
     if (error) return toast('Error: ' + error.message);
