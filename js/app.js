@@ -742,6 +742,7 @@ async function sendSelectedViaBrevo() {
 function renderCompose() {
   if (state.composeMode === 'one-by-one' && state.composeQueue) return renderOneByOne();
   if (state.composeMode === 'csv' && state.composeQueue) return renderCsvExport();
+  if (state.composeSelectedIds) return renderBrevoSend();
 
   const template = state.templates.find(t => t.id === state.composeTemplateId);
   const sourceCount = state.counts[state.composeListFilter] || 0;
@@ -750,62 +751,6 @@ function renderCompose() {
   return `
     <h2 class="section-title">Compose Mailshot</h2>
 
-    ${state.composeSelectedIds ? `
-    <div class="compose-step brevo-panel">
-      <div class="brevo-panel-header">
-        <div>
-          <h3 style="margin:0 0 4px;">✉ Direct Send — ${state.composeSelectedIds.length} contacts selected</h3>
-          <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Pick a template and send personalised emails via Brevo in one click.</p>
-        </div>
-        <button class="btn small" id="clear-selected-send">✕ Clear selection</button>
-      </div>
-
-      <div style="margin-top:14px;">
-        <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Template</label>
-        <select class="select" id="brevo-template-picker" style="max-width:360px;">
-          <option value="">— Select a template —</option>
-          ${state.templates.map(t => `<option value="${t.id}" ${state.composeTemplateId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
-        </select>
-      </div>
-
-      ${template && state.composeBrevoResult?.preview ? `
-      <div class="brevo-preview">
-        <div class="brevo-preview-label">Preview — first contact</div>
-        <div class="brevo-preview-subject"><strong>Subject:</strong> ${esc(state.composeBrevoResult.preview.subject)}</div>
-        <div class="brevo-preview-body">${esc(state.composeBrevoResult.preview.body?.slice(0, 300))}${(state.composeBrevoResult.preview.body?.length || 0) > 300 ? '…' : ''}</div>
-      </div>` : ''}
-
-      <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-        <button class="btn primary" id="brevo-send-btn" ${!template || state.composeBrevoSending ? 'disabled' : ''}>
-          ${state.composeBrevoSending
-            ? '<span class="spinner-inline"></span> Sending via Brevo&hellip;'
-            : '&#9654; Send ' + state.composeSelectedIds.length + ' Emails via Brevo'}
-        </button>
-        ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
-      </div>
-
-      ${state.composeBrevoSending ? `
-        <div class="import-progress" style="margin-top:12px;">
-          <div class="progress-bar"><div class="fill import-pulse"></div></div>
-          <p class="muted" style="margin-top:6px;font-size:12px;">Sending personalised emails via Brevo. Each contact gets their own personalised message&hellip;</p>
-        </div>` : ''}
-
-      ${state.composeBrevoResult && !state.composeBrevoSending ? `
-      <div class="import-result ${state.composeBrevoResult.error ? 'err' : 'ok'}" style="margin-top:12px;">
-        ${state.composeBrevoResult.error
-          ? `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.composeBrevoResult.error)}</p>`
-          : `<div class="import-result-stats">
-              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.sent || 0}</div><div class="import-stat-lbl">Sent</div></div>
-              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.failed || 0}</div><div class="import-stat-lbl">Failed</div></div>
-              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.total || 0}</div><div class="import-stat-lbl">Total</div></div>
-            </div>
-            <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; Done. Each contact auto-advanced to <strong>Contacted</strong> stage with 14-day follow-up date set.</p>`}
-      </div>` : ''}
-    </div>
-    <div class="compose-step" style="opacity:.5;pointer-events:none;">
-      <p class="muted" style="font-size:12px;"><em>Normal compose options hidden — contacts are pre-selected above. Clear the selection to use filter-based compose.</em></p>
-    </div>
-    ` : `
     <div class="compose-step">
       <h3>1. Pick a template</h3>
       <select class="select" id="compose-template" style="width:100%;">
@@ -882,7 +827,63 @@ function renderCompose() {
         <strong>CSV Export</strong>: downloads filtered list + email body for use with Word Mail Merge (faster for big sends).
       </div>
     </div>
-  `};
+  `;
+}
+
+function renderBrevoSend() {
+  const template = state.templates.find(t => t.id === state.composeTemplateId);
+  const ids = state.composeSelectedIds || [];
+
+  return `
+    <div class="compose-step brevo-panel">
+      <div class="brevo-panel-header">
+        <div>
+          <h3 style="margin:0 0 4px;">✉ Direct Send — ${ids.length} contacts selected</h3>
+          <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Pick a template and send personalised emails via Brevo.</p>
+        </div>
+        <button class="btn small" id="clear-selected-send">✕ Clear selection</button>
+      </div>
+
+      <div style="margin-top:14px;">
+        <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Template</label>
+        <select class="select" id="brevo-template-picker" style="max-width:380px;">
+          <option value="">— Select a template —</option>
+          ${state.templates.map(t => `<option value="${esc(t.id)}" ${state.composeTemplateId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+        </select>
+      </div>
+
+      <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <button class="btn primary" id="brevo-send-btn" ${!template || state.composeBrevoSending ? 'disabled' : ''}>
+          ${state.composeBrevoSending
+            ? '<span class="spinner-inline"></span> Sending via Brevo&hellip;'
+            : '&#9654;&nbsp;Send ' + ids.length + ' Emails via Brevo'}
+        </button>
+        ${!template ? '<span class="muted" style="font-size:12px;">Select a template above first</span>' : ''}
+      </div>
+
+      ${state.composeBrevoSending ? `
+        <div class="import-progress" style="margin-top:12px;">
+          <div class="progress-bar"><div class="fill import-pulse"></div></div>
+          <p class="muted" style="margin-top:6px;font-size:12px;">Sending personalised emails via Brevo&hellip; each contact gets a personalised message.</p>
+        </div>` : ''}
+
+      ${state.composeBrevoResult && !state.composeBrevoSending ? `
+      <div class="import-result ${state.composeBrevoResult.error ? 'err' : 'ok'}" style="margin-top:12px;">
+        ${state.composeBrevoResult.error
+          ? `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.composeBrevoResult.error)}</p>`
+          : `<div class="import-result-stats">
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.sent || 0}</div><div class="import-stat-lbl">Sent</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.failed || 0}</div><div class="import-stat-lbl">Failed</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.total || 0}</div><div class="import-stat-lbl">Total</div></div>
+            </div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; Done — each contact auto-advanced to <strong>Contacted</strong> stage with a 14-day follow-up set.</p>`}
+      </div>` : ''}
+    </div>
+
+    <div class="compose-step" style="opacity:.45;pointer-events:none;margin-top:12px;">
+      <p class="muted" style="font-size:12px;"><em>Normal filter-based compose is hidden. Clear the selection above to use it.</em></p>
+    </div>
+  `;
 }
 
 function renderOneByOne() {
