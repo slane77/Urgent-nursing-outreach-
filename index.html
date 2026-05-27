@@ -337,6 +337,101 @@ body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--
   .table { min-width: 360px; }
 }
 
+
+/* ═══════════════════════════════════════════════════════════════
+   IMPORT TAB
+   ═══════════════════════════════════════════════════════════════ */
+.import-wrap { max-width: 760px; }
+.import-wrap .section-title { margin-bottom: 16px; }
+
+.import-card {
+  background: white;
+  border: 1px solid var(--grey-200);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 14px;
+  transition: opacity 0.15s;
+}
+.import-card.disabled { opacity: 0.48; pointer-events: none; }
+
+.import-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.import-card-icon { font-size: 24px; line-height: 1; flex-shrink: 0; }
+.import-card-meta { flex: 1; }
+.import-card-title { font-weight: 600; font-size: 14px; color: var(--grey-900); margin-bottom: 3px; }
+.import-card-sub { font-size: 12px; color: var(--grey-500); line-height: 1.4; }
+
+.import-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.import-badge.live { background: var(--green-light); color: var(--green-dark); }
+.import-badge.soon { background: var(--grey-100); color: var(--grey-500); }
+
+.import-form { border-top: 1px solid var(--grey-100); padding-top: 14px; }
+.import-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.import-form-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.import-hint { font-size: 11px; color: var(--grey-500); line-height: 1.4; flex: 1; }
+
+.import-progress { margin-top: 14px; }
+
+.import-pulse { animation: import-pulse-anim 1.4s ease-in-out infinite; }
+@keyframes import-pulse-anim {
+  0%,100% { width: 30%; margin-left: 0; }
+  50% { width: 60%; margin-left: 20%; }
+}
+
+.spinner-inline {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.import-result {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 8px;
+}
+.import-result.ok { background: var(--green-light); border: 1px solid #A7F3D0; }
+.import-result.err { background: var(--red-light); border: 1px solid #FECACA; }
+
+.import-result-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.import-stat { text-align: center; }
+.import-stat-val { font-size: 26px; font-weight: 700; color: var(--green-dark); }
+.import-result.err .import-stat-val { color: var(--red); }
+.import-stat-lbl { font-size: 10px; color: var(--grey-500); text-transform: uppercase; letter-spacing: 0.04em; }
+
+@media (max-width: 768px) {
+  .import-form-row { grid-template-columns: 1fr 1fr; }
+  .import-form-actions { flex-direction: column; align-items: stretch; }
+  .import-form-actions .btn { width: 100%; }
+  .import-hint { text-align: center; }
+}
+
   </style>
 </head>
 <body>
@@ -357,3 +452,4 @@ body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--
   <script src="js/app.js"></script>
 </body>
 </html>
+
