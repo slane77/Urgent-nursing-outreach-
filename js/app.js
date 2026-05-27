@@ -316,7 +316,7 @@ async function loadContactsPage() {
       nhs_theatre:     'Source: NHS Theatre',
       camhs:           'Source: CAMHS',
     };
-    if (SOURCE_TAG[sf]) query = query.ilike('notes', \`%\${SOURCE_TAG[sf]}%\`);
+    if (SOURCE_TAG[sf]) query = query.ilike('notes', `%${SOURCE_TAG[sf]}%`);
   }
   // ──────────────────────────────────────────────────────────────────────────
 
