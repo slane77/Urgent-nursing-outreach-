@@ -83,6 +83,7 @@ const state = {
   sourceFilter: 'all',
   sourceCounts: {},
   sourceStatusCounts: { lead: null, live: null, unsubscribed: null },
+  ahpSpecialtyFilter: 'all',
   // Multi-select
   selected: new Set()
 };
@@ -398,7 +399,13 @@ async function loadContactsPage() {
       nhs_staffbank:   'Source: NHS Staff Bank',
         camhs:           'Source: CAMHS',
     };
-    if (SOURCE_TAG[sf]) query = query.ilike('notes', `%${SOURCE_TAG[sf]}%`);
+    if (SOURCE_TAG[sf]) {
+    query = query.ilike('notes', `%${SOURCE_TAG[sf]}%`);
+    // AHP specialty sub-filter
+    if (sf === 'ahp' && state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
+      query = query.ilike('notes', `%Specialty: ${state.ahpSpecialtyFilter}%`);
+    }
+  }
   }
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -626,6 +633,7 @@ function renderDatabase() {
     { key: 'gp_surgery',      label: 'GP Surgeries',       live: true  },
     { key: 'children_homes',  label: "Children's Homes",   live: true  },
     { key: 'agency',          label: 'Agency Outreach',    live: true  },
+    { key: 'ahp',             label: 'NHS Jobs AHP',       live: true  },
     { key: 'pharmacy',        label: 'Pharmacy',           live: true  },
     { key: 'bms',             label: 'BMS',                live: false },
     { key: 'sterile',         label: 'Sterile Services',   live: false },
@@ -678,6 +686,24 @@ function renderDatabase() {
       <button class="btn small batch-btn secondary" data-bulk="clear">Clear</button>
     </div>` : ''}
 
+    ${state.sourceFilter === 'ahp' ? `
+    <div class="specialty-tabs">
+      ${[
+        {k:'all',              l:'All Specialties'},
+        {k:'physiotherapy',    l:'Physiotherapy'},
+        {k:'occupational_therapy', l:'OT'},
+        {k:'radiography',      l:'Radiography'},
+        {k:'speech_language',  l:'Speech & Language'},
+        {k:'dietetics',        l:'Dietetics'},
+        {k:'podiatry',         l:'Podiatry'},
+        {k:'orthoptics',       l:'Orthoptics'},
+        {k:'art_therapy',      l:'Arts Therapies'},
+        {k:'paramedic',        l:'Paramedic'},
+        {k:'prosthetics',      l:'Prosthetics'},
+        {k:'pharmacy',         l:'Pharmacy (NHS)'},
+      ].map(s => `<button class="stage-tab${state.ahpSpecialtyFilter===s.k?' active':''}" data-specialty="${s.k}">${s.l}</button>`).join('')}
+    </div>` : ''}
+
     ${state.subTab === 'lead' ? `
     <div class="stage-tabs">
       ${[
@@ -691,9 +717,9 @@ function renderDatabase() {
     </div>` : ''}
     <div class="subtabs">
       ${state.sourceFilter !== 'all' ? `<div class="source-filter-label">Showing: <strong>${state.sourceFilter.replace(/_/g,' ')}</strong></div>` : ''}
-      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">Leads<span class="count">${state.sourceFilter !== 'all' && state.sourceStatusCounts.lead !== null ? state.sourceStatusCounts.lead : state.counts.lead}</span></div>
-      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">Live<span class="count">${state.sourceFilter !== 'all' && state.sourceStatusCounts.live !== null ? state.sourceStatusCounts.live : state.counts.live}</span></div>
-      <div class="subtab ${state.subTab === 'unsubscribed' ? 'active' : ''}" data-subtab="unsubscribed">Unsubscribes<span class="count">${state.counts.unsubscribed}</span></div>
+      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">Leads<span class="count">${state.sourceFilter !== 'all' ? (state.sourceStatusCounts.lead ?? 0) : state.counts.lead}</span></div>
+      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">Live<span class="count">${state.sourceFilter !== 'all' ? (state.sourceStatusCounts.live ?? 0) : state.counts.live}</span></div>
+      <div class="subtab ${state.subTab === 'unsubscribed' ? 'active' : ''}" data-subtab="unsubscribed">Unsubscribes<span class="count">${state.sourceFilter !== 'all' ? (state.sourceStatusCounts.unsubscribed ?? 0) : state.counts.unsubscribed}</span></div>
     </div>
     <div class="toolbar">
       <input class="search" id="search-input" placeholder="Search by name, surgery, email, town, postcode..." value="${esc(state.search)}" />
@@ -724,8 +750,11 @@ function renderDatabase() {
             <th data-sort="email">Email</th>
             <th data-sort="town">Town</th>
             <th data-sort="region">Region</th>
-            <th data-sort="last_emailed_at">Last Emailed</th>
-            <th data-sort="follow_up_date">Follow-up</th>
+            ${state.sourceFilter === 'ahp' ? `
+              <th>Department</th>
+              <th>Band</th>` : `
+              <th data-sort="last_emailed_at">Last Emailed</th>
+              <th data-sort="follow_up_date">Follow-up</th>`}
             <th>Actions</th>
           </tr>
         </thead>
@@ -741,8 +770,11 @@ function renderDatabase() {
               <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
               <td>${esc(c.town)}</td>
               <td>${esc(c.region)}</td>
-              <td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
-              <td>${c.follow_up_date ? `<span class="followup-date ${c.follow_up_date <= new Date().toISOString().split('T')[0] ? 'followup-due' : ''}">${esc(c.follow_up_date)}</span>` : '<span class="muted">—</span>'}</td>
+              ${state.sourceFilter === 'ahp' ? `
+                <td>${esc(c.department || '—')}</td>
+                <td>${esc(c.band_requested || '—')}</td>` : `
+                <td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
+                <td>${c.follow_up_date ? \`<span class="followup-date \${c.follow_up_date <= new Date().toISOString().split('T')[0] ? 'followup-due' : ''}">\${esc(c.follow_up_date)}</span>\` : '<span class="muted">—</span>'}</td>`}
               <td class="actions">
                 <button class="btn small" data-action="edit" data-id="${c.id}">Edit</button>
                 ${c.status !== 'lead' ? `<button class="btn small" data-action="move-lead" data-id="${c.id}">→ Leads</button>` : ''}
@@ -1858,6 +1890,16 @@ function bindEvents() {
     };
   });
 
+  // Specialty sub-filter tabs (AHP view)
+  document.querySelectorAll('[data-specialty]').forEach(btn => {
+    btn.onclick = async () => {
+      state.ahpSpecialtyFilter = btn.dataset.specialty;
+      state.page = 1;
+      await loadContactsPage();
+      render();
+    };
+  });
+
   // Stage filter tabs (database view)
   document.querySelectorAll('[data-dstage]').forEach(btn => {
     btn.onclick = async () => {
@@ -1895,6 +1937,7 @@ function bindEvents() {
   document.querySelectorAll('.source-tab:not([disabled])').forEach(t => {
     t.onclick = async () => {
       state.sourceFilter = t.dataset.source;
+      state.ahpSpecialtyFilter = 'all';
       state.page = 1;
       state.search = '';
       state.regionFilter = '';
