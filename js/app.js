@@ -657,13 +657,24 @@ function renderDatabase() {
     ${selN > 0 ? `
     <div class="batch-bar">
       <span class="batch-count">${selN} selected</span>
-      <button class="btn small batch-btn" data-bulk="unsubscribe">⊘ Unsubscribe</button>
-      <button class="btn small batch-btn" data-bulk="restore">↺ Restore to Lead</button>
+
+      ${state.subTab === 'lead' ? `
+        <button class="btn small batch-btn live-btn" data-bulk="move-to-live">→ Mark as Live</button>
+        <button class="btn small batch-btn" data-bulk="unsubscribe">⊘ Unsubscribe</button>
+        <div class="batch-sep"></div>
+        <button class="btn small batch-btn stage-btn" data-bulk="stage-responded">✓ Responded</button>
+        <button class="btn small batch-btn stage-btn" data-bulk="stage-meeting">📅 Meeting</button>
+        <button class="btn small batch-btn compose-btn" data-bulk="send-compose">✉ Send via Brevo (${selN})</button>
+      ` : state.subTab === 'live' ? `
+        <button class="btn small batch-btn" data-bulk="restore">→ Move to Leads</button>
+        <button class="btn small batch-btn" data-bulk="unsubscribe">⊘ Unsubscribe</button>
+        <button class="btn small batch-btn compose-btn" data-bulk="send-compose">✉ Send via Brevo (${selN})</button>
+      ` : `
+        <button class="btn small batch-btn" data-bulk="restore">↺ Restore to Leads</button>
+        <button class="btn small batch-btn live-btn" data-bulk="move-to-live">→ Mark as Live</button>
+      `}
+
       <button class="btn small batch-btn danger" data-bulk="delete">✕ Delete</button>
-      <div class="batch-sep"></div>
-      <button class="btn small batch-btn stage-btn" data-bulk="stage-responded">✓ Responded</button>
-      <button class="btn small batch-btn stage-btn" data-bulk="stage-meeting">📅 Meeting</button>
-      <button class="btn small batch-btn compose-btn" data-bulk="send-compose">✉ Send via Brevo (${selN})</button>
       <button class="btn small batch-btn secondary" data-bulk="clear">Clear</button>
     </div>` : ''}
 
@@ -1985,6 +1996,7 @@ function bindEvents() {
       const action = btn.dataset.bulk;
       if (action === 'clear') { state.selected = new Set(); render(); return; }
       if (action.startsWith('stage-')) { await bulkAction(action); return; }
+      if (action === 'move-to-live') { await bulkAction('move-to-live'); return; }
       if (action === 'send-compose') {
         state.composeSelectedIds = [...state.selected];
         state.composeBrevoResult = null;
@@ -2264,6 +2276,10 @@ async function bulkAction(action) {
     const { error } = await sb.from('contacts').update({ status: 'lead' }).in('id', ids);
     if (error) return toast('Error: ' + error.message);
     toast(`${ids.length} restored to Leads`);
+  } else if (action === 'move-to-live') {
+    const { error } = await sb.from('contacts').update({ status: 'live', stage: 'live' }).in('id', ids);
+    if (error) return toast('Error: ' + error.message);
+    toast(`${ids.length} contact${ids.length !== 1 ? 's' : ''} marked as Live`);
   } else if (action === 'stage-responded') {
     const { error } = await sb.from('contacts').update({ stage: 'responded' }).in('id', ids);
     if (error) return toast('Error: ' + error.message);
