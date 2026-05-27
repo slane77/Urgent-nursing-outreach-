@@ -69,6 +69,7 @@ const state = {
   pharmacyResult: null,
   agencyCsvText: null,
   agencyCsvPreview: null,
+  agencyCsvSource: 'gp_surgery',
   agencyUploading: false,
   agencyResult: null,
   theatreRunning: false,
@@ -1167,7 +1168,7 @@ async function runAgencyCSVUpload() {
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
-      body: JSON.stringify({ csv: state.agencyCsvText, source: 'Agency Outreach' }),
+      body: JSON.stringify({ csv: state.agencyCsvText, source: state.agencyCsvSource }),
     });
     state.agencyResult = await res.json();
     if (state.agencyResult.success) {
@@ -1183,7 +1184,7 @@ async function previewAgencyCSV(csvText) {
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
-      body: JSON.stringify({ csv: csvText, source: 'Agency Outreach', preview: true }),
+      body: JSON.stringify({ csv: csvText, source: state.agencyCsvSource, preview: true }),
     });
     state.agencyCsvPreview = await res.json();
   } catch(e) { state.agencyCsvPreview = { error: e.message }; }
@@ -1299,13 +1300,29 @@ function renderImport() {
         <div class="import-card-header">
           <div class="import-card-icon">📂</div>
           <div class="import-card-meta">
-            <div class="import-card-title">Agency Outreach — CSV Upload</div>
-            <div class="import-card-sub">Upload your agency contact CSV. Auto-maps columns: name, email, org, job title, phone, region, town etc.</div>
+            <div class="import-card-title">Contact List — CSV Upload</div>
+            <div class="import-card-sub">Upload any contact CSV. Supports GP Surgeries, Agency Outreach and all other sources. Auto-maps columns: name, email, org, job title, phone, region/geographic area, town etc.</div>
           </div>
           <span class="import-badge live">Live</span>
         </div>
         <div class="import-form">
-          <div class="import-form-row" style="grid-template-columns:1fr;">
+          <div class="import-form-row">
+            <div class="field">
+              <label>Source / List Type</label>
+              <select class="select" id="agency-csv-source">
+                ${[
+                  { v: 'gp_surgery',      l: 'GP Surgeries' },
+                  { v: 'agency',          l: 'Agency Outreach' },
+                  { v: 'pharmacy',        l: 'Pharmacy' },
+                  { v: 'private_theatre', l: 'Private Theatres' },
+                  { v: 'children_homes',  l: "Children's Homes" },
+                  { v: 'bms',             l: 'BMS' },
+                  { v: 'sterile',         l: 'Sterile Services' },
+                  { v: 'nhs_staffbank',   l: 'NHS Staff Banks' },
+                  { v: 'camhs',           l: 'CAMHS' },
+                ].map(s => `<option value="${s.v}" ${state.agencyCsvSource === s.v ? 'selected' : ''}>${s.l}</option>`).join('')}
+              </select>
+            </div>
             <div class="field">
               <label>Select CSV file</label>
               <input type="file" id="agency-csv-input" accept=".csv,.txt" style="font-size:13px;padding:6px 0;" />
@@ -1343,7 +1360,7 @@ function renderImport() {
                 <div class="import-stat"><div class="import-stat-val">${state.agencyResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
                 <div class="import-stat"><div class="import-stat-val">${state.agencyResult.skipped_dup}</div><div class="import-stat-lbl">Duplicate</div></div>
               </div>
-              <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${state.agencyResult.inserted} agency contacts added &mdash; view in Database &rarr; Agency Outreach</p>`
+              <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${state.agencyResult.inserted} contacts added &mdash; view in Database under the appropriate source tab</p>`
             : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.agencyResult.error || 'Upload failed')}</p>`}
         </div>` : ''}
       </div>
@@ -1930,6 +1947,13 @@ function bindEvents() {
   const runScrapeBtn = $('#run-scrape-btn');
   if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
   // Agency CSV upload
+  const agencyCsvSourcePicker = $('#agency-csv-source');
+  if (agencyCsvSourcePicker) agencyCsvSourcePicker.onchange = (e) => {
+    state.agencyCsvSource = e.target.value;
+    state.agencyCsvPreview = null;
+    state.agencyResult = null;
+  };
+
   const agencyCsvInput = $('#agency-csv-input');
   if (agencyCsvInput) {
     agencyCsvInput.onchange = (e) => {
