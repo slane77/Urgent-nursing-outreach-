@@ -70,6 +70,8 @@ const state = {
   agencyCsvText: null,
   agencyCsvPreview: null,
   agencyCsvSource: 'gp_surgery',
+  enrichRunning: false,
+  enrichResult: null,
   agencyUploading: false,
   agencyResult: null,
   theatreRunning: false,
@@ -780,7 +782,8 @@ function renderDatabase() {
               <th>Department</th>
               <th>Specialty</th>
               <th>Band</th>
-              <th>Date Added</th>` : `
+              <th>Date Added</th>
+              <th>NHS Jobs</th>` : `
               <th data-sort="last_emailed_at">Last Emailed</th>
               <th data-sort="follow_up_date">Follow-up</th>`}
             <th>Actions</th>
@@ -807,7 +810,8 @@ function renderDatabase() {
                    <td>${esc(c.department || '—')}</td>
                    <td>${esc(extractSpecialty(c.notes))}</td>
                    <td>${esc(c.band_requested || '—')}</td>
-                   <td>${c.created_at ? esc(c.created_at.slice(0,10)) : '—'}</td>`
+                   <td>${c.created_at ? esc(c.created_at.slice(0,10)) : '—'}</td>
+                   <td>${c.source_url ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener" class="nhs-jobs-link" title="View on NHS Jobs">🔗 NHS Jobs</a>` : '<span class="muted">—</span>'}</td>`
                 : `<td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
                 <td>${renderFollowUpDate(c.follow_up_date)}</td>`}
               <td class="actions">
@@ -1242,6 +1246,24 @@ function renderCsvExport() {
 
 
 
+
+async function runEnrichment() {
+  const limit = parseInt(document.getElementById('enrich-limit')?.value || '50');
+  state.enrichRunning = true; state.enrichResult = null; render();
+  try {
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/ofsted-scraper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      body: JSON.stringify({ mode: 'enrich', limit }),
+    });
+    state.enrichResult = await res.json();
+    if (state.enrichResult.emails_found > 0) {
+      await loadSourceCounts();
+    }
+  } catch(e) { state.enrichResult = { success: false, error: e.message }; }
+  state.enrichRunning = false; render();
+}
+
 async function runAgencyCSVUpload() {
   if (!state.agencyCsvText) return;
   state.agencyUploading = true; state.agencyResult = null; render();
@@ -1375,6 +1397,47 @@ function renderImport() {
   return `
     <div class="import-wrap">
       <h2 class="section-title">Import Contacts</h2>
+
+      <!-- Children's Homes Email Enrichment -->
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">🏠</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">Children's Homes — Email Enrichment</div>
+            <div class="import-card-sub">Claude agent searches each home's website to find contact email addresses. 711 homes loaded, run multiple times to enrich batches of 50.</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+        <div class="import-form">
+          <div class="import-form-row" style="grid-template-columns:1fr;">
+            <div class="field">
+              <label>Batch size per run</label>
+              <select class="select" id="enrich-limit">
+                <option value="20">20 homes</option>
+                <option value="50" selected>50 homes</option>
+              </select>
+            </div>
+          </div>
+          <div class="import-form-actions">
+            <button class="btn primary" id="run-enrich-btn" ${state.enrichRunning ? 'disabled' : ''}>
+              ${state.enrichRunning ? '<span class="spinner-inline"></span> Enriching&hellip;' : '&#9654; Run Enrichment'}
+            </button>
+            <span class="import-hint">Each run processes a batch and takes 2&ndash;5 minutes. Run multiple times to work through all 711 homes. Contacts already enriched are skipped automatically.</span>
+          </div>
+        </div>
+        ${state.enrichRunning ? '<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div><p class="muted" style="margin-top:8px;font-size:12px;">Searching home websites for contact emails&hellip;</p></div>' : ''}
+        ${state.enrichResult ? `<div class="import-result ${state.enrichResult.success ? 'ok' : 'err'}">
+          ${state.enrichResult.success ? `
+            <div class="import-result-stats">
+              <div class="import-stat"><div class="import-stat-val">${state.enrichResult.emails_found || 0}</div><div class="import-stat-lbl">Emails found</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.enrichResult.not_found || 0}</div><div class="import-stat-lbl">Not found</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.enrichResult.enriched_total || 0}</div><div class="import-stat-lbl">Processed</div></div>
+            </div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; Batch complete. Run again to process the next 50 homes.</p>`
+          : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.enrichResult.error || 'Error')}</p>`}
+        </div>` : ''}
+      </div>
+
 
       <!-- Agency Outreach CSV Upload -->
       <div class="import-card">
@@ -2040,6 +2103,11 @@ function bindEvents() {
   const runScrapeBtn = $('#run-scrape-btn');
   if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
   // Agency CSV upload
+  const runEnrichBtn = $('#run-enrich-btn');
+  if (runEnrichBtn) runEnrichBtn.onclick = () => { if (!state.enrichRunning) runEnrichment(); };
+  const enrichLimit = $('#enrich-limit');
+  // no state needed for enrich limit — read directly on click
+
   const agencyCsvSourcePicker = $('#agency-csv-source');
   if (agencyCsvSourcePicker) agencyCsvSourcePicker.onchange = (e) => {
     state.agencyCsvSource = e.target.value;
