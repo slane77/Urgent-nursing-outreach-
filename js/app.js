@@ -60,6 +60,10 @@ const state = {
   loadingPage: false,
   // User profile
   userProfile: null,
+  senderEmail: '',
+  senderName: '',
+  senderSaving: false,
+  senderSaved: false,
   // Team management
   teamUsers: [],
   teamLoading: false,
@@ -67,6 +71,8 @@ const state = {
   inviteName: '',
   inviteSources: [],
   inviteResult: null,
+  inviteSenderEmail: '',
+  inviteSenderName: '',
   // Import / scraper
   importSpecialty: 'physiotherapy',
   importRegion: '',
@@ -628,6 +634,10 @@ async function bootApp() {
     });
     const profileData = await profileRes.json();
     state.userProfile = profileData.profile || null;
+    if (profileData.profile) {
+      state.senderEmail = profileData.profile.sender_email || '';
+      state.senderName  = profileData.profile.sender_name  || '';
+    }
   }
   await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
   await loadContactsPage();
@@ -913,6 +923,37 @@ function renderTemplates() {
 
 
 
+
+async function saveSenderDetails() {
+  state.senderSaving = true; state.senderSaved = false; render();
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session?.access_token },
+      body: JSON.stringify({
+        action: 'update_sender',
+        sender_email: state.senderEmail,
+        sender_name:  state.senderName,
+      }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      state.senderSaved = true;
+      // Update the local profile cache
+      if (state.userProfile) {
+        state.userProfile.sender_email = state.senderEmail;
+        state.userProfile.sender_name  = state.senderName;
+      }
+      toast('Sender details saved ✓');
+      setTimeout(() => { state.senderSaved = false; render(); }, 3000);
+    } else {
+      toast('Error: ' + (data.error || 'Unknown'));
+    }
+  } catch(e) { toast('Error: ' + e.message); }
+  state.senderSaving = false; render();
+}
+
 async function loadTeamUsers() {
   state.teamLoading = true; render();
   try {
@@ -939,6 +980,8 @@ async function sendInvite() {
       full_name: state.inviteName,
       role: 'user',
       allowed_sources: state.inviteSources,
+      sender_email: state.inviteSenderEmail || state.inviteEmail,
+      sender_name:  state.inviteSenderName  || state.inviteName,
     }),
   });
   state.inviteResult = await res.json();
@@ -1188,6 +1231,7 @@ function renderBrevoSend() {
         <div>
           <h3 style="margin:0 0 4px;">✉ Direct Send — ${ids.length} contacts selected</h3>
           <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Pick a template and send personalised emails via Brevo.</p>
+          ${state.senderEmail ? `<p class="muted" style="margin:4px 0 0;font-size:11px;">Sending from: <strong>${esc(state.senderName || state.senderEmail)}</strong> &lt;${esc(state.senderEmail)}&gt;</p>` : ''}
         </div>
         <button class="btn small" id="clear-selected-send">✕ Clear selection</button>
       </div>
@@ -2559,12 +2603,28 @@ function bindEvents() {
   const syncM365Btn = $('#sync-m365-btn');
   if (syncM365Btn) syncM365Btn.onclick = () => { if (!state.m365Syncing) syncM365Replies(); };
 
+  // Sender details bindings
+  const senderNameInput = $('#sender-name-input');
+  if (senderNameInput) senderNameInput.oninput = e => { state.senderName = e.target.value; };
+  const senderEmailInput = $('#sender-email-input');
+  if (senderEmailInput) senderEmailInput.oninput = e => { state.senderEmail = e.target.value; };
+  const saveSenderBtn = $('#save-sender-btn');
+  if (saveSenderBtn) saveSenderBtn.onclick = () => { if (!state.senderSaving) saveSenderDetails(); };
+
   // Team management bindings
   if (state.view === 'settings' && state.userProfile?.role === 'admin' && state.teamUsers.length === 0) {
     loadTeamUsers();
   }
   const sendInviteBtn = $('#send-invite-btn');
-  if (sendInviteBtn) sendInviteBtn.onclick = () => { if (state.inviteEmail) sendInvite(); };
+  const inviteSenderNameInput = $('#invite-sender-name');
+  const inviteSenderEmailInput = $('#invite-sender-email');
+  if (sendInviteBtn) sendInviteBtn.onclick = () => {
+    if (state.inviteEmail) {
+      state.inviteSenderName  = inviteSenderNameInput?.value  || '';
+      state.inviteSenderEmail = inviteSenderEmailInput?.value || state.inviteEmail;
+      sendInvite();
+    }
+  };
   const inviteNameInput = $('#invite-name');
   if (inviteNameInput) inviteNameInput.oninput = e => { state.inviteName = e.target.value; };
   const inviteEmailInput = $('#invite-email');
