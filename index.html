@@ -223,6 +223,120 @@ body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--
   .row-cb, #select-all-cb { width: 14px; height: 14px; cursor: pointer; accent-color: #1D4ED8; }
   tr.row-selected td { background: #EFF6FF !important; }
 
+
+/* ═══════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE  (≤ 768px)
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* ── Header ─────────────────────────────────────────────────── */
+  .header { padding: 10px 12px; gap: 10px; }
+  .header img { height: 28px; }
+  .header h1 { font-size: 14px; }
+  .header .badge { display: none; }           /* hides counts — too cluttered */
+  .user-pill { font-size: 11px; padding: 3px 8px; }
+  .user-pill span:first-child { display: none; } /* hide email, keep sign-out */
+
+  /* ── Top nav tabs (Database / Templates / Compose / Settings) ─ */
+  .tabs { padding: 0 8px; gap: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 12px 12px; font-size: 12px; white-space: nowrap; }
+
+  /* ── Main content area ──────────────────────────────────────── */
+  .main { padding: 10px 10px; }
+
+  /* ── Source filter tabs: scroll horizontally, don't wrap ───── */
+  .source-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px 10px 0;
+    gap: 3px;
+  }
+  .source-tabs::-webkit-scrollbar { display: none; }
+  .source-tab { padding: 4px 9px; font-size: 11px; flex-shrink: 0; }
+
+  /* ── Batch bar ──────────────────────────────────────────────── */
+  .batch-bar { padding: 6px 10px; gap: 6px; }
+  .batch-count { font-size: 12px; }
+  .batch-btn { font-size: 11px !important; padding: 3px 7px !important; }
+
+  /* ── Status subtabs ─────────────────────────────────────────── */
+  .subtabs { gap: 6px; margin-bottom: 10px; }
+  .subtab { padding: 6px 10px; font-size: 12px; }
+
+  /* ── Toolbar: stack search + filters full width ─────────────── */
+  .toolbar { flex-direction: column; align-items: stretch; gap: 6px; }
+  .search { min-width: unset; width: 100%; }
+  .select { width: 100%; }
+  .toolbar .btn { width: 100%; }
+
+  /* ── Table: scroll horizontally, hide low-value columns ─────── */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 6px;
+  }
+  .table { min-width: 420px; }  /* prevents excessive squashing */
+  .table th, .table td { padding: 8px 8px; font-size: 12px; }
+
+  /* Hide: Role (4th), Town (6th), Region (7th), Last Emailed (8th)  */
+  /* Checkbox=1, Org=2, Contact=3, Role=4, Email=5, Town=6, Region=7, LastEmailed=8, Actions=9 */
+  .table thead tr th:nth-child(4),
+  .table thead tr th:nth-child(6),
+  .table thead tr th:nth-child(7),
+  .table thead tr th:nth-child(8),
+  .table tbody tr td:nth-child(4),
+  .table tbody tr td:nth-child(6),
+  .table tbody tr td:nth-child(7),
+  .table tbody tr td:nth-child(8) { display: none; }
+
+  /* Tighten ellipsis columns */
+  .table .ellipsis { max-width: 130px; }
+  .notes-cell { max-width: 130px; }
+
+  /* Actions column: stack buttons vertically */
+  .table .actions { flex-direction: column; gap: 3px; }
+  .table .actions .btn { font-size: 11px; padding: 3px 6px; }
+
+  /* ── Pagination ──────────────────────────────────────────────── */
+  .pagination { flex-direction: column; gap: 8px; align-items: center; padding: 10px; }
+  .pagination .pages { flex-wrap: wrap; justify-content: center; }
+  .page-btn { padding: 5px 10px; }
+
+  /* ── Modal ───────────────────────────────────────────────────── */
+  .modal-overlay { padding: 12px; align-items: flex-end; }  /* sheet from bottom on mobile */
+  .modal { padding: 18px; border-radius: 12px 12px 0 0; max-height: 85vh; }
+  .modal h2 { font-size: 16px; }
+  .field-row { grid-template-columns: 1fr; }
+
+  /* ── Compose ─────────────────────────────────────────────────── */
+  .compose-step { padding: 14px; }
+  .stat-row { flex-direction: column; gap: 8px; }
+  .stat { padding: 10px; }
+  .stat .value { font-size: 18px; }
+  .send-card { padding: 14px; }
+  .send-card .actions-row { flex-direction: column; }
+  .send-card .actions-row .btn { width: 100%; }
+
+  /* ── Settings ────────────────────────────────────────────────── */
+  .settings-card { padding: 14px; }
+  .drop-zone { padding: 20px; }
+
+  /* ── Template cards ──────────────────────────────────────────── */
+  .template-card { padding: 12px; }
+  .template-card .actions { flex-wrap: wrap; }
+}
+
+/* ── Extra small (≤ 420px phones) ─────────────────────────────── */
+@media (max-width: 420px) {
+  .header h1 { font-size: 13px; }
+  .tab { padding: 10px 8px; font-size: 11px; }
+  .main { padding: 8px; }
+  .source-tab { font-size: 10px; padding: 4px 7px; }
+  .table { min-width: 360px; }
+}
+
   </style>
 </head>
 <body>
