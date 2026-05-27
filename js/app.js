@@ -50,6 +50,9 @@ const state = {
   composeIndex: 0,
   composeMode: null,
   composePreviewCounts: null,
+  composeSelectedIds: null,   // IDs pre-selected from database for direct Brevo send
+  composeBrevoSending: false,
+  composeBrevoResult: null,
   // Modal
   modal: null,
   // Loading flags
@@ -570,6 +573,7 @@ function renderDatabase() {
       <div class="batch-sep"></div>
       <button class="btn small batch-btn stage-btn" data-bulk="stage-responded">✓ Responded</button>
       <button class="btn small batch-btn stage-btn" data-bulk="stage-meeting">📅 Meeting</button>
+      <button class="btn small batch-btn compose-btn" data-bulk="send-compose">✉ Send via Brevo (${selN})</button>
       <button class="btn small batch-btn secondary" data-bulk="clear">Clear</button>
     </div>` : ''}
 
@@ -690,6 +694,51 @@ function renderTemplates() {
   `;
 }
 
+
+async function sendSelectedViaBrevo() {
+  const ids = state.composeSelectedIds;
+  if (!ids?.length) return;
+  const template = state.templates.find(t => t.id === state.composeTemplateId);
+  if (!template) return toast('Select a template first');
+
+  state.composeBrevoSending = true;
+  state.composeBrevoResult = null;
+  render();
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('Not authenticated — please sign in again');
+
+    const batchId = 'batch_' + Date.now();
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token,
+      },
+      body: JSON.stringify({
+        templateId: template.id,
+        contactIds:  ids,
+        batchId,
+        senderEmail: 'scott.lane@daywebster.com',
+        senderName:  'Day Webster Group',
+      }),
+    });
+
+    state.composeBrevoResult = await res.json();
+    if (state.composeBrevoResult.sent > 0) {
+      await Promise.all([loadStatusCounts(), loadSourceCounts(), loadContactsPage()]);
+      toast(state.composeBrevoResult.sent + ' emails sent via Brevo ✓');
+    }
+  } catch(e) {
+    state.composeBrevoResult = { error: e.message };
+  }
+
+  state.composeBrevoSending = false;
+  render();
+}
+
 function renderCompose() {
   if (state.composeMode === 'one-by-one' && state.composeQueue) return renderOneByOne();
   if (state.composeMode === 'csv' && state.composeQueue) return renderCsvExport();
@@ -701,6 +750,62 @@ function renderCompose() {
   return `
     <h2 class="section-title">Compose Mailshot</h2>
 
+    ${state.composeSelectedIds ? `
+    <div class="compose-step brevo-panel">
+      <div class="brevo-panel-header">
+        <div>
+          <h3 style="margin:0 0 4px;">✉ Direct Send — ${state.composeSelectedIds.length} contacts selected</h3>
+          <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Pick a template and send personalised emails via Brevo in one click.</p>
+        </div>
+        <button class="btn small" id="clear-selected-send">✕ Clear selection</button>
+      </div>
+
+      <div style="margin-top:14px;">
+        <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Template</label>
+        <select class="select" id="brevo-template-picker" style="max-width:360px;">
+          <option value="">— Select a template —</option>
+          ${state.templates.map(t => `<option value="${t.id}" ${state.composeTemplateId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+        </select>
+      </div>
+
+      ${template && state.composeBrevoResult?.preview ? `
+      <div class="brevo-preview">
+        <div class="brevo-preview-label">Preview — first contact</div>
+        <div class="brevo-preview-subject"><strong>Subject:</strong> ${esc(state.composeBrevoResult.preview.subject)}</div>
+        <div class="brevo-preview-body">${esc(state.composeBrevoResult.preview.body?.slice(0, 300))}${(state.composeBrevoResult.preview.body?.length || 0) > 300 ? '…' : ''}</div>
+      </div>` : ''}
+
+      <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <button class="btn primary" id="brevo-send-btn" ${!template || state.composeBrevoSending ? 'disabled' : ''}>
+          ${state.composeBrevoSending
+            ? '<span class="spinner-inline"></span> Sending via Brevo&hellip;'
+            : '&#9654; Send ' + state.composeSelectedIds.length + ' Emails via Brevo'}
+        </button>
+        ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
+      </div>
+
+      ${state.composeBrevoSending ? `
+        <div class="import-progress" style="margin-top:12px;">
+          <div class="progress-bar"><div class="fill import-pulse"></div></div>
+          <p class="muted" style="margin-top:6px;font-size:12px;">Sending personalised emails via Brevo. Each contact gets their own personalised message&hellip;</p>
+        </div>` : ''}
+
+      ${state.composeBrevoResult && !state.composeBrevoSending ? `
+      <div class="import-result ${state.composeBrevoResult.error ? 'err' : 'ok'}" style="margin-top:12px;">
+        ${state.composeBrevoResult.error
+          ? `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.composeBrevoResult.error)}</p>`
+          : `<div class="import-result-stats">
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.sent || 0}</div><div class="import-stat-lbl">Sent</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.failed || 0}</div><div class="import-stat-lbl">Failed</div></div>
+              <div class="import-stat"><div class="import-stat-val">${state.composeBrevoResult.total || 0}</div><div class="import-stat-lbl">Total</div></div>
+            </div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; Done. Each contact auto-advanced to <strong>Contacted</strong> stage with 14-day follow-up date set.</p>`}
+      </div>` : ''}
+    </div>
+    <div class="compose-step" style="opacity:.5;pointer-events:none;">
+      <p class="muted" style="font-size:12px;"><em>Normal compose options hidden — contacts are pre-selected above. Clear the selection to use filter-based compose.</em></p>
+    </div>
+    ` : `
     <div class="compose-step">
       <h3>1. Pick a template</h3>
       <select class="select" id="compose-template" style="width:100%;">
@@ -777,7 +882,7 @@ function renderCompose() {
         <strong>CSV Export</strong>: downloads filtered list + email body for use with Word Mail Merge (faster for big sends).
       </div>
     </div>
-  `;
+  `};
 }
 
 function renderOneByOne() {
@@ -1618,6 +1723,24 @@ function bindEvents() {
   if (impBand) impBand.onchange = e => { state.importBand = e.target.value; };
   const impLimit = $('#imp-limit');
   if (impLimit) impLimit.onchange = e => { state.importLimit = parseInt(e.target.value); };
+  // Direct Brevo send panel bindings
+  const bRevoBtn = $('#brevo-send-btn');
+  if (bRevoBtn) bRevoBtn.onclick = () => { if (!state.composeBrevoSending) sendSelectedViaBrevo(); };
+
+  const clearSelectedSend = $('#clear-selected-send');
+  if (clearSelectedSend) clearSelectedSend.onclick = () => {
+    state.composeSelectedIds = null;
+    state.composeBrevoResult = null;
+    state.selected = new Set();
+    render();
+  };
+
+  const bRevoTpl = $('#brevo-template-picker');
+  if (bRevoTpl) bRevoTpl.onchange = (e) => {
+    state.composeTemplateId = e.target.value;
+    render();
+  };
+
   const runScrapeBtn = $('#run-scrape-btn');
   if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
   // Agency CSV upload
@@ -1649,6 +1772,15 @@ function bindEvents() {
       const action = btn.dataset.bulk;
       if (action === 'clear') { state.selected = new Set(); render(); return; }
       if (action.startsWith('stage-')) { await bulkAction(action); return; }
+      if (action === 'send-compose') {
+        state.composeSelectedIds = [...state.selected];
+        state.composeBrevoResult = null;
+        state.composeBrevoSending = false;
+        state.view = 'compose';
+        state.composePreviewCounts = null;
+        render();
+        return;
+      }
       if (action === 'delete') {
         state.modal = {
           type: 'confirm',
