@@ -1,5 +1,5 @@
 // ============================================================================
-//  Urgent Nursing Outreach Manager — Main App
+//  Urgent Nursing Day Webster Outreach — Main App
 // ============================================================================
 //  Talks to a Supabase backend. All data persists in Postgres. Auth uses
 //  Supabase magic-link email — no passwords.
@@ -61,6 +61,10 @@ const state = {
   importLimit: 20,
   importRunning: false,
   importResult: null,
+  pharmacyRunning: false,
+  pharmacyResult: null,
+  theatreRunning: false,
+  theatreResult: null,
   // Dashboard
   dashboardLoading: false,
   dashboardData: null,
@@ -180,8 +184,8 @@ function renderAuthScreen(errorMsg, infoMsg, savedEmail) {
   return `
     <div class="auth-container">
       <div class="auth-card">
-        <img src="data:image/webp;base64,${window.LOGO_B64}" alt="Urgent Nursing" />
-        <h1>Outreach Manager</h1>
+        <img src="data:image/png;base64,${window.LOGO_B64}" alt="Day Webster Group" />
+        <h1>Day Webster Group Outreach</h1>
         <div class="subtitle">Sign in to continue</div>
         <div class="field">
           <input type="email" id="auth-email" placeholder="firstname.surname@daywebster.com" value="${esc(savedEmail || '')}" autofocus />
@@ -494,8 +498,8 @@ function renderAppShell() {
   const totalCount = state.counts.lead + state.counts.live + state.counts.unsubscribed;
   return `
     <div class="header">
-      <img src="data:image/webp;base64,${window.LOGO_B64}" alt="Urgent Nursing" />
-      <h1>Outreach Manager</h1>
+      <img src="data:image/png;base64,${window.LOGO_B64}" alt="Day Webster Group" />
+      <h1>Day Webster Group Outreach</h1>
       <span class="badge">${state.counts.lead} Leads · ${state.counts.live} Live · ${state.counts.unsubscribed} Unsubs</span>
       <span class="user-pill">${esc(state.user.email)} <button id="sign-out-btn" title="Sign out">Sign out</button></span>
     </div>
@@ -524,10 +528,10 @@ function renderDatabase() {
     { key: 'gp_surgery',      label: 'GP Surgeries',       live: true  },
     { key: 'children_homes',  label: "Children's Homes",   live: true  },
     { key: 'agency',          label: 'Agency Outreach',    live: false },
-    { key: 'pharmacy',        label: 'Pharmacy',           live: false },
+    { key: 'pharmacy',        label: 'Pharmacy',           live: true  },
     { key: 'bms',             label: 'BMS',                live: false },
     { key: 'sterile',         label: 'Sterile Services',   live: false },
-    { key: 'private_theatre', label: 'Private Theatres',   live: false },
+    { key: 'private_theatre', label: 'Private Theatres',   live: true  },
     { key: 'nhs_staffbank',   label: 'NHS Staff Banks',    live: false },
     { key: 'nhs_theatre',     label: 'NHS Theatres',       live: false },
     { key: 'camhs',           label: 'CAMHS',              live: false },
@@ -862,6 +866,43 @@ function renderCsvExport() {
 }
 
 
+
+async function runPharmacyScrape() {
+  const region = document.getElementById('ph-region')?.value || '';
+  const limit = parseInt(document.getElementById('ph-limit')?.value || '20');
+  state.pharmacyRunning = true; state.pharmacyResult = null; render();
+  try {
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/pharmacy-scraper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      body: JSON.stringify({ region, limit }),
+    });
+    state.pharmacyResult = await res.json();
+    if (state.pharmacyResult.success) {
+      await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+    }
+  } catch(e) { state.pharmacyResult = { success: false, error: e.message }; }
+  state.pharmacyRunning = false; render();
+}
+
+async function runTheatreScrape() {
+  const region = document.getElementById('pt-region')?.value || '';
+  const limit = parseInt(document.getElementById('pt-limit')?.value || '20');
+  state.theatreRunning = true; state.theatreResult = null; render();
+  try {
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/private-theatre-scraper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      body: JSON.stringify({ region, limit }),
+    });
+    state.theatreResult = await res.json();
+    if (state.theatreResult.success) {
+      await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+    }
+  } catch(e) { state.theatreResult = { success: false, error: e.message }; }
+  state.theatreRunning = false; render();
+}
+
 async function runNHSScrape() {
   state.importRunning = true;
   state.importResult = null;
@@ -920,10 +961,10 @@ function renderImport() {
   const r = state.importResult;
 
   const placeholders = [
-    { icon: '📋', title: 'Companies House — Pharmacy', sub: 'Superintendent pharmacist contacts from registered pharmacy businesses' },
     { icon: '🔬', title: 'NHS Directory — BMS', sub: 'Biomedical Scientists via NHS pathology lab directories' },
-    { icon: '🏨', title: 'CQC Register — Private Theatres', sub: 'Theatre manager contacts from the CQC registered providers list' },
     { icon: '📡', title: 'NHS Staff Banks', sub: 'Bank manager contacts from NHS trust staff bank portals' },
+    { icon: '🏥', title: 'NHS Theatres', sub: 'NHS trust theatre manager contacts' },
+    { icon: '🧠', title: 'CAMHS', sub: 'Child and Adolescent Mental Health Service contacts' },
   ];
 
   return `
@@ -995,6 +1036,95 @@ function renderImport() {
             <p style="color:#DC2626;font-size:13px;">&#10005; ${esc(r.error || 'Unknown error')}</p>
             ${(r.error||'').includes('ANTHROPIC_API_KEY') ? '<p class="muted" style="margin-top:6px;font-size:12px;">Add key: Supabase Dashboard &rarr; Project Settings &rarr; Edge Functions &rarr; Secrets &rarr; ANTHROPIC_API_KEY</p>' : ''}
           `}
+        </div>` : ''}
+      </div>
+
+
+      <!-- Pharmacy Scraper -->
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">💊</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">Pharmacy — Superintendent Pharmacists</div>
+            <div class="import-card-sub">CQC register + Claude agent finds superintendent pharmacist emails at independent pharmacies</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+        <div class="import-form">
+          <div class="import-form-row">
+            <div class="field"><label>Region</label>
+              <select class="select" id="ph-region">
+                <option value="">All England</option>
+                ${REGIONS.map(rg => `<option value="${rg}">${rg}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Max Contacts</label>
+              <select class="select" id="ph-limit">
+                ${[10,20,30,50].map(n => `<option value="${n}" ${n===20?'selected':''}>${n}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="import-form-actions">
+            <button class="btn primary" id="run-pharmacy-btn" ${state.pharmacyRunning ? 'disabled' : ''}>
+              ${state.pharmacyRunning ? '<span class="spinner-inline"></span> Searching&hellip;' : '&#9654; Run Pharmacy Scraper'}
+            </button>
+            <span class="import-hint">Independent pharmacies from CQC register. Finds superintendent pharmacist email per pharmacy. 2&ndash;5 min.</span>
+          </div>
+        </div>
+        ${state.pharmacyRunning ? `<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>` : ''}
+        ${state.pharmacyResult ? `<div class="import-result ${state.pharmacyResult.success ? 'ok' : 'err'}">
+          ${state.pharmacyResult.success
+            ? `<div class="import-result-stats">
+                <div class="import-stat"><div class="import-stat-val">${state.pharmacyResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.pharmacyResult.found}</div><div class="import-stat-lbl">Found</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.pharmacyResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.pharmacyResult.skipped_dup}</div><div class="import-stat-lbl">Dupe</div></div>
+              </div>`
+            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.pharmacyResult.error || 'Error')}</p>`}
+        </div>` : ''}
+      </div>
+
+      <!-- Private Theatre Scraper -->
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">🏨</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">Private Hospitals — Theatre Managers</div>
+            <div class="import-card-sub">CQC independent acute hospital register + Claude agent finds theatre manager contacts</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+        <div class="import-form">
+          <div class="import-form-row">
+            <div class="field"><label>Region</label>
+              <select class="select" id="pt-region">
+                <option value="">All England</option>
+                ${REGIONS.map(rg => `<option value="${rg}">${rg}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Max Contacts</label>
+              <select class="select" id="pt-limit">
+                ${[10,20,30,50].map(n => `<option value="${n}" ${n===20?'selected':''}>${n}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="import-form-actions">
+            <button class="btn primary" id="run-theatre-btn" ${state.theatreRunning ? 'disabled' : ''}>
+              ${state.theatreRunning ? '<span class="spinner-inline"></span> Searching&hellip;' : '&#9654; Run Theatre Scraper'}
+            </button>
+            <span class="import-hint">Independent acute hospitals from CQC. Finds theatre manager / head of theatres contact. 2&ndash;5 min.</span>
+          </div>
+        </div>
+        ${state.theatreRunning ? `<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>` : ''}
+        ${state.theatreResult ? `<div class="import-result ${state.theatreResult.success ? 'ok' : 'err'}">
+          ${state.theatreResult.success
+            ? `<div class="import-result-stats">
+                <div class="import-stat"><div class="import-stat-val">${state.theatreResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.theatreResult.found}</div><div class="import-stat-lbl">Found</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.theatreResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.theatreResult.skipped_dup}</div><div class="import-stat-lbl">Dupe</div></div>
+              </div>`
+            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.theatreResult.error || 'Error')}</p>`}
         </div>` : ''}
       </div>
 
@@ -1201,7 +1331,7 @@ function renderSettings() {
     </div>
     <div class="settings-card">
       <h3>ℹ️ About</h3>
-      <p>Urgent Nursing Outreach Manager — Day Webster Group. Data lives in Supabase; access is restricted to authorised Day Webster Group email domains. Daily automated database backups run on the Supabase free tier (Dashboard → Database → Backups).</p>
+      <p>Urgent Nursing Day Webster Outreach — Day Webster Group. Data lives in Supabase; access is restricted to authorised Day Webster Group email domains. Daily automated database backups run on the Supabase free tier (Dashboard → Database → Backups).</p>
     </div>
   `;
 }
@@ -1400,6 +1530,10 @@ function bindEvents() {
   if (impLimit) impLimit.onchange = e => { state.importLimit = parseInt(e.target.value); };
   const runScrapeBtn = $('#run-scrape-btn');
   if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
+  const runPharmacyBtn = $('#run-pharmacy-btn');
+  if (runPharmacyBtn) runPharmacyBtn.onclick = () => { if (!state.pharmacyRunning) runPharmacyScrape(); };
+  const runTheatreBtn = $('#run-theatre-btn');
+  if (runTheatreBtn) runTheatreBtn.onclick = () => { if (!state.theatreRunning) runTheatreScrape(); };
 
   // Batch action buttons
   document.querySelectorAll('[data-bulk]').forEach(btn => {
