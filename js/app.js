@@ -184,7 +184,7 @@ function renderAuthScreen(errorMsg, infoMsg, savedEmail) {
   return `
     <div class="auth-container">
       <div class="auth-card">
-        <img src="data:image/png;base64,${window.LOGO_B64}" alt="Day Webster Group" />
+        <img src="data:image/jpeg;base64,${window.LOGO_B64}" alt="Day Webster Group" />
         <h1>Day Webster Group Outreach</h1>
         <div class="subtitle">Sign in to continue</div>
         <div class="field">
@@ -498,7 +498,7 @@ function renderAppShell() {
   const totalCount = state.counts.lead + state.counts.live + state.counts.unsubscribed;
   return `
     <div class="header">
-      <img src="data:image/png;base64,${window.LOGO_B64}" alt="Day Webster Group" />
+      <img src="data:image/jpeg;base64,${window.LOGO_B64}" alt="Day Webster Group" />
       <h1>Day Webster Group Outreach</h1>
       <span class="badge">${state.counts.lead} Leads · ${state.counts.live} Live · ${state.counts.unsubscribed} Unsubs</span>
       <span class="user-pill">${esc(state.user.email)} <button id="sign-out-btn" title="Sign out">Sign out</button></span>
