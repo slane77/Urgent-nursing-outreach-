@@ -363,12 +363,14 @@ async function loadContactsPage() {
   let query = sb.from('contacts_with_last_email').select('*', { count: 'exact' })
     .eq('status', state.subTab);
 
-  // Stage filter
-  const today2 = new Date().toISOString().split('T')[0];
-  if (state.dbStage === 'followup') {
-    query = query.lte('follow_up_date', today2).not('follow_up_date', 'is', null);
-  } else if (state.dbStage && state.dbStage !== 'all') {
-    query = query.eq('stage', state.dbStage);
+  // Stage filter — only applies to leads (unsubscribed have stage='opted_out', live have stage='live')
+  if (state.subTab === 'lead') {
+    const today2 = new Date().toISOString().split('T')[0];
+    if (state.dbStage === 'followup') {
+      query = query.lte('follow_up_date', today2).not('follow_up_date', 'is', null);
+    } else if (state.dbStage && state.dbStage !== 'all') {
+      query = query.eq('stage', state.dbStage);
+    }
   }
 
   // ── Source filter ──────────────────────────────────────────────────────────
@@ -665,6 +667,7 @@ function renderDatabase() {
       <button class="btn small batch-btn secondary" data-bulk="clear">Clear</button>
     </div>` : ''}
 
+    ${state.subTab === 'lead' ? `
     <div class="stage-tabs">
       ${[
         {k:'all',       l:'All'},
@@ -674,7 +677,7 @@ function renderDatabase() {
         {k:'meeting',   l:'Meeting'},
         {k:'followup',  l:'Follow-up Due'},
       ].map(s => `<button class="stage-tab${state.dbStage===s.k?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
-    </div>
+    </div>` : ''}
     <div class="subtabs">
       ${state.sourceFilter !== 'all' ? `<div class="source-filter-label">Showing: <strong>${state.sourceFilter.replace(/_/g,' ')}</strong></div>` : ''}
       <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">Leads<span class="count">${state.sourceFilter !== 'all' && state.sourceStatusCounts.lead !== null ? state.sourceStatusCounts.lead : state.counts.lead}</span></div>
