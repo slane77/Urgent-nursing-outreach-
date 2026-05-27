@@ -54,6 +54,13 @@ const state = {
   modal: null,
   // Loading flags
   loadingPage: false,
+  // Import / scraper
+  importSpecialty: 'physiotherapy',
+  importRegion: '',
+  importBand: '7',
+  importLimit: 20,
+  importRunning: false,
+  importResult: null,
   // Source filter
   sourceFilter: 'all',
   sourceCounts: {},
@@ -482,11 +489,13 @@ function renderAppShell() {
       <div class="tab ${state.view === 'templates' ? 'active' : ''}" data-view="templates">Templates</div>
       <div class="tab ${state.view === 'compose' ? 'active' : ''}" data-view="compose">Compose</div>
       <div class="tab ${state.view === 'settings' ? 'active' : ''}" data-view="settings">Settings</div>
+      <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import">⬇ Import</div>
     </div>
     <div class="main" id="main">
       ${state.view === 'database' ? renderDatabase() :
         state.view === 'templates' ? renderTemplates() :
         state.view === 'compose' ? renderCompose() :
+        state.view === 'import' ? renderImport() :
         renderSettings()}
     </div>
   `;
@@ -820,6 +829,159 @@ function renderCsvExport() {
   `;
 }
 
+
+async function runNHSScrape() {
+  state.importRunning = true;
+  state.importResult = null;
+  render();
+  try {
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-jobs-scraper', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU',
+      },
+      body: JSON.stringify({
+        specialty: state.importSpecialty,
+        region:    state.importRegion,
+        band:      state.importBand,
+        limit:     state.importLimit,
+        mode:      'scrape',
+      }),
+    });
+    const data = await res.json();
+    state.importResult = data;
+    if (data.success && data.inserted > 0) {
+      await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+    }
+  } catch (err) {
+    state.importResult = { success: false, error: err.message };
+  }
+  state.importRunning = false;
+  render();
+}
+
+function renderImport() {
+  const SPECIALTIES = [
+    { value: 'physiotherapy',        label: 'Physiotherapy' },
+    { value: 'occupational_therapy', label: 'Occupational Therapy' },
+    { value: 'radiography',          label: 'Radiography' },
+    { value: 'speech_language',      label: 'Speech & Language Therapy' },
+    { value: 'dietetics',            label: 'Dietetics' },
+    { value: 'podiatry',             label: 'Podiatry' },
+    { value: 'orthoptics',           label: 'Orthoptics' },
+    { value: 'art_therapy',          label: 'Arts Therapies' },
+    { value: 'paramedic',            label: 'Paramedic' },
+    { value: 'prosthetics',          label: 'Prosthetics & Orthotics' },
+  ];
+  const BANDS = [
+    { value: '6', label: 'Band 6+' },
+    { value: '7', label: 'Band 7+' },
+    { value: '8', label: 'Band 8+' },
+    { value: 'any', label: 'Any Band' },
+  ];
+  const REGIONS = [
+    'North West','North East, Yorkshire and The Humber',
+    'West Midlands','East Midlands','East of England',
+    'South East','London','South West',
+  ];
+  const r = state.importResult;
+
+  const placeholders = [
+    { icon: '📋', title: 'Companies House — Pharmacy', sub: 'Superintendent pharmacist contacts from registered pharmacy businesses' },
+    { icon: '🔬', title: 'NHS Directory — BMS', sub: 'Biomedical Scientists via NHS pathology lab directories' },
+    { icon: '🏨', title: 'CQC Register — Private Theatres', sub: 'Theatre manager contacts from the CQC registered providers list' },
+    { icon: '📡', title: 'NHS Staff Banks', sub: 'Bank manager contacts from NHS trust staff bank portals' },
+  ];
+
+  return `
+    <div class="import-wrap">
+      <h2 class="section-title">Import Contacts</h2>
+
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">🏥</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">NHS Jobs — AHP Contacts</div>
+            <div class="import-card-sub">Claude agent searches NHS Jobs and extracts hiring manager contacts from job postings</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+
+        <div class="import-form">
+          <div class="import-form-row">
+            <div class="field">
+              <label>AHP Specialty</label>
+              <select class="select" id="imp-specialty">
+                ${SPECIALTIES.map(s => `<option value="${s.value}" ${state.importSpecialty === s.value ? 'selected' : ''}>${s.label}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Region</label>
+              <select class="select" id="imp-region">
+                <option value="">All England</option>
+                ${REGIONS.map(rg => `<option value="${rg}" ${state.importRegion === rg ? 'selected' : ''}>${rg}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Minimum Band</label>
+              <select class="select" id="imp-band">
+                ${BANDS.map(b => `<option value="${b.value}" ${state.importBand === b.value ? 'selected' : ''}>${b.label}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Max Contacts</label>
+              <select class="select" id="imp-limit">
+                ${[10,20,30,50].map(n => `<option value="${n}" ${state.importLimit === n ? 'selected' : ''}>${n}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="import-form-actions">
+            <button class="btn primary" id="run-scrape-btn" ${state.importRunning ? 'disabled' : ''}>
+              ${state.importRunning ? '<span class="spinner-inline"></span> Scraping NHS Jobs&hellip;' : '&#9654; Run Scraper'}
+            </button>
+            <span class="import-hint">Agent reads NHS Jobs postings and extracts "For further details" contact blocks. Takes 1&ndash;3 minutes.</span>
+          </div>
+        </div>
+
+        ${state.importRunning ? `
+          <div class="import-progress">
+            <div class="progress-bar"><div class="fill import-pulse"></div></div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">Searching NHS Jobs and reading postings&hellip; please wait</p>
+          </div>` : ''}
+
+        ${r ? `<div class="import-result ${r.success ? 'ok' : 'err'}">
+          ${r.success ? `
+            <div class="import-result-stats">
+              <div class="import-stat"><div class="import-stat-val">${r.inserted}</div><div class="import-stat-lbl">Added</div></div>
+              <div class="import-stat"><div class="import-stat-val">${r.found}</div><div class="import-stat-lbl">Found</div></div>
+              <div class="import-stat"><div class="import-stat-val">${r.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
+              <div class="import-stat"><div class="import-stat-val">${r.skipped_dup}</div><div class="import-stat-lbl">Duplicate</div></div>
+            </div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${r.inserted} new ${(r.specialty||'').replace('_',' ')} contacts added &mdash; switch to Database &rarr; All Sources to view them</p>
+          ` : `
+            <p style="color:#DC2626;font-size:13px;">&#10005; ${esc(r.error || 'Unknown error')}</p>
+            ${(r.error||'').includes('ANTHROPIC_API_KEY') ? '<p class="muted" style="margin-top:6px;font-size:12px;">Add key: Supabase Dashboard &rarr; Project Settings &rarr; Edge Functions &rarr; Secrets &rarr; ANTHROPIC_API_KEY</p>' : ''}
+          `}
+        </div>` : ''}
+      </div>
+
+      ${placeholders.map(p => `
+        <div class="import-card disabled">
+          <div class="import-card-header">
+            <div class="import-card-icon">${p.icon}</div>
+            <div class="import-card-meta">
+              <div class="import-card-title">${p.title}</div>
+              <div class="import-card-sub">${p.sub}</div>
+            </div>
+            <span class="import-badge soon">Soon</span>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderSettings() {
   return `
     <h2 class="section-title">Settings</h2>
@@ -935,6 +1097,7 @@ function bindEvents() {
       state.page = 1;
       if (state.view === 'database') await loadContactsPage();
       if (state.view === 'compose') state.composePreviewCounts = null;
+      if (state.view === 'import') state.importResult = null;
       render();
     };
   });
@@ -986,6 +1149,18 @@ function bindEvents() {
       render();
     };
   });
+
+  // Import scraper form bindings
+  const impSpecialty = $('#imp-specialty');
+  if (impSpecialty) impSpecialty.onchange = e => { state.importSpecialty = e.target.value; };
+  const impRegion = $('#imp-region');
+  if (impRegion) impRegion.onchange = e => { state.importRegion = e.target.value; };
+  const impBand = $('#imp-band');
+  if (impBand) impBand.onchange = e => { state.importBand = e.target.value; };
+  const impLimit = $('#imp-limit');
+  if (impLimit) impLimit.onchange = e => { state.importLimit = parseInt(e.target.value); };
+  const runScrapeBtn = $('#run-scrape-btn');
+  if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
 
   // Batch action buttons
   document.querySelectorAll('[data-bulk]').forEach(btn => {
