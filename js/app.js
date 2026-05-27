@@ -397,26 +397,29 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: Private Theatre%')
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
       .not('notes', 'ilike', '%Source: NHS Theatre%')
-      .not('notes', 'ilike', '%Source: CAMHS%');
-  } else if (sf !== 'all') {
-    const SOURCE_TAG = {
-      ahp:             'Source: NHS Jobs AHP',
-      agency:          'Source: Agency Outreach',
-      pharmacy:        'Source: Pharmacy Outreach',
-      bms:             'Source: BMS Outreach',
-      sterile:         'Source: Sterile Services',
-      private_theatre: 'Source: Private Theatre',
-      nhs_staffbank:   'Source: NHS Staff Bank',
-        camhs:           'Source: CAMHS',
-    };
-    if (SOURCE_TAG[sf]) {
-    query = query.ilike('notes', `%${SOURCE_TAG[sf]}%`);
-    // AHP specialty sub-filter
-    if (sf === 'ahp' && state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
+      .not('notes', 'ilike', '%Source: CAMHS%')
+      .not('notes', 'ilike', '%Source: NHS Jobs AHP%');
+  } else if (sf === 'ahp') {
+    query = query.ilike('notes', '%Source: NHS Jobs AHP%');
+    if (state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
       query = query.ilike('notes', `%Specialty: ${state.ahpSpecialtyFilter}%`);
     }
+  } else if (sf === 'agency') {
+    query = query.ilike('notes', '%Source: Agency Outreach%');
+  } else if (sf === 'pharmacy') {
+    query = query.ilike('notes', '%Source: Pharmacy Outreach%');
+  } else if (sf === 'private_theatre') {
+    query = query.ilike('notes', '%Source: Private Theatre%');
+  } else if (sf === 'bms') {
+    query = query.ilike('notes', '%Source: BMS Outreach%');
+  } else if (sf === 'sterile') {
+    query = query.ilike('notes', '%Source: Sterile Services%');
+  } else if (sf === 'nhs_staffbank') {
+    query = query.ilike('notes', '%Source: NHS Staff Bank%');
+  } else if (sf === 'camhs') {
+    query = query.ilike('notes', '%Source: CAMHS%');
   }
-  }
+  // sf === 'all' — no filter applied
   // ──────────────────────────────────────────────────────────────────────────
 
   if (state.regionFilter) query = query.eq('region', state.regionFilter);
