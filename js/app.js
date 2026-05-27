@@ -338,8 +338,7 @@ async function loadContactsPage() {
       sterile:         'Source: Sterile Services',
       private_theatre: 'Source: Private Theatre',
       nhs_staffbank:   'Source: NHS Staff Bank',
-      nhs_theatre:     'Source: NHS Theatre',
-      camhs:           'Source: CAMHS',
+        camhs:           'Source: CAMHS',
     };
     if (SOURCE_TAG[sf]) query = query.ilike('notes', `%${SOURCE_TAG[sf]}%`);
   }
@@ -469,7 +468,6 @@ function applyComposeSourceFilter(q, source) {
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
-    nhs_theatre:     'Source: NHS Theatre',
     camhs:           'Source: CAMHS',
   };
   const tag = SOURCE_TAGS[source];
@@ -575,7 +573,6 @@ function renderDatabase() {
     { key: 'sterile',         label: 'Sterile Services',   live: false },
     { key: 'private_theatre', label: 'Private Theatres',   live: true  },
     { key: 'nhs_staffbank',   label: 'NHS Staff Banks',    live: false },
-    { key: 'nhs_theatre',     label: 'NHS Theatres',       live: false },
     { key: 'camhs',           label: 'CAMHS',              live: false },
   ];
 
@@ -816,7 +813,6 @@ function renderCompose() {
               {k:'bms',            l:'BMS'},
               {k:'sterile',        l:'Sterile Services'},
               {k:'nhs_staffbank',  l:'NHS Staff Banks'},
-              {k:'nhs_theatre',    l:'NHS Theatres'},
               {k:'camhs',          l:'CAMHS'},
             ].map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
           </select>
@@ -1141,6 +1137,7 @@ function renderImport() {
     { value: 'art_therapy',          label: 'Arts Therapies' },
     { value: 'paramedic',            label: 'Paramedic' },
     { value: 'prosthetics',          label: 'Prosthetics & Orthotics' },
+    { value: 'pharmacy',             label: 'Pharmacy (NHS)' },
   ];
   const BANDS = [
     { value: '6', label: 'Band 6+' },
@@ -1158,7 +1155,6 @@ function renderImport() {
   const placeholders = [
     { icon: '🔬', title: 'NHS Directory — BMS', sub: 'Biomedical Scientists via NHS pathology lab directories' },
     { icon: '📡', title: 'NHS Staff Banks', sub: 'Bank manager contacts from NHS trust staff bank portals' },
-    { icon: '🏥', title: 'NHS Theatres', sub: 'NHS trust theatre manager contacts' },
     { icon: '🧠', title: 'CAMHS', sub: 'Child and Adolescent Mental Health Service contacts' },
   ];
 
