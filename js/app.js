@@ -58,21 +58,6 @@ const state = {
   modal: null,
   // Loading flags
   loadingPage: false,
-  // User profile
-  userProfile: null,
-  senderEmail: '',
-  senderName: '',
-  senderSaving: false,
-  senderSaved: false,
-  // Team management
-  teamUsers: [],
-  teamLoading: false,
-  inviteEmail: '',
-  inviteName: '',
-  inviteSources: [],
-  inviteResult: null,
-  inviteSenderEmail: '',
-  inviteSenderName: '',
   // Import / scraper
   importSpecialty: 'physiotherapy',
   importRegion: '',
@@ -89,13 +74,6 @@ const state = {
   agencyCsvSource: 'gp_surgery',
   enrichRunning: false,
   enrichResult: null,
-  responsesLoading: false,
-  responsesData: null,
-  m365Syncing: false,
-  m365SyncResult: null,
-  m365ShowClientIdInput: false,
-  m365ClientId: localStorage?.getItem?.('m365ClientId') || '',
-  m365DaysBack: 30,
   agencyUploading: false,
   agencyResult: null,
   theatreRunning: false,
@@ -332,7 +310,8 @@ async function loadSourceStatusCounts() {
         .not('notes', 'ilike', '%Source: Private Theatre%')
         .not('notes', 'ilike', '%Source: NHS Staff Bank%')
         .not('notes', 'ilike', '%Source: CAMHS%')
-        .not('notes', 'ilike', '%Source: NHS Jobs AHP%');
+        .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
+        .not('notes', 'ilike', '%Source: Care Home%');
     }
     const tag = SOURCE_TAGS[sf];
     if (tag) return q.ilike('notes', `%${tag}%`);
@@ -362,7 +341,7 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, gpRes, ahpRes, agencyRes, pharmRes, theatreRes, careHomeRes] = await Promise.all([
+  const [allRes, chRes, gpRes, ahpRes, agencyRes, pharmRes, theatreRes, careRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
@@ -390,6 +369,7 @@ async function loadSourceCounts() {
     agency:         agencyRes.count || 0,
     pharmacy:       pharmRes.count  || 0,
     private_theatre: theatreRes.count || 0,
+    care_home: careRes.count || 0,
   };
 }
 
@@ -427,7 +407,8 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
       .not('notes', 'ilike', '%Source: NHS Theatre%')
       .not('notes', 'ilike', '%Source: CAMHS%')
-      .not('notes', 'ilike', '%Source: NHS Jobs AHP%');
+      .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
+      .not('notes', 'ilike', '%Source: Care Home%');
   } else if (sf === 'ahp') {
     query = query.ilike('notes', '%Source: NHS Jobs AHP%');
     if (state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
@@ -445,6 +426,8 @@ async function loadContactsPage() {
     query = query.ilike('notes', '%Source: Sterile Services%');
   } else if (sf === 'nhs_staffbank') {
     query = query.ilike('notes', '%Source: NHS Staff Bank%');
+  } else if (sf === 'care_home') {
+    query = query.ilike('notes', '%Source: Care Home%');
   } else if (sf === 'camhs') {
     query = query.ilike('notes', '%Source: CAMHS%');
   } else if (sf === 'care_home') {
@@ -566,7 +549,8 @@ function applyComposeSourceFilter(q, source) {
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
       .not('notes', 'ilike', '%Source: NHS Theatre%')
       .not('notes', 'ilike', '%Source: CAMHS%')
-      .not('notes', 'ilike', '%Source: NHS Jobs AHP%');
+      .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
+      .not('notes', 'ilike', '%Source: Care Home%');
   }
   const SOURCE_TAGS = {
     children_homes:  'Ofsted Register',
@@ -574,8 +558,6 @@ function applyComposeSourceFilter(q, source) {
     pharmacy:        'Source: Pharmacy Outreach',
     ahp:             'Source: NHS Jobs AHP',
     private_theatre: 'Source: Private Theatre',
-    care_home:       'Source: Care Home',
-    care_home:       'Source: Care Home',
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
@@ -624,37 +606,11 @@ async function previewComposeCounts() {
 
 async function bootApp() {
   $('#app').innerHTML = '<div style="padding:40px;text-align:center;color:#6B7280;">Loading data...</div>';
-  try {
-    // Load user profile (non-fatal — app works without it)
-    try {
-      const { data: { session: bootSession } } = await sb.auth.getSession();
-      if (bootSession) {
-        const profileRes = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + bootSession.access_token },
-          body: JSON.stringify({ action: 'me' }),
-        });
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          state.userProfile = profileData.profile || null;
-          if (profileData.profile) {
-            state.senderEmail = profileData.profile.sender_email || '';
-            state.senderName  = profileData.profile.sender_name  || '';
-          }
-        }
-      }
-    } catch(profileErr) {
-      console.warn('Profile load failed (non-fatal):', profileErr.message);
-    }
-
-    await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
-    await loadContactsPage();
-    render();
-    loadDashboard(); // non-blocking background load
-  } catch(bootErr) {
-    console.error('bootApp error:', bootErr);
-    render(); // render anyway so user isn't stuck on Loading
-  }
+  await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
+  await loadContactsPage();
+  render();
+  // Load dashboard data in background (non-blocking)
+  loadDashboard();
 }
 
 function render() {
@@ -667,13 +623,8 @@ function render() {
     bindAuthEvents();
     return;
   }
-  try {
-    $('#app').innerHTML = renderAppShell();
-    bindEvents();
-  } catch(renderErr) {
-    console.error('Render error:', renderErr);
-    $('#app').innerHTML = '<div style="padding:40px;text-align:center;color:#DC2626;">App error: ' + renderErr.message + '<br><br><button onclick="location.reload()" style="margin-top:10px;padding:8px 16px;background:#1a7a4a;color:white;border:none;border-radius:6px;cursor:pointer;">Reload</button></div>';
-  }
+  $('#app').innerHTML = renderAppShell();
+  bindEvents();
   if (state.modal) renderModal();
 }
 
@@ -693,7 +644,6 @@ function renderAppShell() {
       <div class="tab ${state.view === 'compose' ? 'active' : ''}" data-view="compose">Compose</div>
       <div class="tab ${state.view === 'settings' ? 'active' : ''}" data-view="settings">Settings</div>
       <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import">⬇ Import</div>
-      <div class="tab ${state.view === 'responses' ? 'active' : ''} ${state.responsesData?.stats?.unread_replies > 0 ? 'tab-badge' : ''}" data-view="responses">📬 Responses${state.responsesData?.stats?.unread_replies > 0 ? ` <span class="tab-count">${state.responsesData.stats.unread_replies}</span>` : ''}</div>
     </div>
     <div class="main" id="main">
       ${state.view === 'dashboard' ? renderDashboard() :
@@ -701,7 +651,6 @@ function renderAppShell() {
         state.view === 'templates' ? renderTemplates() :
         state.view === 'compose' ? renderCompose() :
         state.view === 'import' ? renderImport() :
-        state.view === 'responses' ? renderResponses() :
         renderSettings()}
     </div>
   `;
@@ -720,10 +669,6 @@ function renderFollowUpDate(d) {
 }
 
 function renderDatabase() {
-  // Filter sources based on user permissions
-  const userSources = state.userProfile?.allowed_sources || [];
-  const isAdmin = !state.userProfile || state.userProfile.role === 'admin' || userSources.length === 0;
-
   const SOURCES = [
     { key: 'all',             label: 'All Sources',        live: true  },
     { key: 'gp_surgery',      label: 'GP Surgeries',       live: true  },
@@ -748,7 +693,7 @@ function renderDatabase() {
 
   return `
     <div class="source-tabs">
-      ${SOURCES.filter(s => s.key === 'all' || isAdmin || userSources.includes(s.key)).map(s => `
+      ${SOURCES.map(s => `
         <button class="source-tab${state.sourceFilter === s.key ? ' active' : ''}${!s.live ? ' soon' : ''}"
           data-source="${s.key}"${!s.live ? ' disabled title="Coming soon"' : ''}>
           ${esc(s.label)}
@@ -938,75 +883,6 @@ function renderTemplates() {
 }
 
 
-
-
-async function saveSenderDetails() {
-  state.senderSaving = true; state.senderSaved = false; render();
-  try {
-    const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session?.access_token },
-      body: JSON.stringify({
-        action: 'update_sender',
-        sender_email: state.senderEmail,
-        sender_name:  state.senderName,
-      }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      state.senderSaved = true;
-      // Update the local profile cache
-      if (state.userProfile) {
-        state.userProfile.sender_email = state.senderEmail;
-        state.userProfile.sender_name  = state.senderName;
-      }
-      toast('Sender details saved ✓');
-      setTimeout(() => { state.senderSaved = false; render(); }, 3000);
-    } else {
-      toast('Error: ' + (data.error || 'Unknown'));
-    }
-  } catch(e) { toast('Error: ' + e.message); }
-  state.senderSaving = false; render();
-}
-
-async function loadTeamUsers() {
-  state.teamLoading = true; render();
-  try {
-    const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session?.access_token },
-      body: JSON.stringify({ action: 'list' }),
-    });
-    const data = await res.json();
-    state.teamUsers = data.users || [];
-  } catch(e) { console.error('loadTeamUsers:', e); }
-  state.teamLoading = false; render();
-}
-
-async function sendInvite() {
-  const { data: { session } } = await sb.auth.getSession();
-  const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session?.access_token },
-    body: JSON.stringify({
-      action: 'invite',
-      email: state.inviteEmail,
-      full_name: state.inviteName,
-      role: 'user',
-      allowed_sources: state.inviteSources,
-      sender_email: state.inviteSenderEmail || state.inviteEmail,
-      sender_name:  state.inviteSenderName  || state.inviteName,
-    }),
-  });
-  state.inviteResult = await res.json();
-  if (state.inviteResult.success) {
-    state.inviteEmail = ''; state.inviteName = ''; state.inviteSources = [];
-    await loadTeamUsers();
-  }
-  render();
-}
 
 async function sendFilteredViaBrevo() {
   const template = state.templates.find(t => t.id === state.composeTemplateId);
@@ -1247,7 +1123,6 @@ function renderBrevoSend() {
         <div>
           <h3 style="margin:0 0 4px;">✉ Direct Send — ${ids.length} contacts selected</h3>
           <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Pick a template and send personalised emails via Brevo.</p>
-          ${state.senderEmail ? `<p class="muted" style="margin:4px 0 0;font-size:11px;">Sending from: <strong>${esc(state.senderName || state.senderEmail)}</strong> &lt;${esc(state.senderEmail)}&gt;</p>` : ''}
         </div>
         <button class="btn small" id="clear-selected-send">✕ Clear selection</button>
       </div>
@@ -1434,20 +1309,19 @@ async function previewAgencyCSV(csvText) {
   render();
 }
 
-
 async function runCareHomeScrape() {
-  const region = document.getElementById('ch-region')?.value || '';
-  const care_type = document.getElementById('ch-type')?.value || 'all';
-  const limit = parseInt(document.getElementById('ch-limit')?.value || '20');
+  const region = document.getElementById('ch-region') ? document.getElementById('ch-region').value : '';
+  const care_type = document.getElementById('ch-type') ? document.getElementById('ch-type').value : 'all';
+  const limit = parseInt((document.getElementById('ch-limit') || {value:'20'}).value);
   state.careHomeRunning = true; state.careHomeResult = null; render();
   try {
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/care-home-scraper', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
-      body: JSON.stringify({ region, care_type, limit }),
+      body: JSON.stringify({ region: region, care_type: care_type, limit: limit }),
     });
     state.careHomeResult = await res.json();
-    if (state.careHomeResult.success && state.careHomeResult.inserted > 0) {
+    if (state.careHomeResult && state.careHomeResult.success && state.careHomeResult.inserted > 0) {
       await Promise.all([loadStatusCounts(), loadSourceCounts()]);
     }
   } catch(e) { state.careHomeResult = { success: false, error: e.message }; }
@@ -1739,59 +1613,48 @@ function renderImport() {
       </div>
 
 
-
-      <!-- Care Homes Scraper -->
       <div class="import-card">
         <div class="import-card-header">
-          <div class="import-card-icon">🏡</div>
+          <div class="import-card-icon">&#x1F3E1;</div>
           <div class="import-card-meta">
-            <div class="import-card-title">Care Homes — Registered Managers</div>
-            <div class="import-card-sub">Claude agent finds registered care home managers across England with email addresses. Covers residential, nursing, dementia and supported living.</div>
+            <div class="import-card-title">Care Homes &mdash; Registered Managers</div>
+            <div class="import-card-sub">Claude agent finds registered care home managers with email addresses. Residential, nursing, dementia and supported living.</div>
           </div>
           <span class="import-badge live">Live</span>
         </div>
         <div class="import-form">
           <div class="import-form-row">
-            <div class="field">
-              <label>Region</label>
-              <select class="select" id="ch-region">
-                <option value="">All England</option>
+            <div class="field"><label>Region</label>
+              <select class="select" id="ch-region"><option value="">All England</option>
                 ${['North West','North East, Yorkshire and The Humber','West Midlands','East Midlands','East of England','South East','London','South West'].map(r => `<option value="${r}">${r}</option>`).join('')}
-              </select>
-            </div>
-            <div class="field">
-              <label>Care Type</label>
+              </select></div>
+            <div class="field"><label>Type</label>
               <select class="select" id="ch-type">
-                <option value="all">All Types</option>
-                <option value="residential">Residential</option>
-                <option value="nursing">Nursing</option>
-                <option value="dementia">Dementia</option>
+                <option value="all">All Types</option><option value="residential">Residential</option>
+                <option value="nursing">Nursing</option><option value="dementia">Dementia</option>
                 <option value="learning_disability">Learning Disability</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Max Contacts</label>
+              </select></div>
+            <div class="field"><label>Max</label>
               <select class="select" id="ch-limit">
                 ${[10,20,30,50].map(n => `<option value="${n}" ${n===20?'selected':''}>${n}</option>`).join('')}
-              </select>
-            </div>
+              </select></div>
           </div>
           <div class="import-form-actions">
-            <button class="btn primary" id="run-carehome-btn" ${state.careHomeRunning ? 'disabled' : ''}>
+            <button class="btn primary" id="run-carehome-btn" ${state.careHomeRunning?'disabled':''}>
               ${state.careHomeRunning ? '<span class="spinner-inline"></span> Searching&hellip;' : '&#9654; Run Care Home Scraper'}
             </button>
-            <span class="import-hint">Searches for care home registered managers with email addresses. Takes 2&ndash;4 minutes per run.</span>
+            <span class="import-hint">Finds registered care home managers with emails. 2&ndash;4 minutes.</span>
           </div>
         </div>
         ${state.careHomeRunning ? '<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>' : ''}
         ${state.careHomeResult ? `<div class="import-result ${state.careHomeResult.success ? 'ok' : 'err'}">
-          ${state.careHomeResult.success ? `
-            <div class="import-result-stats">
-              <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
-              <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.found}</div><div class="import-stat-lbl">Found</div></div>
-              <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
-              <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.skipped_dup}</div><div class="import-stat-lbl">Dupe</div></div>
-            </div>` : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.careHomeResult.error || 'Error')}</p>`}
+          ${state.careHomeResult.success
+            ? `<div class="import-result-stats">
+                <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.found}</div><div class="import-stat-lbl">Found</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
+              </div>`
+            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.careHomeResult.error||'Error')}</p>`}
         </div>` : ''}
       </div>
 
@@ -2071,407 +1934,22 @@ function renderDashboard() {
 }
 
 
-// ============================================================================
-//  RESPONSES TAB — Engagement (Brevo) + Replies (M365)
-// ============================================================================
-
-const SB_URL_RESP  = 'https://udttpnaenmyxviuiwxqw.supabase.co';
-const SB_ANON_RESP = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU';
-
-// Microsoft Azure App Registration Client ID
-// To set up: Azure Portal → App registrations → New → add redirect URI for your Vercel URL
-// Scope needed: Mail.Read
-const M365_CLIENT_ID = Deno?.env ? '' : (window.M365_CLIENT_ID || '');
-
-async function loadResponsesData() {
-  state.responsesLoading = true;
-  render();
-  try {
-    const [eventsRes, repliesRes, statsRes] = await Promise.all([
-      // Recent events
-      sb.from('email_events')
-        .select('id, event_type, email, occurred_at, link_url, batch_id, contacts(first_name, last_name, org)')
-        .order('occurred_at', { ascending: false })
-        .limit(50),
-      // Unread replies
-      sb.from('replies')
-        .select('id, from_email, from_name, subject, body_preview, received_at, read, contacts(first_name, last_name, org)')
-        .order('received_at', { ascending: false })
-        .limit(50),
-      // Engagement stats
-      sb.from('email_events').select('event_type, id', { count: 'exact' }),
-    ]);
-
-    const events = eventsRes.data || [];
-    const replies = repliesRes.data || [];
-    const allEvents = statsRes.data || [];
-
-    const stats = {
-      total_opens:       allEvents.filter(e => e.event_type === 'opened').length,
-      total_clicks:      allEvents.filter(e => e.event_type === 'clicked').length,
-      total_bounces:     allEvents.filter(e => ['hard_bounce','soft_bounce'].includes(e.event_type)).length,
-      total_unsubscribed: allEvents.filter(e => e.event_type === 'unsubscribed').length,
-      unread_replies:    replies.filter(r => !r.read).length,
-    };
-
-    state.responsesData = { events, replies, stats };
-  } catch(e) {
-    state.responsesData = { error: e.message };
-  }
-  state.responsesLoading = false;
-  render();
-}
-
-async function syncM365Replies() {
-  // Use MSAL popup to get access token
-  state.m365Syncing = true;
-  state.m365SyncResult = null;
-  render();
-
-  try {
-    // Check if MSAL is loaded
-    if (typeof window.msal === 'undefined') {
-      throw new Error('Microsoft authentication library not loaded. Please refresh the page and try again.');
-    }
-
-    const msalConfig = {
-      auth: {
-        clientId: state.m365ClientId || '',
-        authority: 'https://login.microsoftonline.com/common',
-        redirectUri: window.location.origin,
-      }
-    };
-
-    if (!msalConfig.auth.clientId) {
-      state.m365ShowClientIdInput = true;
-      state.m365Syncing = false;
-      render();
-      return;
-    }
-
-    const msalInstance = new window.msal.PublicClientApplication(msalConfig);
-    await msalInstance.initialize();
-
-    const loginRequest = { scopes: ['Mail.Read', 'User.Read'] };
-    const tokenResponse = await msalInstance.acquireTokenPopup(loginRequest);
-    const m365Token = tokenResponse.accessToken;
-
-    // Call our Edge Function with the token
-    const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch(`${SB_URL_RESP}/functions/v1/m365-sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + session?.access_token,
-      },
-      body: JSON.stringify({ m365Token, daysBack: state.m365DaysBack || 30 }),
-    });
-
-    state.m365SyncResult = await res.json();
-    if (state.m365SyncResult.success) {
-      await loadResponsesData();
-      toast(`Synced ${state.m365SyncResult.synced} replies from Outlook ✓`);
-    }
-  } catch(e) {
-    state.m365SyncResult = { success: false, error: e.message };
-  }
-
-  state.m365Syncing = false;
-  render();
-}
-
-async function markReplyRead(replyId) {
-  await sb.from('replies').update({ read: true }).eq('id', replyId);
-  if (state.responsesData?.replies) {
-    const r = state.responsesData.replies.find(r => r.id === replyId);
-    if (r) r.read = true;
-  }
-  render();
-}
-
-function renderResponses() {
-  if (state.responsesLoading || !state.responsesData) {
-    return `<div class="dash-loading"><div class="dash-spinner"></div><p>Loading responses&hellip;</p></div>`;
-  }
-
-  const d = state.responsesData;
-  if (d.error) return `<div class="dash-error">Error: ${esc(d.error)}</div>`;
-
-  const s = d.stats || {};
-  const replies = d.replies || [];
-  const events = d.events || [];
-  const unreadReplies = replies.filter(r => !r.read);
-
-  const EVENT_ICONS = {
-    opened: '👁',
-    clicked: '🖱',
-    delivered: '✓',
-    sent: '📤',
-    hard_bounce: '⚠',
-    soft_bounce: '↩',
-    unsubscribed: '⊘',
-    complaint: '🚫',
-    replied: '↩',
-  };
-
-  const EVENT_COLORS = {
-    opened: 'event-open',
-    clicked: 'event-click',
-    delivered: 'event-delivered',
-    hard_bounce: 'event-bounce',
-    soft_bounce: 'event-bounce',
-    unsubscribed: 'event-unsub',
-    complaint: 'event-bounce',
-  };
-
-  return `
-    <div class="responses-wrap">
-
-      <!-- Stats row -->
-      <div class="dash-stats" style="margin-bottom:16px;">
-        <div class="dash-stat">
-          <div class="dash-stat-val">${s.unread_replies || 0}</div>
-          <div class="dash-stat-lbl">Unread replies</div>
-          <div class="dash-stat-sub">${replies.length} total</div>
-        </div>
-        <div class="dash-stat">
-          <div class="dash-stat-val">${s.total_opens || 0}</div>
-          <div class="dash-stat-lbl">Email opens</div>
-          <div class="dash-stat-sub">Tracked via Brevo</div>
-        </div>
-        <div class="dash-stat">
-          <div class="dash-stat-val">${s.total_clicks || 0}</div>
-          <div class="dash-stat-lbl">Link clicks</div>
-          <div class="dash-stat-sub">${s.total_unsubscribed || 0} unsubscribed</div>
-        </div>
-        <div class="dash-stat ${s.total_bounces > 0 ? 'dash-stat-alert' : ''}">
-          <div class="dash-stat-val">${s.total_bounces || 0}</div>
-          <div class="dash-stat-lbl">Bounces</div>
-          <div class="dash-stat-sub">${s.total_bounces > 0 ? 'Check contacts' : 'All good'}</div>
-        </div>
-      </div>
-
-      <div class="responses-cols">
-
-        <!-- REPLIES from Outlook -->
-        <div class="responses-panel">
-          <div class="responses-panel-header">
-            <h3>📬 Replies from Outlook</h3>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-              <select class="select" id="m365-days" style="font-size:12px;padding:4px 8px;width:auto;">
-                <option value="7">Last 7 days</option>
-                <option value="30" selected>Last 30 days</option>
-                <option value="90">Last 90 days</option>
-              </select>
-              <button class="btn primary" id="sync-m365-btn" ${state.m365Syncing ? 'disabled' : ''}>
-                ${state.m365Syncing ? '<span class="spinner-inline"></span> Syncing&hellip;' : '🔄 Sync from Outlook'}
-              </button>
-            </div>
-          </div>
-
-          ${state.m365ShowClientIdInput ? `
-          <div class="m365-setup">
-            <p style="font-size:13px;margin-bottom:10px;">To sync Outlook replies, enter your Azure App Client ID:</p>
-            <input class="search" id="m365-client-id-input" placeholder="e.g. 12345678-1234-1234-1234-123456789abc"
-              value="${esc(state.m365ClientId || '')}" style="margin-bottom:8px;" />
-            <button class="btn primary" id="save-m365-client-id">Save & Connect</button>
-            <p class="muted" style="font-size:11px;margin-top:8px;">
-              Register a free Azure app: Azure Portal → App Registrations → New → 
-              add <code>${window.location.origin}</code> as redirect URI → 
-              grant <code>Mail.Read</code> permission → copy Client ID.
-            </p>
-          </div>` : ''}
-
-          ${state.m365SyncResult && !state.m365Syncing ? `
-          <div class="import-result ${state.m365SyncResult.success ? 'ok' : 'err'}" style="margin-bottom:12px;">
-            ${state.m365SyncResult.success
-              ? `<p style="font-size:13px;">✓ Synced ${state.m365SyncResult.synced} new replies from ${state.m365SyncResult.total_messages} emails checked</p>`
-              : `<p style="color:#DC2626;font-size:13px;">✗ ${esc(state.m365SyncResult.error || 'Sync failed')}</p>`}
-          </div>` : ''}
-
-          ${replies.length === 0 ? `
-          <div class="responses-empty">
-            <p>No replies synced yet.</p>
-            <p class="muted" style="font-size:12px;margin-top:6px;">Click "Sync from Outlook" to search your inbox for emails from contacts in your database.</p>
-          </div>` : `
-          <div class="replies-list">
-            ${replies.map(r => {
-              const c = r.contacts || {};
-              const name = r.from_name || esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || r.from_email;
-              const when = r.received_at ? new Date(r.received_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
-              return `
-                <div class="reply-card ${r.read ? '' : 'reply-unread'}" data-reply-id="${r.id}">
-                  <div class="reply-card-header">
-                    <div class="reply-from">${esc(name)}</div>
-                    <div class="reply-when">${when}</div>
-                  </div>
-                  <div class="reply-org">${esc(c.org || r.from_email)}</div>
-                  <div class="reply-subject">${esc(r.subject || '(no subject)')}</div>
-                  <div class="reply-preview">${esc(r.body_preview || '')}</div>
-                  ${!r.read ? `<button class="btn small reply-read-btn" data-reply-id="${r.id}">Mark read</button>` : ''}
-                </div>`;
-            }).join('')}
-          </div>`}
-        </div>
-
-        <!-- ENGAGEMENT from Brevo -->
-        <div class="responses-panel">
-          <div class="responses-panel-header">
-            <h3>📊 Email Engagement</h3>
-            <span class="muted" style="font-size:11px;">Auto-tracked via Brevo webhook</span>
-          </div>
-
-          ${events.length === 0 ? `
-          <div class="responses-empty">
-            <p>No engagement events yet.</p>
-            <p class="muted" style="font-size:12px;margin-top:6px;">
-              Set up the Brevo webhook to start tracking opens and clicks.<br>
-              Webhook URL: <code style="font-size:10px;word-break:break-all;">${SB_URL_RESP}/functions/v1/brevo-webhook</code>
-            </p>
-            <p class="muted" style="font-size:11px;margin-top:8px;">
-              Brevo Dashboard → Transactional → Settings → Webhooks → Add new → paste URL above → 
-              select: Delivered, Opened, Clicked, Soft bounce, Hard bounce, Unsubscribed.
-            </p>
-          </div>` : `
-          <div class="events-list">
-            ${events.map(ev => {
-              const c = ev.contacts || {};
-              const who = esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || esc(ev.email);
-              const org = esc(c.org || '');
-              const icon = EVENT_ICONS[ev.event_type] || '•';
-              const cls  = EVENT_COLORS[ev.event_type] || 'event-default';
-              const when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
-              return `
-                <div class="event-row ${cls}">
-                  <span class="event-icon">${icon}</span>
-                  <div class="event-body">
-                    <div class="event-who">${who} ${org ? `<span class="muted">— ${org}</span>` : ''}</div>
-                    <div class="event-type">${esc(ev.event_type.replace(/_/g,' '))} ${ev.link_url ? `<a href="${esc(ev.link_url)}" target="_blank" class="event-link">↗</a>` : ''}</div>
-                  </div>
-                  <span class="event-when">${when}</span>
-                </div>`;
-            }).join('')}
-          </div>`}
-        </div>
-
-      </div>
-    </div>
-  `;
-}
-
-
 function renderSettings() {
-  const sources = [
-    {k:'gp_surgery',label:'GP Surgeries'},
-    {k:'children_homes',label:"Children's Homes"},
-    {k:'agency',label:'Agency Outreach'},
-    {k:'ahp',label:'AHP (NHS Jobs)'},
-    {k:'pharmacy',label:'Pharmacy'},
-    {k:'private_theatre',label:'Private Theatres'},
-    {k:'care_home',label:'Care Homes'},
-    {k:'bms',label:'BMS'},
-    {k:'sterile',label:'Sterile Services'},
-    {k:'nhs_staffbank',label:'NHS Staff Banks'},
-  ];
-
-  const isAdmin = !state.userProfile || state.userProfile.role === 'admin';
-
   return `
-    <div class="settings-wrap">
-
-      <!-- My Sender Details (every user) -->
-      <div class="settings-section">
-        <h3 class="settings-section-title">✉ My Sender Details</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:12px;">
-          Emails you send will come from this name and address. Must match a verified sender in Brevo.
-        </p>
-        <div class="import-form-row" style="max-width:520px;">
-          <div class="field">
-            <label>Your Name</label>
-            <input class="search" id="sender-name-input" placeholder="e.g. Chris Thompson - Day Webster Group"
-              value="${esc(state.senderName || '')}" />
-          </div>
-          <div class="field">
-            <label>Your Email Address</label>
-            <input class="search" id="sender-email-input" type="email"
-              placeholder="e.g. chris@daywebster.com"
-              value="${esc(state.senderEmail || '')}" />
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
-          <button class="btn primary" id="save-sender-btn" ${state.senderSaving ? 'disabled' : ''}>
-            ${state.senderSaving ? '<span class="spinner-inline"></span> Saving&hellip;' : 'Save Sender Details'}
-          </button>
-          ${state.senderSaved ? '<span style="color:var(--green-dark);font-size:13px;">&#10003; Saved</span>' : ''}
-        </div>
-        <p class="muted" style="font-size:11px;margin-top:8px;">
-          &#9888; Your email must be verified in Brevo: Brevo &#x2192; Senders &#x2192; Add &amp; verify.
-        </p>
-      </div>
-
-      <!-- Team Management (admin only) -->
-      ${isAdmin ? `
-      <div class="settings-section">
-        <h3 class="settings-section-title">&#x1F465; Team Management</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:12px;">Invite team members and control which sources they can access.</p>
-        <div class="team-invite-form">
-          <div class="import-form-row">
-            <div class="field"><label>Full Name</label>
-              <input class="search" id="invite-name" placeholder="e.g. Chris Thompson" value="${esc(state.inviteName)}" /></div>
-            <div class="field"><label>Email</label>
-              <input class="search" id="invite-email" placeholder="chris@daywebster.com" value="${esc(state.inviteEmail)}" /></div>
-          </div>
-          <div class="import-form-row">
-            <div class="field"><label>Sender Name</label>
-              <input class="search" id="invite-sender-name" placeholder="Chris Thompson - Day Webster Group" /></div>
-            <div class="field"><label>Sender Email</label>
-              <input class="search" id="invite-sender-email" type="email" placeholder="chris@daywebster.com" /></div>
-          </div>
-          <div class="field" style="margin-bottom:10px;">
-            <label>Source Access (leave all unchecked = all sources)</label>
-            <div class="source-checkboxes">
-              ${sources.map(s => `<label class="source-checkbox-label">
-                <input type="checkbox" class="invite-source-cb" value="${s.k}" ${state.inviteSources.includes(s.k)?'checked':''}> ${s.label}
-              </label>`).join('')}
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <button class="btn primary" id="send-invite-btn">&#x2709; Send Invite</button>
-            ${state.inviteResult ? `<span class="${state.inviteResult.success?'':'text-danger'}" style="font-size:13px;">
-              ${state.inviteResult.success ? '&#10003; Invite sent &mdash; they will receive a magic link' : '&#10005; ' + esc(state.inviteResult.error||'Error')}
-            </span>` : ''}
-          </div>
-        </div>
-        ${state.teamLoading ? '<p class="muted" style="margin-top:12px;">Loading team&hellip;</p>' : ''}
-        ${state.teamUsers.length > 0 ? `
-        <table class="table" style="margin-top:12px;">
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Sources</th><th>Sender Email</th><th>Last Login</th><th></th></tr></thead>
-          <tbody>
-            ${state.teamUsers.map(u => `<tr>
-              <td>${esc(u.full_name||'—')}</td>
-              <td>${esc(u.email||'—')}</td>
-              <td><span class="role-badge ${u.role==='admin'?'role-admin':'role-user'}">${u.role||'user'}</span></td>
-              <td class="muted" style="font-size:11px;">${!u.allowed_sources?.length?'All':''+u.allowed_sources.join(', ')}</td>
-              <td class="muted" style="font-size:11px;">${esc(u.sender_email||'—')}</td>
-              <td class="muted" style="font-size:11px;">${u.last_sign_in?new Date(u.last_sign_in).toLocaleDateString('en-GB'):'Never'}</td>
-              <td>${u.email!=='scott.lane@daywebster.com'?`<button class="btn small danger" data-delete-user="${esc(u.user_id)}" data-user-email="${esc(u.email)}">Remove</button>`:'<span class="muted">Admin</span>'}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>` : '<p class="muted" style="font-size:12px;margin-top:12px;">No team members yet.</p>'}
-      </div>` : ''}
-
-      <!-- Standard settings -->
-      <div class="settings-section">
-        <h3 class="settings-section-title">&#x1F4E4; Export Data</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:10px;">Download all contacts as CSV for backup or analysis.</p>
-        <button class="btn primary" id="export-csv-all">&#x2B07; Export All Contacts as CSV</button>
-      </div>
-      <div class="settings-section">
-        <h3 class="settings-section-title">&#x1F464; Account</h3>
-        <p class="muted" style="font-size:12px;margin-bottom:10px;">Signed in as <strong>${esc(state.user.email)}</strong></p>
-        <button class="btn danger" id="sign-out-btn-settings">Sign Out</button>
-      </div>
-
+    <h2 class="section-title">Settings</h2>
+    <div class="settings-card">
+      <h3>📤 Export Data</h3>
+      <p>Download a backup of contacts as CSV. Useful for ad-hoc analysis or as a safety net.</p>
+      <button class="btn primary" id="export-csv-all">⬇ Export All Contacts as CSV</button>
+    </div>
+    <div class="settings-card">
+      <h3>👤 Account</h3>
+      <p>Signed in as <strong>${esc(state.user.email)}</strong></p>
+      <button class="btn danger" id="sign-out-btn-settings">Sign Out</button>
+    </div>
+    <div class="settings-card">
+      <h3>ℹ️ About</h3>
+      <p>Urgent Nursing Day Webster Outreach — Day Webster Group. Data lives in Supabase; access is restricted to authorised Day Webster Group email domains. Daily automated database backups run on the Supabase free tier (Dashboard → Database → Backups).</p>
     </div>
   `;
 }
@@ -2573,8 +2051,6 @@ function bindEvents() {
       if (state.view === 'database') await loadContactsPage();
       if (state.view === 'compose') { state.composePreviewCounts = null; state.composeBrevoResult = null; }
       if (state.view === 'import') state.importResult = null;
-      if (state.view === 'responses') { loadResponsesData(); return; }
-      if (state.view === 'settings' && state.userProfile?.role === 'admin') { loadTeamUsers(); }
       render();
     };
   });
@@ -2586,11 +2062,7 @@ function bindEvents() {
       state.page = 1;
       state.search = '';
       state.regionFilter = '';
-      // Reset source filter for unsubs/live so all contacts are visible
-      if (t.dataset.subtab === 'unsubscribed' || t.dataset.subtab === 'live') {
-        state.sourceFilter = 'all';
-        state.sourceStatusCounts = { lead: null, live: null, unsubscribed: null };
-      }
+      if (t.dataset.subtab !== 'lead') { state.sourceFilter = 'all'; state.sourceStatusCounts = { lead: null, live: null, unsubscribed: null }; }
       await loadContactsPage();
       render();
     };
@@ -2711,73 +2183,6 @@ function bindEvents() {
   const runScrapeBtn = $('#run-scrape-btn');
   if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
   // Agency CSV upload
-  // Responses tab bindings
-  const syncM365Btn = $('#sync-m365-btn');
-  if (syncM365Btn) syncM365Btn.onclick = () => { if (!state.m365Syncing) syncM365Replies(); };
-
-  // Sender details bindings
-  const senderNameInput = $('#sender-name-input');
-  if (senderNameInput) senderNameInput.oninput = e => { state.senderName = e.target.value; };
-  const senderEmailInput = $('#sender-email-input');
-  if (senderEmailInput) senderEmailInput.oninput = e => { state.senderEmail = e.target.value; };
-  const saveSenderBtn = $('#save-sender-btn');
-  if (saveSenderBtn) saveSenderBtn.onclick = () => { if (!state.senderSaving) saveSenderDetails(); };
-
-  // Team management bindings
-  if (state.view === 'settings' && state.userProfile?.role === 'admin' && state.teamUsers.length === 0) {
-    loadTeamUsers();
-  }
-  const sendInviteBtn = $('#send-invite-btn');
-  const inviteSenderNameInput = $('#invite-sender-name');
-  const inviteSenderEmailInput = $('#invite-sender-email');
-  if (sendInviteBtn) sendInviteBtn.onclick = () => {
-    if (state.inviteEmail) {
-      state.inviteSenderName  = inviteSenderNameInput?.value  || '';
-      state.inviteSenderEmail = inviteSenderEmailInput?.value || state.inviteEmail;
-      sendInvite();
-    }
-  };
-  const inviteNameInput = $('#invite-name');
-  if (inviteNameInput) inviteNameInput.oninput = e => { state.inviteName = e.target.value; };
-  const inviteEmailInput = $('#invite-email');
-  if (inviteEmailInput) inviteEmailInput.oninput = e => { state.inviteEmail = e.target.value; };
-  document.querySelectorAll('.invite-source-cb').forEach(cb => {
-    cb.onchange = () => {
-      if (cb.checked) { state.inviteSources = [...new Set([...state.inviteSources, cb.value])]; }
-      else { state.inviteSources = state.inviteSources.filter(s => s !== cb.value); }
-    };
-  });
-  document.querySelectorAll('[data-delete-user]').forEach(btn => {
-    btn.onclick = async () => {
-      if (!confirm('Remove ' + btn.dataset.userEmail + ' from the team?')) return;
-      const { data: { session } } = await sb.auth.getSession();
-      await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session?.access_token },
-        body: JSON.stringify({ action: 'delete', target_user_id: btn.dataset.deleteUser }),
-      });
-      await loadTeamUsers();
-    };
-  });
-
-  const m365DaysSelect = $('#m365-days');
-  if (m365DaysSelect) m365DaysSelect.onchange = e => { state.m365DaysBack = parseInt(e.target.value); };
-
-  const saveM365Btn = $('#save-m365-client-id');
-  if (saveM365Btn) saveM365Btn.onclick = () => {
-    const input = $('#m365-client-id-input');
-    if (input?.value) {
-      state.m365ClientId = input.value.trim();
-      localStorage?.setItem?.('m365ClientId', state.m365ClientId);
-      state.m365ShowClientIdInput = false;
-      syncM365Replies();
-    }
-  };
-
-  document.querySelectorAll('.reply-read-btn').forEach(btn => {
-    btn.onclick = () => markReplyRead(btn.dataset.replyId);
-  });
-
   const runEnrichBtn = $('#run-enrich-btn');
   if (runEnrichBtn) runEnrichBtn.onclick = () => { if (!state.enrichRunning) runEnrichment(); };
   const enrichLimit = $('#enrich-limit');
@@ -2808,7 +2213,7 @@ function bindEvents() {
   if (agencyUploadBtn) agencyUploadBtn.onclick = () => { if (!state.agencyUploading) runAgencyCSVUpload(); };
 
   const runCareHomeBtn = $('#run-carehome-btn');
-  if (runCareHomeBtn) runCareHomeBtn.onclick = () => { if (!state.careHomeRunning) runCareHomeScrape(); };
+  if (runCareHomeBtn) runCareHomeBtn.onclick = function() { if (!state.careHomeRunning) runCareHomeScrape(); };
   const runPharmacyBtn = $('#run-pharmacy-btn');
   if (runPharmacyBtn) runPharmacyBtn.onclick = () => { if (!state.pharmacyRunning) runPharmacyScrape(); };
   const runTheatreBtn = $('#run-theatre-btn');
