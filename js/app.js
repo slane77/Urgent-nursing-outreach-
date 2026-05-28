@@ -91,6 +91,10 @@ const state = {
   m365DaysBack: 30,
   expandedReplyId: null,
   addFromReplyLoading: false,
+  // Per-source CSV upload state
+  csvText_children_homes: '', csvPreview_children_homes: null, csvUploading_children_homes: false, csvResult_children_homes: null,
+  csvText_care_home: '', csvPreview_care_home: null, csvUploading_care_home: false, csvResult_care_home: null,
+  csvText_private_theatre: '', csvPreview_private_theatre: null, csvUploading_private_theatre: false, csvResult_private_theatre: null,
   agencyCsvText: null,
   agencyCsvPreview: null,
   agencyCsvSource: 'gp_surgery',
@@ -1425,6 +1429,64 @@ async function runNHSScrape() {
   render();
 }
 
+
+// ── Smart CSV upload card renderer (reusable) ─────────────────────────────────
+function renderCsvUploadCard(sourceKey, state) {
+  const stateKey = 'csv_' + sourceKey;
+  const csvText = state['csvText_' + sourceKey] || '';
+  const preview = state['csvPreview_' + sourceKey] || null;
+  const uploading = state['csvUploading_' + sourceKey] || false;
+  const result = state['csvResult_' + sourceKey] || null;
+
+  let previewHtml = '';
+  if (preview && preview.success) {
+    previewHtml = `<div class="csv-preview">
+      <div class="csv-preview-header">
+        <strong>${preview.totalRows} rows</strong> &nbsp;&middot;&nbsp;
+        ${preview.hasEmail ? '<span style="color:var(--green-dark)">&#10003; Email column detected</span>' : '<span style="color:#DC2626">&#10005; No email column found &mdash; check column names</span>'}
+        ${preview.hasName ? ' &nbsp;&middot;&nbsp; <span style="color:var(--green-dark)">&#10003; Name detected</span>' : ''}
+      </div>
+      <div class="csv-col-map">
+        ${preview.headers.map((h, i) => `<span class="csv-col ${preview.mapped[i] ? 'mapped' : 'unmapped'}">${esc(h)} ${preview.mapped[i] ? '&rarr; ' + preview.mapped[i] : '(ignored)'}</span>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  let resultHtml = '';
+  if (result) {
+    resultHtml = `<div class="import-result ${result.success ? 'ok' : 'err'}">
+      ${result.success
+        ? `<div class="import-result-stats">
+            <div class="import-stat"><div class="import-stat-val">${result.inserted}</div><div class="import-stat-lbl">Added</div></div>
+            <div class="import-stat"><div class="import-stat-val">${result.total_rows}</div><div class="import-stat-lbl">Total Rows</div></div>
+            <div class="import-stat"><div class="import-stat-val">${result.skipped_no_email}</div><div class="import-stat-lbl">No Email</div></div>
+            <div class="import-stat"><div class="import-stat-val">${result.skipped_dup}</div><div class="import-stat-lbl">Duplicate</div></div>
+          </div>
+          <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${result.inserted} contacts added to ${sourceKey.replace(/_/g,' ')} database.</p>`
+        : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(result.error || 'Upload failed')}</p>`}
+    </div>`;
+  }
+
+  return `<div class="import-form">
+    <div class="import-form-row" style="grid-template-columns:1fr;">
+      <div class="field">
+        <label>Select CSV file</label>
+        <input type="file" id="csv-input-${sourceKey}" accept=".csv,.txt" style="font-size:13px;padding:6px 0;" data-csv-source="${sourceKey}" />
+      </div>
+    </div>
+    ${previewHtml}
+    <div class="import-form-actions">
+      <button class="btn primary" id="csv-upload-btn-${sourceKey}"
+        ${!csvText || uploading ? 'disabled' : ''}>
+        ${uploading ? '<span class="spinner-inline"></span> Uploading&hellip;' : '&#8593; Upload to Database'}
+      </button>
+      <span class="import-hint">Columns auto-detected. Duplicates (same email) skipped.</span>
+    </div>
+  </div>
+  ${uploading ? '<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div><p class="muted" style="margin-top:8px;font-size:12px;">Uploading contacts&hellip;</p></div>' : ''}
+  ${resultHtml}`;
+}
+
 function renderImport() {
   const SPECIALTIES = [
     { value: 'physiotherapy',        label: 'Physiotherapy' },
@@ -1463,48 +1525,24 @@ function renderImport() {
     <div class="import-wrap">
       <h2 class="section-title">Import Contacts</h2>
 
-      <!-- Children's Homes Email Enrichment -->
+            <!-- Children's Homes CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
           <div class="import-card-icon">🏠</div>
           <div class="import-card-meta">
-            <div class="import-card-title">Children's Homes — Email Enrichment</div>
-            <div class="import-card-sub">Claude agent searches each home's website to find contact email addresses. 711 homes loaded, run multiple times to enrich batches of 50.</div>
+            <div class="import-card-title">Children's Homes — CSV Upload</div>
+            <div class="import-card-sub">Upload a CSV of children's home contacts. Auto-detects columns for name, email, phone, home name, town and region.</div>
           </div>
           <span class="import-badge live">Live</span>
         </div>
-        <div class="import-form">
-          <div class="import-form-row" style="grid-template-columns:1fr;">
-            <div class="field">
-              <label>Batch size per run</label>
-              <select class="select" id="enrich-limit">
-                <option value="20">20 homes</option>
-                <option value="50" selected>50 homes</option>
-              </select>
-            </div>
-          </div>
-          <div class="import-form-actions">
-            <button class="btn primary" id="run-enrich-btn" ${state.enrichRunning ? 'disabled' : ''}>
-              ${state.enrichRunning ? '<span class="spinner-inline"></span> Enriching&hellip;' : '&#9654; Run Enrichment'}
-            </button>
-            <span class="import-hint">Each run processes a batch and takes 2&ndash;5 minutes. Run multiple times to work through all 711 homes. Contacts already enriched are skipped automatically.</span>
-          </div>
+        <div class="import-card-template-hint" style="font-size:12px;color:var(--grey-500);margin:0 0 12px 0;padding:0 4px;">
+          Expected columns: <code>Home Name</code> <code>Contact Name</code> <code>Email</code> <code>Phone</code> <code>Town</code> <code>Region</code> &mdash;
+          <a href="data:text/csv;charset=utf-8,Home%20Name%2CContact%20Name%2CEmail%2CPhone%2CTown%2CRegion%0AExample%20Children's%20Home%2CJane%20Smith%2Cjane%40example.co.uk%2C01234%20567890%2CManchester%2CNorth%20West" download="childrens_homes_template.csv" style="color:var(--primary);">Download template</a>
         </div>
-        ${state.enrichRunning ? '<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div><p class="muted" style="margin-top:8px;font-size:12px;">Searching home websites for contact emails&hellip;</p></div>' : ''}
-        ${state.enrichResult ? `<div class="import-result ${state.enrichResult.success ? 'ok' : 'err'}">
-          ${state.enrichResult.success ? `
-            <div class="import-result-stats">
-              <div class="import-stat"><div class="import-stat-val">${state.enrichResult.emails_found || 0}</div><div class="import-stat-lbl">Emails found</div></div>
-              <div class="import-stat"><div class="import-stat-val">${state.enrichResult.not_found || 0}</div><div class="import-stat-lbl">Not found</div></div>
-              <div class="import-stat"><div class="import-stat-val">${state.enrichResult.enriched_total || 0}</div><div class="import-stat-lbl">Processed</div></div>
-            </div>
-            <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; Batch complete. Run again to process the next 50 homes.</p>`
-          : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.enrichResult.error || 'Error')}</p>`}
-        </div>` : ''}
+        ${renderCsvUploadCard('children_homes', state)}
       </div>
 
-
-      <!-- Agency Outreach CSV Upload -->
+<!-- Agency Outreach CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
           <div class="import-card-icon">📂</div>
@@ -1644,52 +1682,25 @@ function renderImport() {
       </div>
 
 
+            <!-- Care Homes CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
           <div class="import-card-icon">&#x1F3E1;</div>
           <div class="import-card-meta">
-            <div class="import-card-title">Care Homes &mdash; Registered Managers</div>
-            <div class="import-card-sub">Downloads CQC care directory and scrapes care home websites for registered manager emails. No AI credits needed.ng, dementia and supported living.</div>
+            <div class="import-card-title">Care Homes — CSV Upload</div>
+            <div class="import-card-sub">Upload a CSV of care home contacts. Auto-detects name, email, phone, home name, town and region. Tag your contacts as Care Home in the source dropdown.</div>
           </div>
           <span class="import-badge live">Live</span>
         </div>
-        <div class="import-form">
-          <div class="import-form-row">
-            <div class="field"><label>Region</label>
-              <select class="select" id="ch-region"><option value="">All England</option>
-                ${['North West','North East, Yorkshire and The Humber','West Midlands','East Midlands','East of England','South East','London','South West'].map(r => `<option value="${r}">${r}</option>`).join('')}
-              </select></div>
-            <div class="field"><label>Type</label>
-              <select class="select" id="ch-type">
-                <option value="all">All Types</option><option value="residential">Residential</option>
-                <option value="nursing">Nursing</option><option value="dementia">Dementia</option>
-                <option value="learning_disability">Learning Disability</option>
-              </select></div>
-            <div class="field"><label>Max</label>
-              <select class="select" id="ch-limit">
-                ${[10,20,30,50].map(n => `<option value="${n}" ${n===20?'selected':''}>${n}</option>`).join('')}
-              </select></div>
-          </div>
-          <div class="import-form-actions">
-            <button class="btn primary" id="run-carehome-btn" ${state.careHomeRunning?'disabled':''}>
-              ${state.careHomeRunning ? '<span class="spinner-inline"></span> Searching&hellip;' : '&#9654; Run Care Home Scraper'}
-            </button>
-            <span class="import-hint">Finds registered care home managers with emails. 2&ndash;4 minutes.</span>
-          </div>
+        <div class="import-card-template-hint" style="font-size:12px;color:var(--grey-500);margin:0 0 12px 0;padding:0 4px;">
+          Expected columns: <code>Home Name</code> <code>Manager Name</code> <code>Email</code> <code>Phone</code> <code>Town</code> <code>Region</code> &mdash;
+          <a href="data:text/csv;charset=utf-8,Home%20Name%2CManager%20Name%2CEmail%2CPhone%2CTown%2CRegion%0ASunrise%20Care%20Home%2CMargaret%20Jones%2Cmanager%40sunrise.co.uk%2C01234%20567890%2CManchester%2CNorth%20West" download="care_homes_template.csv" style="color:var(--primary);">Download template</a>
+          &nbsp;&middot;&nbsp; <a href="https://www.cqc.org.uk/about-us/transparency/using-cqc-data" target="_blank" rel="noopener" style="color:var(--primary);">Get data from CQC &#x2197;</a>
         </div>
-        ${state.careHomeRunning ? '<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>' : ''}
-        ${state.careHomeResult ? `<div class="import-result ${state.careHomeResult.success ? 'ok' : 'err'}">
-          ${state.careHomeResult.success
-            ? `<div class="import-result-stats">
-                <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.found}</div><div class="import-stat-lbl">Found</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.careHomeResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
-              </div>`
-            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.careHomeResult.error||'Error')}</p>`}
-        </div>` : ''}
+        ${renderCsvUploadCard('care_home', state)}
       </div>
 
-      <!-- Pharmacy Scraper -->
+<!-- Pharmacy Scraper -->
       <div class="import-card">
         <div class="import-card-header">
           <div class="import-card-icon">💊</div>
@@ -1733,48 +1744,22 @@ function renderImport() {
         </div>` : ''}
       </div>
 
-      <!-- Private Theatre Scraper -->
+            <!-- Private Theatres CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
-          <div class="import-card-icon">🏨</div>
+          <div class="import-card-icon">&#x1F3E8;</div>
           <div class="import-card-meta">
-            <div class="import-card-title">Private Hospitals — Theatre Managers</div>
-            <div class="import-card-sub">CQC independent acute hospital register + Claude agent finds theatre manager contacts</div>
+            <div class="import-card-title">Private Hospitals — Theatre Managers CSV</div>
+            <div class="import-card-sub">Upload a CSV of private hospital theatre manager contacts. Auto-detects name, email, phone, hospital name, town and region.</div>
           </div>
           <span class="import-badge live">Live</span>
         </div>
-        <div class="import-form">
-          <div class="import-form-row">
-            <div class="field"><label>Region</label>
-              <select class="select" id="pt-region">
-                <option value="">All England</option>
-                ${REGIONS.map(rg => `<option value="${rg}">${rg}</option>`).join('')}
-              </select>
-            </div>
-            <div class="field"><label>Max Contacts</label>
-              <select class="select" id="pt-limit">
-                ${[10,20,30,50].map(n => `<option value="${n}" ${n===20?'selected':''}>${n}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-          <div class="import-form-actions">
-            <button class="btn primary" id="run-theatre-btn" ${state.theatreRunning ? 'disabled' : ''}>
-              ${state.theatreRunning ? '<span class="spinner-inline"></span> Searching&hellip;' : '&#9654; Run Theatre Scraper'}
-            </button>
-            <span class="import-hint">Independent acute hospitals from CQC. Finds theatre manager / head of theatres contact. 2&ndash;5 min.</span>
-          </div>
+        <div class="import-card-template-hint" style="font-size:12px;color:var(--grey-500);margin:0 0 12px 0;padding:0 4px;">
+          Expected columns: <code>Hospital Name</code> <code>Contact Name</code> <code>Email</code> <code>Phone</code> <code>Town</code> <code>Region</code> &mdash;
+          <a href="data:text/csv;charset=utf-8,Hospital%20Name%2CContact%20Name%2CEmail%2CPhone%2CTown%2CRegion%0ACromwell%20Hospital%2CSarah%20Smith%2Ctheatres%40cromwell.co.uk%2C020%201234%205678%2CLondon%2CLondon" download="private_theatres_template.csv" style="color:var(--primary);">Download template</a>
+          &nbsp;&middot;&nbsp; <a href="https://www.phin.org.uk/find-a-hospital" target="_blank" rel="noopener" style="color:var(--primary);">Find hospitals via PHIN &#x2197;</a>
         </div>
-        ${state.theatreRunning ? `<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>` : ''}
-        ${state.theatreResult ? `<div class="import-result ${state.theatreResult.success ? 'ok' : 'err'}">
-          ${state.theatreResult.success
-            ? `<div class="import-result-stats">
-                <div class="import-stat"><div class="import-stat-val">${state.theatreResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.theatreResult.found}</div><div class="import-stat-lbl">Found</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.theatreResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.theatreResult.skipped_dup}</div><div class="import-stat-lbl">Dupe</div></div>
-              </div>`
-            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.theatreResult.error || 'Error')}</p>`}
-        </div>` : ''}
+        ${renderCsvUploadCard('private_theatre', state)}
       </div>
 
       ${placeholders.map(p => `
