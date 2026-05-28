@@ -306,18 +306,16 @@ async function loadSourceStatusCounts() {
   }
 
   const SOURCE_TAGS = {
-    gp_surgery:      null, // special case
+    gp_surgery:      null,
     children_homes:  'Ofsted Register',
     agency:          'Source: Agency Outreach',
     pharmacy:        'Source: Pharmacy Outreach',
     ahp:             'Source: NHS Jobs AHP',
     private_theatre: 'Source: Private Theatre',
     care_home:       'Source: Care Home',
-    care_home:       'Source: Care Home',
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
-    ahp:             'Source: NHS Jobs AHP',
     camhs:           'Source: CAMHS',
   };
 
@@ -331,9 +329,9 @@ async function loadSourceStatusCounts() {
         .not('notes', 'ilike', '%Source: Sterile%')
         .not('notes', 'ilike', '%Source: Private Theatre%')
         .not('notes', 'ilike', '%Source: NHS Staff Bank%')
-        .not('notes', 'ilike', '%Source: CAMHS%')
         .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
-        .not('notes', 'ilike', '%Source: Care Home%');
+        .not('notes', 'ilike', '%Source: Care Home%')
+        .not('notes', 'ilike', '%Source: CAMHS%');
     }
     const tag = SOURCE_TAGS[sf];
     if (tag) return q.ilike('notes', `%${tag}%`);
@@ -363,15 +361,20 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, gpRes, ahpRes, agencyRes, pharmRes, theatreRes, careRes] = await Promise.all([
+  const [allRes, chRes, ahpRes, agencyRes, pharmRes, theatreRes, careRes, gpRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: NHS Jobs AHP%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Agency Outreach%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Pharmacy Outreach%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Private Theatre%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true }).ilike('notes', '%Source: Care Home%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: NHS Jobs AHP%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: Agency Outreach%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: Pharmacy Outreach%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: Private Theatre%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: Care Home%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .not('notes', 'ilike', '%Ofsted Register%')
       .not('notes', 'ilike', '%Source: Agency%')
@@ -380,18 +383,19 @@ async function loadSourceCounts() {
       .not('notes', 'ilike', '%Source: Sterile%')
       .not('notes', 'ilike', '%Source: Private Theatre%')
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
-      .not('notes', 'ilike', '%Source: NHS Theatre%')
+      .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
+      .not('notes', 'ilike', '%Source: Care Home%')
       .not('notes', 'ilike', '%Source: CAMHS%'),
   ]);
   state.sourceCounts = {
-    all:            allRes.count    || 0,
-    gp_surgery:     gpRes.count     || 0,
-    children_homes: chRes.count     || 0,
-    ahp:            ahpRes.count    || 0,
-    agency:         agencyRes.count || 0,
-    pharmacy:       pharmRes.count  || 0,
+    all:             allRes.count     || 0,
+    gp_surgery:      gpRes.count      || 0,
+    children_homes:  chRes.count      || 0,
+    ahp:             ahpRes.count     || 0,
+    agency:          agencyRes.count  || 0,
+    pharmacy:        pharmRes.count   || 0,
     private_theatre: theatreRes.count || 0,
-    care_home: careRes.count || 0,
+    care_home:       careRes.count    || 0,
   };
 }
 
@@ -421,16 +425,15 @@ async function loadContactsPage() {
   } else if (sf === 'gp_surgery') {
     query = query
       .not('notes', 'ilike', '%Ofsted Register%')
-      .not('notes', 'ilike', '%Source: Agency Outreach%')
-      .not('notes', 'ilike', '%Source: Pharmacy Outreach%')
-      .not('notes', 'ilike', '%Source: BMS Outreach%')
-      .not('notes', 'ilike', '%Source: Sterile Services%')
+      .not('notes', 'ilike', '%Source: Agency%')
+      .not('notes', 'ilike', '%Source: Pharmacy%')
+      .not('notes', 'ilike', '%Source: BMS%')
+      .not('notes', 'ilike', '%Source: Sterile%')
       .not('notes', 'ilike', '%Source: Private Theatre%')
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
-      .not('notes', 'ilike', '%Source: NHS Theatre%')
-      .not('notes', 'ilike', '%Source: CAMHS%')
       .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
-      .not('notes', 'ilike', '%Source: Care Home%');
+      .not('notes', 'ilike', '%Source: Care Home%')
+      .not('notes', 'ilike', '%Source: CAMHS%');
   } else if (sf === 'ahp') {
     query = query.ilike('notes', '%Source: NHS Jobs AHP%');
     if (state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
@@ -448,8 +451,6 @@ async function loadContactsPage() {
     query = query.ilike('notes', '%Source: Sterile Services%');
   } else if (sf === 'nhs_staffbank') {
     query = query.ilike('notes', '%Source: NHS Staff Bank%');
-  } else if (sf === 'care_home') {
-    query = query.ilike('notes', '%Source: Care Home%');
   } else if (sf === 'camhs') {
     query = query.ilike('notes', '%Source: CAMHS%');
   } else if (sf === 'care_home') {
@@ -694,18 +695,14 @@ function renderFollowUpDate(d) {
 
 function renderDatabase() {
   const SOURCES = [
-    { key: 'all',             label: 'All Sources',        live: true  },
-    { key: 'gp_surgery',      label: 'GP Surgeries',       live: true  },
-    { key: 'children_homes',  label: "Children's Homes",   live: true  },
-    { key: 'agency',          label: 'Agency Outreach',    live: true  },
-    { key: 'ahp',             label: 'NHS Jobs AHP',       live: true  },
-    { key: 'care_home',       label: 'Care Homes',         live: true  },
-    { key: 'pharmacy',        label: 'Pharmacy',           live: true  },
-    { key: 'bms',             label: 'BMS',                live: false },
-    { key: 'sterile',         label: 'Sterile Services',   live: false },
-    { key: 'private_theatre', label: 'Private Theatres',   live: true  },
-    { key: 'nhs_staffbank',   label: 'NHS Staff Banks',    live: false },
-    { key: 'camhs',           label: 'CAMHS',              live: false },
+    { key: 'all',             label: 'All Sources'       },
+    { key: 'gp_surgery',      label: 'GP Surgeries'      },
+    { key: 'children_homes',  label: "Children's Homes"  },
+    { key: 'agency',          label: 'Agency Outreach'   },
+    { key: 'ahp',             label: 'NHS Jobs AHP'      },
+    { key: 'care_home',       label: 'Care Homes'        },
+    { key: 'pharmacy',        label: 'Pharmacy'          },
+    { key: 'private_theatre', label: 'Private Theatres'  },
   ];
 
   const total = state.totalRows;
@@ -717,16 +714,16 @@ function renderDatabase() {
 
   return `
     <div class="source-tabs">
-      ${SOURCES.map(s => `
-        <button class="source-tab${state.sourceFilter === s.key ? ' active' : ''}${!s.live ? ' soon' : ''}"
-          data-source="${s.key}"${!s.live ? ' disabled title="Coming soon"' : ''}>
+      ${SOURCES.map(s => {
+        const cnt = state.sourceCounts[s.key];
+        const isEmpty = cnt === 0;
+        const isActive = state.sourceFilter === s.key;
+        return `<button class="source-tab${isActive ? ' active' : ''}${isEmpty ? ' source-empty' : ''}" data-source="${s.key}">
           ${esc(s.label)}
-          ${s.live && state.sourceCounts[s.key] != null
-            ? `<span class="source-count">${Number(state.sourceCounts[s.key]).toLocaleString()}</span>`
-            : !s.live ? '<span class="source-soon">soon</span>' : ''}
-          ${s.key === 'children_homes' && s.live ? '<span class="source-warn" title="Most have placeholder emails — run enrichment">⚠</span>' : ''}
-        </button>
-      `).join('')}
+          ${cnt != null ? `<span class="source-count${isEmpty ? ' zero' : ''}">${Number(cnt).toLocaleString()}</span>` : ''}
+          ${s.key === 'children_homes' && cnt > 0 ? '<span class="source-warn" title="Most have placeholder emails — run enrichment from Import tab">⚠</span>' : ''}
+        </button>`;
+      }).join('')}
     </div>
 
     ${selN > 0 ? `
@@ -784,10 +781,18 @@ function renderDatabase() {
       ].map(s => `<button class="stage-tab${state.dbStage===s.k?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
     </div>` : ''}
     <div class="subtabs">
-      ${state.sourceFilter !== 'all' ? `<div class="source-filter-label">Showing: <strong>${state.sourceFilter.replace(/_/g,' ')}</strong></div>` : ''}
-      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">Leads<span class="count">${state.sourceFilter !== 'all' ? (state.sourceStatusCounts.lead ?? 0) : state.counts.lead}</span></div>
-      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">Live<span class="count">${state.sourceFilter !== 'all' ? (state.sourceStatusCounts.live ?? 0) : state.counts.live}</span></div>
-      <div class="subtab ${state.subTab === 'unsubscribed' ? 'active' : ''}" data-subtab="unsubscribed">Unsubscribes<span class="count">${state.sourceFilter !== 'all' ? (state.sourceStatusCounts.unsubscribed ?? 0) : state.counts.unsubscribed}</span></div>
+      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">
+        Leads
+        <span class="count">${state.sourceStatusCounts.lead !== null ? state.sourceStatusCounts.lead.toLocaleString() : state.counts.lead.toLocaleString()}</span>
+      </div>
+      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">
+        Live
+        <span class="count">${state.sourceStatusCounts.live !== null ? state.sourceStatusCounts.live.toLocaleString() : state.counts.live.toLocaleString()}</span>
+      </div>
+      <div class="subtab ${state.subTab === 'unsubscribed' ? 'active' : ''}" data-subtab="unsubscribed">
+        Unsubscribes
+        <span class="count">${state.sourceStatusCounts.unsubscribed !== null ? state.sourceStatusCounts.unsubscribed.toLocaleString() : state.counts.unsubscribed.toLocaleString()}</span>
+      </div>
     </div>
     <div class="toolbar">
       <input class="search" id="search-input" placeholder="Search by name, surgery, email, town, postcode..." value="${esc(state.search)}" />
@@ -2568,7 +2573,8 @@ function bindEvents() {
       state.page = 1;
       state.search = '';
       state.regionFilter = '';
-      if (t.dataset.subtab !== 'lead') { state.sourceFilter = 'all'; state.sourceStatusCounts = { lead: null, live: null, unsubscribed: null }; }
+      // Keep sourceFilter — don't reset it when switching between Lead/Live/Unsub
+      if (false) { state.sourceFilter = 'all'; state.sourceStatusCounts = { lead: null, live: null, unsubscribed: null }; }
       await loadContactsPage();
       render();
     };
@@ -2618,9 +2624,11 @@ function bindEvents() {
   });
 
   // Source filter tabs
-  document.querySelectorAll('.source-tab:not([disabled])').forEach(t => {
+  document.querySelectorAll('.source-tab').forEach(t => {
     t.onclick = async () => {
       state.sourceFilter = t.dataset.source;
+      state.subTab = 'lead';
+      state.dbStage = 'all';
       state.ahpSpecialtyFilter = 'all';
       state.selected = new Set();
       state.page = 1;
