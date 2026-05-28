@@ -3242,3 +3242,53 @@ async function exportAllAsCsv() {
     render();
   }
 })();
+  // Smart CSV upload cards — Children's Homes, Care Homes, Private Theatres
+  ['children_homes', 'care_home', 'private_theatre'].forEach(function(src) {
+    var inp = document.getElementById('csv-input-' + src);
+    if (inp) {
+      inp.onchange = async function() {
+        var file = this.files && this.files[0];
+        if (!file) return;
+        var text = await file.text();
+        state['csvText_' + src] = text;
+        state['csvPreview_' + src] = null;
+        state['csvResult_' + src] = null;
+        try {
+          var sess = (await sb.auth.getSession()).data.session;
+          var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess.access_token },
+            body: JSON.stringify({ csv: text, source: src, preview: true }),
+          });
+          state['csvPreview_' + src] = await res.json();
+        } catch(e) { console.error('Preview error', e); }
+        render();
+      };
+    }
+    var btn = document.getElementById('csv-upload-btn-' + src);
+    if (btn) {
+      btn.onclick = async function() {
+        var text = state['csvText_' + src];
+        if (!text) return;
+        state['csvUploading_' + src] = true;
+        state['csvResult_' + src] = null;
+        render();
+        try {
+          var sess = (await sb.auth.getSession()).data.session;
+          var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess.access_token },
+            body: JSON.stringify({ csv: text, source: src }),
+          });
+          state['csvResult_' + src] = await res.json();
+          if (state['csvResult_' + src] && state['csvResult_' + src].success) {
+            await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+            toast('\u2713 ' + (state['csvResult_' + src].inserted || 0) + ' contacts added');
+          }
+        } catch(e) { state['csvResult_' + src] = { success: false, error: e.message }; }
+        state['csvUploading_' + src] = false;
+        render();
+      };
+    }
+  });
+
