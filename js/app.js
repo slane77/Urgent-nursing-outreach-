@@ -766,6 +766,7 @@ function renderDatabase() {
         {k:'paramedic',        l:'Paramedic'},
         {k:'prosthetics',      l:'Prosthetics'},
         {k:'pharmacy',         l:'Pharmacy (NHS)'},
+        {k:'gp_surgery',      l:'GP Surgeries'},
       ].map(s => `<button class="stage-tab${state.ahpSpecialtyFilter===s.k?' active':''}" data-specialty="${s.k}">${s.l}</button>`).join('')}
     </div>` : ''}
 
@@ -1430,6 +1431,7 @@ function renderImport() {
     { value: 'paramedic',            label: 'Paramedic' },
     { value: 'prosthetics',          label: 'Prosthetics & Orthotics' },
     { value: 'pharmacy',             label: 'Pharmacy (NHS)' },
+    { value: 'gp_surgery',           label: 'GP Surgeries (Practice Managers)' },
   ];
   const BANDS = [
     { value: '6', label: 'Band 6+' },
@@ -1963,8 +1965,8 @@ async function loadResponsesData() {
   try {
     const [evRes, replRes] = await Promise.all([
       sb.from('email_events')
-        .select('id, event_type, email, occurred_at, link_url, contacts(first_name, last_name, org)')
-        .order('occurred_at', { ascending: false }).limit(50),
+        .select('id, event_type, email, occurred_at, link_url, event_data, contacts(first_name, last_name, org)')
+        .order('occurred_at', { ascending: false }).limit(200),
       sb.from('replies')
         .select('id, from_email, from_name, subject, body_preview, received_at, read, contacts(first_name, last_name, org)')
         .order('received_at', { ascending: false }).limit(50),
@@ -2043,12 +2045,43 @@ function renderResponses() {
   var EVENT_CLASS = { opened:'event-open', clicked:'event-click', hard_bounce:'event-bounce', soft_bounce:'event-bounce', unsubscribed:'event-unsub', complaint:'event-bounce' };
 
   // Stat cards
+  var bounceEvents = events.filter(function(e) { return e.event_type === 'hard_bounce' || e.event_type === 'soft_bounce'; });
+
   var stats = '<div class="dash-stats" style="margin-bottom:16px;">'
     + '<div class="dash-stat"><div class="dash-stat-val">' + (s.unread_replies || 0) + '</div><div class="dash-stat-lbl">Unread replies</div><div class="dash-stat-sub">' + replies.length + ' total</div></div>'
     + '<div class="dash-stat"><div class="dash-stat-val">' + (s.total_opens || 0) + '</div><div class="dash-stat-lbl">Email opens</div><div class="dash-stat-sub">Via Brevo</div></div>'
     + '<div class="dash-stat"><div class="dash-stat-val">' + (s.total_clicks || 0) + '</div><div class="dash-stat-lbl">Link clicks</div><div class="dash-stat-sub">' + (s.total_unsubscribed || 0) + ' unsubscribed</div></div>'
-    + '<div class="dash-stat' + (s.total_bounces > 0 ? ' dash-stat-alert' : '') + '"><div class="dash-stat-val">' + (s.total_bounces || 0) + '</div><div class="dash-stat-lbl">Bounces</div><div class="dash-stat-sub">' + (s.total_bounces > 0 ? 'Check contacts' : 'All good') + '</div></div>'
+    + '<div class="dash-stat' + (bounceEvents.length > 0 ? ' dash-stat-alert' : '') + '"><div class="dash-stat-val">' + bounceEvents.length + '</div><div class="dash-stat-lbl">Bounces</div><div class="dash-stat-sub">' + (bounceEvents.length > 0 ? 'Review needed' : 'All good') + '</div></div>'
     + '</div>';
+
+  // Bounce review panel
+  var bounceHtml = '';
+  if (bounceEvents.length > 0) {
+    var bounceRows = bounceEvents.map(function(ev) {
+      var c = ev.contacts || {};
+      var name = esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || esc(ev.email);
+      var org = esc(c.org || '');
+      var reason = ev.event_data ? (ev.event_data.reason || ev.event_data.error || '') : '';
+      var when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleDateString('en-GB') : '';
+      return '<tr>'
+        + '<td>' + name + '</td>'
+        + '<td>' + org + '</td>'
+        + '<td class="ellipsis" style="max-width:200px;" title="' + esc(ev.email) + '">' + esc(ev.email) + '</td>'
+        + '<td><span class="event-' + (ev.event_type === 'hard_bounce' ? 'bounce' : 'default') + '" style="padding:2px 6px;border-radius:4px;font-size:11px;">'
+          + esc(ev.event_type.replace('_',' ')) + '</span></td>'
+        + '<td class="muted" style="font-size:11px;max-width:200px;" title="' + esc(String(reason)) + '">' + esc(String(reason).slice(0,80)) + '</td>'
+        + '<td class="muted" style="font-size:11px;">' + when + '</td>'
+        + '</tr>';
+    }).join('');
+    bounceHtml = '<div class="responses-panel" style="margin-bottom:16px;grid-column:1/-1;">'
+      + '<div class="responses-panel-header"><h3>&#x26A0; Bounced Emails (' + bounceEvents.length + ')</h3>'
+      + '<span class="muted" style="font-size:11px;">Hard bounces = invalid address. Search for updated contact details then edit the contact.</span></div>'
+      + '<div style="overflow-x:auto;">'
+      + '<table class="table"><thead><tr>'
+      + '<th>Contact</th><th>Organisation</th><th>Email</th><th>Type</th><th>Reason</th><th>Date</th>'
+      + '</tr></thead><tbody>' + bounceRows + '</tbody></table>'
+      + '</div></div>';
+  }
 
   // M365 sync panel
   var syncResult = '';
@@ -2121,6 +2154,7 @@ function renderResponses() {
 
   return '<div class="responses-wrap">'
     + stats
+    + bounceHtml
     + '<div class="responses-cols">'
     + '<div class="responses-panel">'
     + '<div class="responses-panel-header"><h3>&#x1F4EC; Replies from Outlook</h3>'
