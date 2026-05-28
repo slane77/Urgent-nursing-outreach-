@@ -1625,7 +1625,7 @@ function renderImport() {
             <div class="import-result-stats">
               <div class="import-stat"><div class="import-stat-val">${r.inserted}</div><div class="import-stat-lbl">Added</div></div>
               <div class="import-stat"><div class="import-stat-val">${r.found}</div><div class="import-stat-lbl">Found</div></div>
-              <div class="import-stat"><div class="import-stat-val">${r.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
+              <div class="import-stat"><div class="import-stat-val">${r.jobs_checked||r.skipped_no_email||0}</div><div class="import-stat-lbl">${r.jobs_checked ? 'Checked' : 'No email'}</div></div>
               <div class="import-stat"><div class="import-stat-val">${r.skipped_dup}</div><div class="import-stat-lbl">Duplicate</div></div>
             </div>
             <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${r.inserted} new ${(r.specialty||'').replace('_',' ')} contacts added &mdash; switch to Database &rarr; All Sources to view them</p>
