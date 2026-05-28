@@ -629,8 +629,8 @@ async function bootApp() {
   await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
   await loadContactsPage();
   render();
-  // Load dashboard data in background (non-blocking)
   loadDashboard();
+  loadUserProfile().then(function() { render(); });
 }
 
 function render() {
@@ -2141,6 +2141,45 @@ function renderResponses() {
     + '</div></div>';
 }
 
+
+async function loadUserProfile() {
+  try {
+    var sess = (await sb.auth.getSession()).data.session;
+    if (!sess) return;
+    var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess.access_token },
+      body: JSON.stringify({ action: 'me' }),
+    });
+    if (!res.ok) return;
+    var data = await res.json();
+    state.userProfile = data.profile || null;
+    if (data.profile) {
+      state.senderEmail = data.profile.sender_email || '';
+      state.senderName  = data.profile.sender_name  || '';
+    }
+  } catch(e) { console.warn('Profile load (non-fatal):', e.message); }
+}
+
+async function saveSenderDetails() {
+  state.senderSaving = true; state.senderSaved = false; render();
+  try {
+    var sess = (await sb.auth.getSession()).data.session;
+    var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess.access_token },
+      body: JSON.stringify({ action: 'update_sender', sender_email: state.senderEmail, sender_name: state.senderName }),
+    });
+    var data = await res.json();
+    if (data.success) {
+      state.senderSaved = true;
+      toast('Sender details saved');
+      setTimeout(function() { state.senderSaved = false; render(); }, 3000);
+    } else { toast('Error: ' + (data.error || 'Unknown')); }
+  } catch(e) { toast('Error: ' + e.message); }
+  state.senderSaving = false; render();
+}
+
 function renderSettings() {
   var isAdmin = !state.userProfile || state.userProfile.role === 'admin';
 
@@ -2677,7 +2716,44 @@ function bindEvents() {
   if (exportCsvAll) exportCsvAll.onclick = exportAllAsCsv;
 
   // Sign out buttons (both in header and settings)
-  document.querySelectorAll('#sign-out-btn, #sign-out-btn-settings').forEach(b => {
+  // Sender details bindings
+  var snd_name = $('#sender-name-input'); if (snd_name) snd_name.oninput = function(e) { state.senderName = e.target.value; };
+  var snd_email = $('#sender-email-input'); if (snd_email) snd_email.oninput = function(e) { state.senderEmail = e.target.value; };
+  var snd_save = $('#save-sender-btn'); if (snd_save) snd_save.onclick = function() { if (!state.senderSaving) saveSenderDetails(); };
+  // Team invite bindings
+  var inv_name = $('#invite-name'); if (inv_name) inv_name.oninput = function(e) { state.inviteName = e.target.value; };
+  var inv_email = $('#invite-email'); if (inv_email) inv_email.oninput = function(e) { state.inviteEmail = e.target.value; };
+  var inv_sn = $('#invite-sender-name'); if (inv_sn) inv_sn.oninput = function(e) { state.inviteSenderName = e.target.value; };
+  var inv_se = $('#invite-sender-email'); if (inv_se) inv_se.oninput = function(e) { state.inviteSenderEmail = e.target.value; };
+  var inv_btn = $('#send-invite-btn'); if (inv_btn) inv_btn.onclick = function() { if (state.inviteEmail) sendInvite(); };
+  document.querySelectorAll('.invite-source-cb').forEach(function(cb) {
+    cb.onchange = function() {
+      if (cb.checked) { if (state.inviteSources.indexOf(cb.value) < 0) state.inviteSources.push(cb.value); }
+      else { state.inviteSources = state.inviteSources.filter(function(s) { return s !== cb.value; }); }
+    };
+  });
+  document.querySelectorAll('[data-delete-user]').forEach(function(btn) {
+    btn.onclick = async function() {
+      if (!confirm('Remove ' + btn.dataset.userEmail + ' from the team?')) return;
+      var sess2 = (await sb.auth.getSession()).data.session;
+      await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess2.access_token },
+        body: JSON.stringify({ action: 'delete', target_user_id: btn.dataset.deleteUser }),
+      });
+      await loadTeamUsers();
+    };
+  });
+  // M365 responses bindings
+  var m365_btn = $('#sync-m365-btn'); if (m365_btn) m365_btn.onclick = function() { if (!state.m365Syncing) syncM365(); };
+  var m365_days = $('#m365-days'); if (m365_days) m365_days.onchange = function(e) { state.m365DaysBack = parseInt(e.target.value); };
+  var m365_save = $('#save-m365-client-id'); if (m365_save) m365_save.onclick = function() {
+    var inp = $('#m365-client-id-input');
+    if (inp && inp.value) { state.m365ClientId = inp.value.trim(); state.m365ShowClientIdInput = false; syncM365(); }
+  };
+  document.querySelectorAll('.reply-read-btn').forEach(function(btn) {
+    btn.onclick = function() { markReplyRead(btn.dataset.replyId); };
+  });
+    document.querySelectorAll('#sign-out-btn, #sign-out-btn-settings').forEach(b => {
     b.onclick = signOut;
   });
 }
