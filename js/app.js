@@ -89,6 +89,8 @@ const state = {
   m365ShowClientIdInput: false,
   m365ClientId: '',
   m365DaysBack: 30,
+  expandedReplyId: null,
+  addFromReplyLoading: false,
   agencyCsvText: null,
   agencyCsvPreview: null,
   agencyCsvSource: 'gp_surgery',
@@ -1963,25 +1965,30 @@ function renderDashboard() {
 async function loadResponsesData() {
   state.responsesLoading = true; render();
   try {
-    const [evRes, replRes] = await Promise.all([
+    const [evRes, replRes, unsubRes] = await Promise.all([
       sb.from('email_events')
         .select('id, event_type, email, occurred_at, link_url, event_data, contacts(first_name, last_name, org)')
         .order('occurred_at', { ascending: false }).limit(200),
       sb.from('replies')
-        .select('id, from_email, from_name, subject, body_preview, received_at, read, contacts(first_name, last_name, org)')
+        .select('id, from_email, from_name, subject, body_preview, full_body, received_at, read, contacts(first_name, last_name, org, email)')
         .order('received_at', { ascending: false }).limit(50),
+      sb.from('contacts')
+        .select('id, first_name, last_name, org, email, notes, status')
+        .eq('status', 'unsubscribed')
+        .order('updated_at', { ascending: false }).limit(100),
     ]);
     const events  = evRes.data   || [];
     const replies = replRes.data || [];
+    const unsubs  = unsubRes.data || [];
     const unread  = replies.filter(function(r) { return !r.read; }).length;
+    const bounceEvents = events.filter(function(e) { return e.event_type === 'hard_bounce' || e.event_type === 'soft_bounce'; });
     state.responsesData = {
-      events: events,
-      replies: replies,
+      events, replies, unsubs,
       stats: {
         total_opens: events.filter(function(e) { return e.event_type === 'opened'; }).length,
         total_clicks: events.filter(function(e) { return e.event_type === 'clicked'; }).length,
-        total_bounces: events.filter(function(e) { return e.event_type === 'hard_bounce' || e.event_type === 'soft_bounce'; }).length,
-        total_unsubscribed: events.filter(function(e) { return e.event_type === 'unsubscribed'; }).length,
+        total_bounces: bounceEvents.length,
+        total_unsubscribed: unsubs.length,
         unread_replies: unread,
       },
     };
@@ -2028,6 +2035,35 @@ async function markReplyRead(replyId) {
   render();
 }
 
+
+async function addContactFromReply(replyId) {
+  state.addFromReplyLoading = replyId; render();
+  try {
+    const reply = state.responsesData.replies.find(r => r.id === replyId);
+    if (!reply) throw new Error('Reply not found');
+    const email = reply.from_email || '';
+    if (!email) throw new Error('No email address in this reply');
+    // Check if already in DB
+    const { data: existing } = await sb.from('contacts').select('id').eq('email', email.toLowerCase()).single();
+    if (existing) {
+      toast('Contact already in database');
+    } else {
+      const nameParts = (reply.from_name || '').split(' ');
+      await sb.from('contacts').insert({
+        first_name: nameParts[0] || '',
+        last_name: nameParts.slice(1).join(' ') || '',
+        email: email.toLowerCase().trim(),
+        org: reply.contacts?.org || '',
+        status: 'lead',
+        notes: 'Source: Added from email reply | ' + new Date().toISOString().split('T')[0],
+      });
+      toast('✓ Contact added to database');
+      await loadStatusCounts();
+    }
+  } catch(e) { toast('Error: ' + e.message); }
+  state.addFromReplyLoading = null; render();
+}
+
 function renderResponses() {
   if (state.responsesLoading || !state.responsesData) {
     return '<div class="dash-loading"><div class="dash-spinner"></div><p>Loading responses&hellip;</p></div>';
@@ -2040,57 +2076,89 @@ function renderResponses() {
   var s = d.stats || {};
   var replies = d.replies || [];
   var events  = d.events  || [];
+  var unsubs  = d.unsubs  || [];
 
-  var EVENT_ICON  = { opened:'&#x1F441;', clicked:'&#x1F5B1;', delivered:'&#x2713;', hard_bounce:'&#x26A0;', soft_bounce:'&#x21A9;', unsubscribed:'&#x2296;', complaint:'&#x1F6AB;' };
-  var EVENT_CLASS = { opened:'event-open', clicked:'event-click', hard_bounce:'event-bounce', soft_bounce:'event-bounce', unsubscribed:'event-unsub', complaint:'event-bounce' };
+  var EVENT_ICON  = { opened:'&#x1F441;', clicked:'&#x1F5B1;', delivered:'&#x2713;', hard_bounce:'&#x26A0;', soft_bounce:'&#x26A0;', unsubscribed:'&#x1F6AB;', complaint:'&#x26A0;' };
+  var EVENT_CLASS = { opened:'event-open', clicked:'event-click', hard_bounce:'event-bounce', soft_bounce:'event-bounce', unsubscribed:'event-bounce', complaint:'event-bounce' };
 
-  // Stat cards
   var bounceEvents = events.filter(function(e) { return e.event_type === 'hard_bounce' || e.event_type === 'soft_bounce'; });
 
+  // ── Stat cards ────────────────────────────────────────────────────────────
   var stats = '<div class="dash-stats" style="margin-bottom:16px;">'
-    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.unread_replies || 0) + '</div><div class="dash-stat-lbl">Unread replies</div><div class="dash-stat-sub">' + replies.length + ' total</div></div>'
-    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.total_opens || 0) + '</div><div class="dash-stat-lbl">Email opens</div><div class="dash-stat-sub">Via Brevo</div></div>'
-    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.total_clicks || 0) + '</div><div class="dash-stat-lbl">Link clicks</div><div class="dash-stat-sub">' + (s.total_unsubscribed || 0) + ' unsubscribed</div></div>'
-    + '<div class="dash-stat' + (bounceEvents.length > 0 ? ' dash-stat-alert' : '') + '"><div class="dash-stat-val">' + bounceEvents.length + '</div><div class="dash-stat-lbl">Bounces</div><div class="dash-stat-sub">' + (bounceEvents.length > 0 ? 'Review needed' : 'All good') + '</div></div>'
+    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.unread_replies || 0) + '</div><div class="dash-stat-lbl">UNREAD REPLIES<br><span style="font-size:10px;font-weight:400;">' + replies.length + ' total</span></div></div>'
+    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.total_opens || 0) + '</div><div class="dash-stat-lbl">EMAIL OPENS<br><span style="font-size:10px;font-weight:400;">Via Brevo</span></div></div>'
+    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.total_clicks || 0) + '</div><div class="dash-stat-lbl">LINK CLICKS<br><span style="font-size:10px;font-weight:400;">' + (s.total_unsubscribed || 0) + ' unsubscribed</span></div></div>'
+    + '<div class="dash-stat' + (bounceEvents.length > 0 ? ' dash-stat-alert' : '') + '"><div class="dash-stat-val">' + bounceEvents.length + '</div><div class="dash-stat-lbl">BOUNCES<br><span style="font-size:10px;font-weight:400;">' + (bounceEvents.length === 0 ? 'All good' : bounceEvents.filter(function(e){return e.event_type==='hard_bounce';}).length + ' hard, ' + bounceEvents.filter(function(e){return e.event_type==='soft_bounce';}).length + ' soft') + '</span></div></div>'
     + '</div>';
 
-  // Bounce review panel
-  var bounceHtml = '';
+  // ── Bounce panel ─────────────────────────────────────────────────────────
+  var bounceHtml = '<div class="responses-panel" style="margin-bottom:16px;grid-column:1/-1;">'
+    + '<div class="responses-panel-header"><h3>&#x26A0; Bounced Emails (' + bounceEvents.length + ')</h3>'
+    + (bounceEvents.length === 0 ? '<span class="muted" style="font-size:11px;">None yet — bounces will appear here automatically once Brevo webhook is active</span>' : '<span class="muted" style="font-size:11px;">Hard bounce = invalid address. Soft bounce = temporary failure.</span>')
+    + '</div>';
   if (bounceEvents.length > 0) {
     var bounceRows = bounceEvents.map(function(ev) {
       var c = ev.contacts || {};
       var name = esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || esc(ev.email);
       var org = esc(c.org || '');
-      var reason = ev.event_data ? (ev.event_data.reason || ev.event_data.error || '') : '';
+      var reason = ev.event_data ? (ev.event_data.reason || ev.event_data.error || ev.event_data.description || '') : '';
       var when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleDateString('en-GB') : '';
+      var typeLabel = ev.event_type === 'hard_bounce' ? '<span style="background:#FEF2F2;color:#DC2626;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;">HARD</span>'
+                    : '<span style="background:#FFF7ED;color:#EA580C;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;">SOFT</span>';
       return '<tr>'
-        + '<td>' + name + '</td>'
-        + '<td>' + org + '</td>'
-        + '<td class="ellipsis" style="max-width:200px;" title="' + esc(ev.email) + '">' + esc(ev.email) + '</td>'
-        + '<td><span class="event-' + (ev.event_type === 'hard_bounce' ? 'bounce' : 'default') + '" style="padding:2px 6px;border-radius:4px;font-size:11px;">'
-          + esc(ev.event_type.replace('_',' ')) + '</span></td>'
-        + '<td class="muted" style="font-size:11px;max-width:200px;" title="' + esc(String(reason)) + '">' + esc(String(reason).slice(0,80)) + '</td>'
+        + '<td style="font-weight:500;">' + name + '</td>'
+        + '<td class="muted">' + org + '</td>'
+        + '<td style="font-size:12px;color:var(--grey-600);">' + esc(ev.email) + '</td>'
+        + '<td>' + typeLabel + '</td>'
+        + '<td class="muted" style="font-size:11px;max-width:220px;" title="' + esc(String(reason)) + '">' + esc(String(reason).slice(0,60)) + (String(reason).length > 60 ? '&hellip;' : '') + '</td>'
         + '<td class="muted" style="font-size:11px;">' + when + '</td>'
         + '</tr>';
     }).join('');
-    bounceHtml = '<div class="responses-panel" style="margin-bottom:16px;grid-column:1/-1;">'
-      + '<div class="responses-panel-header"><h3>&#x26A0; Bounced Emails (' + bounceEvents.length + ')</h3>'
-      + '<span class="muted" style="font-size:11px;">Hard bounces = invalid address. Search for updated contact details then edit the contact.</span></div>'
-      + '<div style="overflow-x:auto;">'
-      + '<table class="table"><thead><tr>'
+    bounceHtml += '<div style="overflow-x:auto;"><table class="table"><thead><tr>'
       + '<th>Contact</th><th>Organisation</th><th>Email</th><th>Type</th><th>Reason</th><th>Date</th>'
-      + '</tr></thead><tbody>' + bounceRows + '</tbody></table>'
-      + '</div></div>';
+      + '</tr></thead><tbody>' + bounceRows + '</tbody></table></div>';
+  } else {
+    bounceHtml += '<p class="muted" style="font-size:12px;padding:8px 0;">Set up the Brevo webhook to start tracking bounces automatically:<br>'
+      + 'Brevo &#x2192; Transactional &#x2192; Settings &#x2192; Webhooks &#x2192; Add URL:<br>'
+      + '<code style="font-size:10px;background:var(--grey-100);padding:2px 6px;border-radius:3px;">https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/brevo-webhook</code><br>'
+      + 'Tick: Delivered, Opened, Clicked, Soft bounce, Hard bounce, Unsubscribed</p>';
+  }
+  bounceHtml += '</div>';
+
+  // ── Unsubscribed panel ────────────────────────────────────────────────────
+  var unsubHtml = '';
+  if (unsubs.length > 0) {
+    var unsubRows = unsubs.map(function(c) {
+      var name = esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || esc(c.email);
+      var source = '';
+      if (c.notes) {
+        var m = c.notes.match(/Unsubscribed[^|]+/i);
+        if (m) source = m[0].trim();
+      }
+      return '<tr>'
+        + '<td style="font-weight:500;">' + name + '</td>'
+        + '<td class="muted">' + esc(c.org || '') + '</td>'
+        + '<td style="font-size:12px;color:var(--grey-600);">' + esc(c.email || '') + '</td>'
+        + '<td class="muted" style="font-size:11px;">' + esc(source) + '</td>'
+        + '</tr>';
+    }).join('');
+    unsubHtml = '<div class="responses-panel" style="margin-bottom:16px;grid-column:1/-1;">'
+      + '<div class="responses-panel-header"><h3>&#x1F6AB; Unsubscribed (' + unsubs.length + ')</h3>'
+      + '<span class="muted" style="font-size:11px;">Auto-marked — these contacts are excluded from all future sends</span></div>'
+      + '<div style="overflow-x:auto;"><table class="table"><thead><tr>'
+      + '<th>Contact</th><th>Organisation</th><th>Email</th><th>Source</th>'
+      + '</tr></thead><tbody>' + unsubRows + '</tbody></table></div>'
+      + '</div>';
   }
 
-  // M365 sync panel
+  // ── M365 sync panel ───────────────────────────────────────────────────────
   var syncResult = '';
   if (state.m365SyncResult && !state.m365Syncing) {
-    syncResult = '<div class="import-result ' + (state.m365SyncResult.success ? 'ok' : 'err') + '" style="margin-bottom:12px;">'
+    syncResult = '<div class="import-result ' + (state.m365SyncResult.success ? 'ok' : 'err') + '" style="margin-bottom:10px;">'
       + (state.m365SyncResult.success
          ? '<p style="font-size:13px;">&#10003; Synced ' + state.m365SyncResult.synced + ' new repl' + (state.m365SyncResult.synced === 1 ? 'y' : 'ies')
            + ' (' + state.m365SyncResult.total_messages + ' emails checked)'
-           + (state.m365SyncResult.auto_unsubscribed > 0 ? ' &mdash; ' + state.m365SyncResult.auto_unsubscribed + ' auto-unsubscribed' : '') + '</p>'
+           + (state.m365SyncResult.auto_unsubscribed > 0 ? ' &mdash; <strong>' + state.m365SyncResult.auto_unsubscribed + ' auto-unsubscribed</strong>' : '') + '</p>'
          : '<p style="color:#DC2626;font-size:13px;">&#10005; ' + esc(state.m365SyncResult.error || 'Sync failed') + '</p>')
       + '</div>';
   }
@@ -2099,12 +2167,13 @@ function renderResponses() {
   if (state.m365ShowClientIdInput) {
     clientIdInput = '<div class="m365-setup">'
       + '<p style="font-size:13px;margin-bottom:8px;">Enter your Azure App Client ID to connect Outlook:</p>'
-      + '<input class="search" id="m365-client-id-input" placeholder="e.g. 12345678-1234-1234-1234-123456789abc" value="' + esc(state.m365ClientId || '') + '" style="margin-bottom:8px;" />'
+      + '<input class="search" id="m365-client-id-input" placeholder="e.g. 12345678-1234-1234-1234-123456789abc" value="' + esc(state.m365ClientId||'') + '" style="margin-bottom:8px;width:100%;">'
       + '<button class="btn primary" id="save-m365-client-id">Save &amp; Connect</button>'
-      + '<p class="muted" style="font-size:11px;margin-top:8px;">Azure Portal &#x2192; App Registrations &#x2192; New &#x2192; add <code>' + window.location.origin + '</code> as redirect URI &#x2192; grant Mail.Read &#x2192; copy Client ID.</p>'
+      + '<p class="muted" style="font-size:11px;margin-top:8px;">Azure Portal &#x2192; App Registrations &#x2192; New &#x2192; redirect URI = ' + window.location.origin + ' &#x2192; Mail.Read permission</p>'
       + '</div>';
   }
 
+  // ── Replies panel ─────────────────────────────────────────────────────────
   var repliesHtml = '';
   if (replies.length === 0) {
     repliesHtml = '<div class="responses-empty"><p>No replies synced yet.</p><p class="muted" style="font-size:12px;margin-top:6px;">Click Sync from Outlook to search your inbox.</p></div>';
@@ -2112,24 +2181,37 @@ function renderResponses() {
     repliesHtml = '<div class="replies-list">'
       + replies.map(function(r) {
           var c = r.contacts || {};
-          var name = r.from_name || esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || r.from_email;
+          var name = esc(r.from_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || r.from_email);
           var when = r.received_at ? new Date(r.received_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
-          return '<div class="reply-card ' + (r.read ? '' : 'reply-unread') + '">'
-            + '<div class="reply-card-header"><div class="reply-from">' + esc(name) + '</div><div class="reply-when">' + when + '</div></div>'
-            + '<div class="reply-org">' + esc(c.org || r.from_email) + '</div>'
-            + '<div class="reply-subject">' + esc(r.subject || '(no subject)') + '</div>'
-            + '<div class="reply-preview">' + esc(r.body_preview || '') + '</div>'
+          var isExpanded = state.expandedReplyId === r.id;
+          var isLoading  = state.addFromReplyLoading === r.id;
+          var bodyText = isExpanded
+            ? esc(r.full_body || r.body_preview || '(no body)')
+            : esc((r.body_preview || '').slice(0, 120) + (r.body_preview && r.body_preview.length > 120 ? '...' : ''));
+          return '<div class="reply-card ' + (r.read ? '' : 'reply-unread') + '" style="cursor:pointer;">'
+            + '<div class="reply-card-header" data-expand-reply="' + r.id + '">'
+            + '<div class="reply-from">' + name + '</div>'
+            + '<div class="reply-when">' + when + '</div></div>'
+            + '<div class="reply-org" data-expand-reply="' + r.id + '">' + esc(c.org || r.from_email) + '</div>'
+            + '<div class="reply-subject" data-expand-reply="' + r.id + '">' + esc(r.subject || '(no subject)') + '</div>'
+            + '<div class="reply-preview" data-expand-reply="' + r.id + '" style="white-space:' + (isExpanded ? 'pre-wrap;font-size:12px;max-height:300px;overflow-y:auto;background:var(--grey-50);padding:8px;border-radius:4px;margin-top:4px;' : 'normal;') + '">' + bodyText + '</div>'
+            + '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">'
+            + '<button class="btn small" data-expand-reply="' + r.id + '">' + (isExpanded ? '&#x25B2; Collapse' : '&#x25BC; Read full email') + '</button>'
+            + '<button class="btn small" style="background:var(--green);color:#fff;border-color:var(--green);" data-add-reply="' + r.id + '" ' + (isLoading ? 'disabled' : '') + '>'
+            + (isLoading ? '&#x23F3; Adding&hellip;' : '&#x2795; Add to Database') + '</button>'
             + (!r.read ? '<button class="btn small reply-read-btn" data-reply-id="' + r.id + '">Mark read</button>' : '')
+            + '</div>'
             + '</div>';
         }).join('')
       + '</div>';
   }
 
+  // ── Events panel ─────────────────────────────────────────────────────────
   var eventsHtml = '';
   if (events.length === 0) {
     eventsHtml = '<div class="responses-empty">'
       + '<p>No engagement events yet.</p>'
-      + '<p class="muted" style="font-size:12px;margin-top:6px;">Set up the Brevo webhook to start tracking opens and clicks.<br>'
+      + '<p class="muted" style="font-size:12px;margin-top:6px;">Set up the Brevo webhook to start tracking opens and clicks automatically.<br>'
       + 'Brevo &#x2192; Transactional &#x2192; Settings &#x2192; Webhooks &#x2192; Add:<br>'
       + '<code style="font-size:10px;">https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/brevo-webhook</code><br>'
       + 'Tick: Delivered, Opened, Clicked, Soft bounce, Hard bounce, Unsubscribed.</p>'
@@ -2138,14 +2220,14 @@ function renderResponses() {
     eventsHtml = '<div class="events-list">'
       + events.map(function(ev) {
           var c = ev.contacts || {};
-          var who = esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || esc(ev.email);
-          var icon  = EVENT_ICON[ev.event_type]  || '&bull;';
-          var cls   = EVENT_CLASS[ev.event_type] || 'event-default';
-          var when  = ev.occurred_at ? new Date(ev.occurred_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
+          var who  = esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || esc(ev.email);
+          var icon = EVENT_ICON[ev.event_type]  || '&bull;';
+          var cls  = EVENT_CLASS[ev.event_type] || 'event-default';
+          var when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
           return '<div class="event-row ' + cls + '">'
             + '<span class="event-icon">' + icon + '</span>'
             + '<div class="event-body"><div class="event-who">' + who + (c.org ? ' <span class="muted">&mdash; ' + esc(c.org) + '</span>' : '') + '</div>'
-            + '<div class="event-type">' + esc(ev.event_type.replace(/_/g,' ')) + (ev.link_url ? ' <a href="' + esc(ev.link_url) + '" target="_blank" class="event-link">&#x2197;</a>' : '') + '</div></div>'
+            + '<div class="event-type">' + esc(ev.event_type.replace(/_/g,' ')) + (ev.link_url ? ' <a href="' + esc(ev.link_url) + '" target="_blank" rel="noopener" style="font-size:11px;margin-left:4px;">link</a>' : '') + '</div></div>'
             + '<span class="event-when">' + when + '</span>'
             + '</div>';
         }).join('')
@@ -2155,16 +2237,19 @@ function renderResponses() {
   return '<div class="responses-wrap">'
     + stats
     + bounceHtml
+    + unsubHtml
     + '<div class="responses-cols">'
     + '<div class="responses-panel">'
     + '<div class="responses-panel-header"><h3>&#x1F4EC; Replies from Outlook</h3>'
     + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
     + '<select class="select" id="m365-days" style="font-size:12px;padding:4px 8px;width:auto;">'
-    + '<option value="7">Last 7 days</option><option value="30"' + (state.m365DaysBack === 30 ? ' selected' : '') + '>Last 30 days</option><option value="90">Last 90 days</option>'
+    + '<option value="7">Last 7 days</option>'
+    + '<option value="30"' + (state.m365DaysBack === 30 ? ' selected' : '') + '>Last 30 days</option>'
+    + '<option value="90"' + (state.m365DaysBack === 90 ? ' selected' : '') + '>Last 90 days</option>'
     + '</select>'
     + '<button class="btn primary" id="sync-m365-btn"' + (state.m365Syncing ? ' disabled' : '') + '>'
-    + (state.m365Syncing ? '<span class="spinner-inline"></span> Syncing&hellip;' : '&#x1F504; Sync from Outlook') + '</button>'
-    + '</div></div>'
+    + (state.m365Syncing ? '<span class="spinner-inline"></span> Syncing&hellip;' : '&#x1F504; Sync from Outlook')
+    + '</button></div></div>'
     + clientIdInput + syncResult + repliesHtml
     + '</div>'
     + '<div class="responses-panel">'
@@ -2835,6 +2920,24 @@ function bindEvents() {
   };
   document.querySelectorAll('.reply-read-btn').forEach(function(btn) {
     btn.onclick = function() { markReplyRead(btn.dataset.replyId); };
+  // Reply expand/collapse and add-to-DB
+  document.querySelectorAll('[data-expand-reply]').forEach(function(el) {
+    el.onclick = function(e) {
+      e.stopPropagation();
+      var id = this.dataset.expandReply;
+      state.expandedReplyId = (state.expandedReplyId === id) ? null : id;
+      // Mark as read when expanding
+      var reply = state.responsesData && state.responsesData.replies && state.responsesData.replies.find(function(r){return r.id===id;});
+      if (reply && !reply.read) markReplyRead(id);
+      else render();
+    };
+  });
+  document.querySelectorAll('[data-add-reply]').forEach(function(el) {
+    el.onclick = function(e) {
+      e.stopPropagation();
+      addContactFromReply(this.dataset.addReply);
+    };
+  });
   });
     document.querySelectorAll('#sign-out-btn, #sign-out-btn-settings').forEach(b => {
     b.onclick = signOut;
