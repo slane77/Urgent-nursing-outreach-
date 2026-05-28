@@ -1642,7 +1642,7 @@ function renderImport() {
           <div class="import-card-icon">&#x1F3E1;</div>
           <div class="import-card-meta">
             <div class="import-card-title">Care Homes &mdash; Registered Managers</div>
-            <div class="import-card-sub">Claude agent finds registered care home managers with email addresses. Residential, nursing, dementia and supported living.</div>
+            <div class="import-card-sub">Downloads CQC care directory and scrapes care home websites for registered manager emails. No AI credits needed.ng, dementia and supported living.</div>
           </div>
           <span class="import-badge live">Live</span>
         </div>
