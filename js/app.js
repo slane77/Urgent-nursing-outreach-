@@ -2161,6 +2161,55 @@ async function loadUserProfile() {
   } catch(e) { console.warn('Profile load (non-fatal):', e.message); }
 }
 
+
+async function loadTeamUsers() {
+  state.teamLoading = true; render();
+  try {
+    var sess = (await sb.auth.getSession()).data.session;
+    if (!sess) { state.teamLoading = false; render(); return; }
+    var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess.access_token },
+      body: JSON.stringify({ action: 'list' }),
+    });
+    if (res.ok) {
+      var data = await res.json();
+      state.teamUsers = data.users || [];
+    }
+  } catch(e) { console.error('loadTeamUsers:', e.message); }
+  state.teamLoading = false; render();
+}
+
+async function sendInvite() {
+  try {
+    var sess = (await sb.auth.getSession()).data.session;
+    if (!sess) return;
+    var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess.access_token },
+      body: JSON.stringify({
+        action: 'invite',
+        email: state.inviteEmail,
+        full_name: state.inviteName,
+        role: 'user',
+        allowed_sources: state.inviteSources,
+        sender_email: state.inviteSenderEmail || state.inviteEmail,
+        sender_name: state.inviteSenderName || state.inviteName,
+      }),
+    });
+    state.inviteResult = await res.json();
+    if (state.inviteResult.success) {
+      state.inviteEmail = '';
+      state.inviteName = '';
+      state.inviteSources = [];
+      state.inviteSenderEmail = '';
+      state.inviteSenderName = '';
+      await loadTeamUsers();
+    }
+  } catch(e) { state.inviteResult = { success: false, error: e.message }; }
+  render();
+}
+
 async function saveSenderDetails() {
   state.senderSaving = true; state.senderSaved = false; render();
   try {
