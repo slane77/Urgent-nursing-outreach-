@@ -69,6 +69,26 @@ const state = {
   careHomeResult: null,
   pharmacyRunning: false,
   pharmacyResult: null,
+  userProfile: null,
+  senderEmail: '',
+  senderName: '',
+  senderSaving: false,
+  senderSaved: false,
+  teamUsers: [],
+  teamLoading: false,
+  inviteEmail: '',
+  inviteName: '',
+  inviteSources: [],
+  inviteSenderEmail: '',
+  inviteSenderName: '',
+  inviteResult: null,
+  responsesLoading: false,
+  responsesData: null,
+  m365Syncing: false,
+  m365SyncResult: null,
+  m365ShowClientIdInput: false,
+  m365ClientId: '',
+  m365DaysBack: 30,
   agencyCsvText: null,
   agencyCsvPreview: null,
   agencyCsvSource: 'gp_surgery',
@@ -644,6 +664,7 @@ function renderAppShell() {
       <div class="tab ${state.view === 'compose' ? 'active' : ''}" data-view="compose">Compose</div>
       <div class="tab ${state.view === 'settings' ? 'active' : ''}" data-view="settings">Settings</div>
       <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import">⬇ Import</div>
+      <div class="tab ${state.view === 'responses' ? 'active' : ''}" data-view="responses">&#x1F4EC; Responses</div>
     </div>
     <div class="main" id="main">
       ${state.view === 'dashboard' ? renderDashboard() :
@@ -651,6 +672,7 @@ function renderAppShell() {
         state.view === 'templates' ? renderTemplates() :
         state.view === 'compose' ? renderCompose() :
         state.view === 'import' ? renderImport() :
+        state.view === 'responses' ? renderResponses() :
         renderSettings()}
     </div>
   `;
@@ -1934,25 +1956,300 @@ function renderDashboard() {
 }
 
 
-function renderSettings() {
-  return `
-    <h2 class="section-title">Settings</h2>
-    <div class="settings-card">
-      <h3>📤 Export Data</h3>
-      <p>Download a backup of contacts as CSV. Useful for ad-hoc analysis or as a safety net.</p>
-      <button class="btn primary" id="export-csv-all">⬇ Export All Contacts as CSV</button>
-    </div>
-    <div class="settings-card">
-      <h3>👤 Account</h3>
-      <p>Signed in as <strong>${esc(state.user.email)}</strong></p>
-      <button class="btn danger" id="sign-out-btn-settings">Sign Out</button>
-    </div>
-    <div class="settings-card">
-      <h3>ℹ️ About</h3>
-      <p>Urgent Nursing Day Webster Outreach — Day Webster Group. Data lives in Supabase; access is restricted to authorised Day Webster Group email domains. Daily automated database backups run on the Supabase free tier (Dashboard → Database → Backups).</p>
-    </div>
-  `;
+
+
+async function loadResponsesData() {
+  state.responsesLoading = true; render();
+  try {
+    const [evRes, replRes] = await Promise.all([
+      sb.from('email_events')
+        .select('id, event_type, email, occurred_at, link_url, contacts(first_name, last_name, org)')
+        .order('occurred_at', { ascending: false }).limit(50),
+      sb.from('replies')
+        .select('id, from_email, from_name, subject, body_preview, received_at, read, contacts(first_name, last_name, org)')
+        .order('received_at', { ascending: false }).limit(50),
+    ]);
+    const events  = evRes.data   || [];
+    const replies = replRes.data || [];
+    const unread  = replies.filter(function(r) { return !r.read; }).length;
+    state.responsesData = {
+      events: events,
+      replies: replies,
+      stats: {
+        total_opens: events.filter(function(e) { return e.event_type === 'opened'; }).length,
+        total_clicks: events.filter(function(e) { return e.event_type === 'clicked'; }).length,
+        total_bounces: events.filter(function(e) { return e.event_type === 'hard_bounce' || e.event_type === 'soft_bounce'; }).length,
+        total_unsubscribed: events.filter(function(e) { return e.event_type === 'unsubscribed'; }).length,
+        unread_replies: unread,
+      },
+    };
+  } catch(e) { state.responsesData = { error: e.message }; }
+  state.responsesLoading = false; render();
 }
+
+async function syncM365() {
+  state.m365Syncing = true; state.m365SyncResult = null; render();
+  try {
+    if (!state.m365ClientId) {
+      state.m365ShowClientIdInput = true;
+      state.m365Syncing = false; render(); return;
+    }
+    if (typeof window.msal === 'undefined') {
+      throw new Error('Microsoft authentication library not loaded yet. Please refresh and try again.');
+    }
+    const msalInstance = new window.msal.PublicClientApplication({
+      auth: { clientId: state.m365ClientId, authority: 'https://login.microsoftonline.com/common', redirectUri: window.location.origin }
+    });
+    await msalInstance.initialize();
+    const tokenResponse = await msalInstance.acquireTokenPopup({ scopes: ['Mail.Read', 'User.Read'] });
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/m365-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
+      body: JSON.stringify({ m365Token: tokenResponse.accessToken, daysBack: state.m365DaysBack || 30 }),
+    });
+    state.m365SyncResult = await res.json();
+    if (state.m365SyncResult.success) {
+      await loadResponsesData();
+      toast('Synced ' + state.m365SyncResult.synced + ' replies from Outlook');
+    }
+  } catch(e) { state.m365SyncResult = { success: false, error: e.message }; }
+  state.m365Syncing = false; render();
+}
+
+async function markReplyRead(replyId) {
+  await sb.from('replies').update({ read: true }).eq('id', replyId);
+  if (state.responsesData && state.responsesData.replies) {
+    var r = state.responsesData.replies.find(function(r) { return r.id === replyId; });
+    if (r) r.read = true;
+  }
+  render();
+}
+
+function renderResponses() {
+  if (state.responsesLoading || !state.responsesData) {
+    return '<div class="dash-loading"><div class="dash-spinner"></div><p>Loading responses&hellip;</p></div>';
+  }
+  if (state.responsesData.error) {
+    return '<div class="dash-error">Error: ' + esc(state.responsesData.error) + '</div>';
+  }
+
+  var d = state.responsesData;
+  var s = d.stats || {};
+  var replies = d.replies || [];
+  var events  = d.events  || [];
+
+  var EVENT_ICON  = { opened:'&#x1F441;', clicked:'&#x1F5B1;', delivered:'&#x2713;', hard_bounce:'&#x26A0;', soft_bounce:'&#x21A9;', unsubscribed:'&#x2296;', complaint:'&#x1F6AB;' };
+  var EVENT_CLASS = { opened:'event-open', clicked:'event-click', hard_bounce:'event-bounce', soft_bounce:'event-bounce', unsubscribed:'event-unsub', complaint:'event-bounce' };
+
+  // Stat cards
+  var stats = '<div class="dash-stats" style="margin-bottom:16px;">'
+    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.unread_replies || 0) + '</div><div class="dash-stat-lbl">Unread replies</div><div class="dash-stat-sub">' + replies.length + ' total</div></div>'
+    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.total_opens || 0) + '</div><div class="dash-stat-lbl">Email opens</div><div class="dash-stat-sub">Via Brevo</div></div>'
+    + '<div class="dash-stat"><div class="dash-stat-val">' + (s.total_clicks || 0) + '</div><div class="dash-stat-lbl">Link clicks</div><div class="dash-stat-sub">' + (s.total_unsubscribed || 0) + ' unsubscribed</div></div>'
+    + '<div class="dash-stat' + (s.total_bounces > 0 ? ' dash-stat-alert' : '') + '"><div class="dash-stat-val">' + (s.total_bounces || 0) + '</div><div class="dash-stat-lbl">Bounces</div><div class="dash-stat-sub">' + (s.total_bounces > 0 ? 'Check contacts' : 'All good') + '</div></div>'
+    + '</div>';
+
+  // M365 sync panel
+  var syncResult = '';
+  if (state.m365SyncResult && !state.m365Syncing) {
+    syncResult = '<div class="import-result ' + (state.m365SyncResult.success ? 'ok' : 'err') + '" style="margin-bottom:12px;">'
+      + (state.m365SyncResult.success
+         ? '<p style="font-size:13px;">&#10003; Synced ' + state.m365SyncResult.synced + ' new repl' + (state.m365SyncResult.synced === 1 ? 'y' : 'ies')
+           + ' (' + state.m365SyncResult.total_messages + ' emails checked)'
+           + (state.m365SyncResult.auto_unsubscribed > 0 ? ' &mdash; ' + state.m365SyncResult.auto_unsubscribed + ' auto-unsubscribed' : '') + '</p>'
+         : '<p style="color:#DC2626;font-size:13px;">&#10005; ' + esc(state.m365SyncResult.error || 'Sync failed') + '</p>')
+      + '</div>';
+  }
+
+  var clientIdInput = '';
+  if (state.m365ShowClientIdInput) {
+    clientIdInput = '<div class="m365-setup">'
+      + '<p style="font-size:13px;margin-bottom:8px;">Enter your Azure App Client ID to connect Outlook:</p>'
+      + '<input class="search" id="m365-client-id-input" placeholder="e.g. 12345678-1234-1234-1234-123456789abc" value="' + esc(state.m365ClientId || '') + '" style="margin-bottom:8px;" />'
+      + '<button class="btn primary" id="save-m365-client-id">Save &amp; Connect</button>'
+      + '<p class="muted" style="font-size:11px;margin-top:8px;">Azure Portal &#x2192; App Registrations &#x2192; New &#x2192; add <code>' + window.location.origin + '</code> as redirect URI &#x2192; grant Mail.Read &#x2192; copy Client ID.</p>'
+      + '</div>';
+  }
+
+  var repliesHtml = '';
+  if (replies.length === 0) {
+    repliesHtml = '<div class="responses-empty"><p>No replies synced yet.</p><p class="muted" style="font-size:12px;margin-top:6px;">Click Sync from Outlook to search your inbox.</p></div>';
+  } else {
+    repliesHtml = '<div class="replies-list">'
+      + replies.map(function(r) {
+          var c = r.contacts || {};
+          var name = r.from_name || esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || r.from_email;
+          var when = r.received_at ? new Date(r.received_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
+          return '<div class="reply-card ' + (r.read ? '' : 'reply-unread') + '">'
+            + '<div class="reply-card-header"><div class="reply-from">' + esc(name) + '</div><div class="reply-when">' + when + '</div></div>'
+            + '<div class="reply-org">' + esc(c.org || r.from_email) + '</div>'
+            + '<div class="reply-subject">' + esc(r.subject || '(no subject)') + '</div>'
+            + '<div class="reply-preview">' + esc(r.body_preview || '') + '</div>'
+            + (!r.read ? '<button class="btn small reply-read-btn" data-reply-id="' + r.id + '">Mark read</button>' : '')
+            + '</div>';
+        }).join('')
+      + '</div>';
+  }
+
+  var eventsHtml = '';
+  if (events.length === 0) {
+    eventsHtml = '<div class="responses-empty">'
+      + '<p>No engagement events yet.</p>'
+      + '<p class="muted" style="font-size:12px;margin-top:6px;">Set up the Brevo webhook to start tracking opens and clicks.<br>'
+      + 'Brevo &#x2192; Transactional &#x2192; Settings &#x2192; Webhooks &#x2192; Add:<br>'
+      + '<code style="font-size:10px;">https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/brevo-webhook</code><br>'
+      + 'Tick: Delivered, Opened, Clicked, Soft bounce, Hard bounce, Unsubscribed.</p>'
+      + '</div>';
+  } else {
+    eventsHtml = '<div class="events-list">'
+      + events.map(function(ev) {
+          var c = ev.contacts || {};
+          var who = esc([c.first_name, c.last_name].filter(Boolean).join(' ')) || esc(ev.email);
+          var icon  = EVENT_ICON[ev.event_type]  || '&bull;';
+          var cls   = EVENT_CLASS[ev.event_type] || 'event-default';
+          var when  = ev.occurred_at ? new Date(ev.occurred_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
+          return '<div class="event-row ' + cls + '">'
+            + '<span class="event-icon">' + icon + '</span>'
+            + '<div class="event-body"><div class="event-who">' + who + (c.org ? ' <span class="muted">&mdash; ' + esc(c.org) + '</span>' : '') + '</div>'
+            + '<div class="event-type">' + esc(ev.event_type.replace(/_/g,' ')) + (ev.link_url ? ' <a href="' + esc(ev.link_url) + '" target="_blank" class="event-link">&#x2197;</a>' : '') + '</div></div>'
+            + '<span class="event-when">' + when + '</span>'
+            + '</div>';
+        }).join('')
+      + '</div>';
+  }
+
+  return '<div class="responses-wrap">'
+    + stats
+    + '<div class="responses-cols">'
+    + '<div class="responses-panel">'
+    + '<div class="responses-panel-header"><h3>&#x1F4EC; Replies from Outlook</h3>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+    + '<select class="select" id="m365-days" style="font-size:12px;padding:4px 8px;width:auto;">'
+    + '<option value="7">Last 7 days</option><option value="30"' + (state.m365DaysBack === 30 ? ' selected' : '') + '>Last 30 days</option><option value="90">Last 90 days</option>'
+    + '</select>'
+    + '<button class="btn primary" id="sync-m365-btn"' + (state.m365Syncing ? ' disabled' : '') + '>'
+    + (state.m365Syncing ? '<span class="spinner-inline"></span> Syncing&hellip;' : '&#x1F504; Sync from Outlook') + '</button>'
+    + '</div></div>'
+    + clientIdInput + syncResult + repliesHtml
+    + '</div>'
+    + '<div class="responses-panel">'
+    + '<div class="responses-panel-header"><h3>&#x1F4CA; Email Engagement</h3>'
+    + '<span class="muted" style="font-size:11px;">Auto-tracked via Brevo webhook</span></div>'
+    + eventsHtml
+    + '</div>'
+    + '</div></div>';
+}
+
+function renderSettings() {
+  var isAdmin = !state.userProfile || state.userProfile.role === 'admin';
+
+  var sourceOptions = [
+    {k:'gp_surgery',label:'GP Surgeries'},
+    {k:'children_homes',label:"Children's Homes"},
+    {k:'agency',label:'Agency Outreach'},
+    {k:'ahp',label:'AHP (NHS Jobs)'},
+    {k:'pharmacy',label:'Pharmacy'},
+    {k:'private_theatre',label:'Private Theatres'},
+    {k:'care_home',label:'Care Homes'},
+    {k:'bms',label:'BMS'},
+    {k:'sterile',label:'Sterile Services'},
+    {k:'nhs_staffbank',label:'NHS Staff Banks'},
+  ];
+
+  // Build sender section
+  var senderSection = '<div class="settings-section">'
+    + '<h3 class="settings-section-title">&#x2709; My Sender Details</h3>'
+    + '<p class="muted" style="font-size:12px;margin-bottom:12px;">Emails you send will come from this name and address. Must be verified in Brevo (Senders &amp; IPs &rarr; Add sender).</p>'
+    + '<div class="import-form-row" style="max-width:520px;">'
+    + '<div class="field"><label>Your Name</label>'
+    + '<input class="search" id="sender-name-input" placeholder="e.g. Chris Thompson - Day Webster Group" value="' + esc(state.senderName || '') + '" /></div>'
+    + '<div class="field"><label>Your Email</label>'
+    + '<input class="search" id="sender-email-input" type="email" placeholder="e.g. chris@daywebster.com" value="' + esc(state.senderEmail || '') + '" /></div>'
+    + '</div>'
+    + '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;">'
+    + '<button class="btn primary" id="save-sender-btn"' + (state.senderSaving ? ' disabled' : '') + '>'
+    + (state.senderSaving ? '<span class="spinner-inline"></span> Saving&hellip;' : 'Save Sender Details')
+    + '</button>'
+    + (state.senderSaved ? '<span style="color:var(--green-dark);font-size:13px;">&#10003; Saved</span>' : '')
+    + '</div>'
+    + '<p class="muted" style="font-size:11px;margin-top:8px;">&#9888; Verify your email in Brevo first: Senders &amp; IPs &#x2192; Senders &#x2192; Add &amp; verify.</p>'
+    + '</div>';
+
+  // Build team section (admin only)
+  var teamSection = '';
+  if (isAdmin) {
+    var sourceCheckboxes = sourceOptions.map(function(s) {
+      return '<label class="source-checkbox-label">'
+        + '<input type="checkbox" class="invite-source-cb" value="' + s.k + '"'
+        + (state.inviteSources.indexOf(s.k) >= 0 ? ' checked' : '') + '>'
+        + s.label + '</label>';
+    }).join('');
+
+    var teamRows = state.teamUsers.map(function(u) {
+      var isScott = u.email === 'scott.lane@daywebster.com';
+      var srcs = (!u.allowed_sources || u.allowed_sources.length === 0) ? 'All sources' : u.allowed_sources.join(', ');
+      var lastLogin = u.last_sign_in ? new Date(u.last_sign_in).toLocaleDateString('en-GB') : 'Never';
+      return '<tr>'
+        + '<td>' + esc(u.full_name || '—') + '</td>'
+        + '<td>' + esc(u.email || '—') + '</td>'
+        + '<td><span class="role-badge ' + (u.role === 'admin' ? 'role-admin' : 'role-user') + '">' + (u.role || 'user') + '</span></td>'
+        + '<td class="muted" style="font-size:11px;">' + esc(srcs) + '</td>'
+        + '<td class="muted" style="font-size:11px;">' + esc(u.sender_email || '—') + '</td>'
+        + '<td class="muted" style="font-size:11px;">' + lastLogin + '</td>'
+        + '<td>' + (isScott ? '<span class="muted">Admin</span>' : '<button class="btn small danger" data-delete-user="' + esc(u.user_id) + '" data-user-email="' + esc(u.email) + '">Remove</button>') + '</td>'
+        + '</tr>';
+    }).join('');
+
+    var inviteResult = '';
+    if (state.inviteResult) {
+      inviteResult = '<span class="' + (state.inviteResult.success ? '' : 'text-danger') + '" style="font-size:13px;">'
+        + (state.inviteResult.success ? '&#10003; Invite sent &mdash; they will receive a magic link to log in' : '&#10005; ' + esc(state.inviteResult.error || 'Error'))
+        + '</span>';
+    }
+
+    teamSection = '<div class="settings-section">'
+      + '<h3 class="settings-section-title">&#x1F465; Team Management</h3>'
+      + '<p class="muted" style="font-size:12px;margin-bottom:12px;">Invite team members and control which data sources they can access. Each user only sees their assigned sources.</p>'
+      + '<div class="team-invite-form">'
+      + '<div class="import-form-row">'
+      + '<div class="field"><label>Full Name</label><input class="search" id="invite-name" placeholder="e.g. Chris Thompson" value="' + esc(state.inviteName) + '" /></div>'
+      + '<div class="field"><label>Email</label><input class="search" id="invite-email" placeholder="chris@daywebster.com" value="' + esc(state.inviteEmail) + '" /></div>'
+      + '</div>'
+      + '<div class="import-form-row">'
+      + '<div class="field"><label>Their Sender Name</label><input class="search" id="invite-sender-name" placeholder="Chris Thompson - Day Webster Group" /></div>'
+      + '<div class="field"><label>Their Sender Email</label><input class="search" id="invite-sender-email" type="email" placeholder="chris@daywebster.com" /></div>'
+      + '</div>'
+      + '<div class="field" style="margin-bottom:10px;"><label>Source Access (leave blank = all sources)</label>'
+      + '<div class="source-checkboxes">' + sourceCheckboxes + '</div></div>'
+      + '<div style="display:flex;gap:8px;align-items:center;">'
+      + '<button class="btn primary" id="send-invite-btn">&#x2709; Send Invite</button>'
+      + inviteResult
+      + '</div>'
+      + '</div>'
+      + (state.teamLoading ? '<p class="muted" style="margin-top:12px;">Loading team&hellip;</p>' : '')
+      + (state.teamUsers.length > 0
+          ? '<table class="table" style="margin-top:12px;"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Sources</th><th>Sender Email</th><th>Last Login</th><th></th></tr></thead><tbody>' + teamRows + '</tbody></table>'
+          : '<p class="muted" style="font-size:12px;margin-top:12px;">No team members yet.</p>')
+      + '</div>';
+  }
+
+  return '<div class="settings-wrap">'
+    + senderSection
+    + teamSection
+    + '<div class="settings-section">'
+    + '<h3 class="settings-section-title">&#x1F4E4; Export Data</h3>'
+    + '<p class="muted" style="font-size:12px;margin-bottom:10px;">Download all contacts as CSV for backup or analysis.</p>'
+    + '<button class="btn primary" id="export-csv-all">&#x2B07; Export All Contacts as CSV</button>'
+    + '</div>'
+    + '<div class="settings-section">'
+    + '<h3 class="settings-section-title">&#x1F464; Account</h3>'
+    + '<p class="muted" style="font-size:12px;margin-bottom:10px;">Signed in as <strong>' + esc(state.user.email) + '</strong></p>'
+    + '<button class="btn danger" id="sign-out-btn-settings">Sign Out</button>'
+    + '</div>'
+    + '</div>';
+}
+
 
 function renderModal() {
   const existing = document.querySelector('.modal-overlay');
@@ -2051,6 +2348,8 @@ function bindEvents() {
       if (state.view === 'database') await loadContactsPage();
       if (state.view === 'compose') { state.composePreviewCounts = null; state.composeBrevoResult = null; }
       if (state.view === 'import') state.importResult = null;
+      if (state.view === 'responses') { loadResponsesData(); return; }
+      if (state.view === 'settings') { loadTeamUsers(); }
       render();
     };
   });
