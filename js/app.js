@@ -100,6 +100,7 @@ const state = {
   enrichResult: null,
   agencyUploading: false,
   agencyResult: null,
+  agencyProgress: null,
   theatreRunning: false,
   theatreResult: null,
   // Dashboard
@@ -1360,21 +1361,114 @@ async function runEnrichment() {
   state.enrichRunning = false; render();
 }
 
+// Split a CSV into header + data rows, respecting quoted fields that may
+// themselves contain commas or newlines.
+function splitCsvIntoRows(csvText) {
+  const rows = [];
+  let current = '';
+  let inQuote = false;
+  for (let i = 0; i < csvText.length; i++) {
+    const ch = csvText[i];
+    if (ch === '"') {
+      inQuote = !inQuote;
+      current += ch;
+    } else if ((ch === '\n' || ch === '\r') && !inQuote) {
+      if (ch === '\r' && csvText[i + 1] === '\n') i++;
+      if (current.length > 0) rows.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) rows.push(current);
+  return rows;
+}
+
+// Upload a CSV in chunks to stay under Edge Function CPU/timeout limits.
+// Returns the same shape the existing csv-upload Edge Function returns,
+// with the per-chunk results aggregated.
 async function runAgencyCSVUpload() {
   if (!state.agencyCsvText) return;
-  state.agencyUploading = true; state.agencyResult = null; render();
+  state.agencyUploading = true;
+  state.agencyResult = null;
+  state.agencyProgress = null;
+  render();
+
+  const CHUNK_SIZE = 500;
+  const AUTH = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU';
+
   try {
-    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
-      body: JSON.stringify({ csv: state.agencyCsvText, source: state.agencyCsvSource }),
-    });
-    state.agencyResult = await res.json();
-    if (state.agencyResult.success) {
-      await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+    const allRows = splitCsvIntoRows(state.agencyCsvText);
+    if (allRows.length < 2) {
+      state.agencyResult = { success: false, error: 'CSV has no data rows' };
+      state.agencyUploading = false; render(); return;
     }
-  } catch(e) { state.agencyResult = { success: false, error: e.message }; }
-  state.agencyUploading = false; render();
+    const header = allRows[0];
+    const dataRows = allRows.slice(1);
+    const totalChunks = Math.ceil(dataRows.length / CHUNK_SIZE);
+
+    let inserted = 0, totalRows = 0, skippedNoEmail = 0, skippedDup = 0;
+
+    for (let i = 0; i < totalChunks; i++) {
+      state.agencyProgress = {
+        currentChunk: i + 1,
+        totalChunks: totalChunks,
+        rowsDone: Math.min((i + 1) * CHUNK_SIZE, dataRows.length),
+        totalRowsInFile: dataRows.length,
+      };
+      render();
+
+      const chunkRows = dataRows.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+      const chunkCsv = [header, ...chunkRows].join('\n');
+
+      let res, result;
+      try {
+        res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': AUTH },
+          body: JSON.stringify({ csv: chunkCsv, source: state.agencyCsvSource }),
+        });
+        result = await res.json();
+      } catch(netErr) {
+        state.agencyResult = {
+          success: false,
+          error: `Network error on chunk ${i + 1} of ${totalChunks}: ${netErr.message}. ${inserted} contacts uploaded so far.`,
+          inserted, total_rows: totalRows, skipped_no_email: skippedNoEmail, skipped_dup: skippedDup,
+        };
+        state.agencyUploading = false; state.agencyProgress = null;
+        if (inserted > 0) await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+        render(); return;
+      }
+
+      if (!result || !result.success) {
+        state.agencyResult = {
+          success: false,
+          error: `Chunk ${i + 1} of ${totalChunks} failed: ${(result && result.error) || ('HTTP ' + (res && res.status))}. ${inserted} contacts uploaded so far.`,
+          inserted, total_rows: totalRows, skipped_no_email: skippedNoEmail, skipped_dup: skippedDup,
+        };
+        state.agencyUploading = false; state.agencyProgress = null;
+        if (inserted > 0) await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+        render(); return;
+      }
+
+      inserted += result.inserted || 0;
+      totalRows += result.total_rows || 0;
+      skippedNoEmail += result.skipped_no_email || 0;
+      skippedDup += result.skipped_dup || 0;
+    }
+
+    state.agencyResult = {
+      success: true,
+      inserted, total_rows: totalRows,
+      skipped_no_email: skippedNoEmail, skipped_dup: skippedDup,
+    };
+    await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+  } catch(e) {
+    state.agencyResult = { success: false, error: e.message };
+  }
+  state.agencyUploading = false;
+  state.agencyProgress = null;
+  render();
 }
 
 async function previewAgencyCSV(csvText) {
@@ -1626,7 +1720,12 @@ function renderImport() {
             <span class="import-hint">Contacts tagged <code>Source: Agency Outreach</code>. Duplicates (same email) skipped automatically.</span>
           </div>
         </div>
-        ${state.agencyUploading ? '<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>' : ''}
+        ${state.agencyUploading ? `<div class="import-progress">
+          <div class="progress-bar"><div class="fill" style="width:${state.agencyProgress ? Math.round((state.agencyProgress.currentChunk / state.agencyProgress.totalChunks) * 100) : 5}%;transition:width 0.3s;"></div></div>
+          <p class="muted" style="margin-top:8px;font-size:12px;">${state.agencyProgress
+            ? `Uploading chunk ${state.agencyProgress.currentChunk} of ${state.agencyProgress.totalChunks} &mdash; ${state.agencyProgress.rowsDone.toLocaleString()} of ${state.agencyProgress.totalRowsInFile.toLocaleString()} rows processed&hellip;`
+            : 'Preparing upload&hellip;'}</p>
+        </div>` : ''}
         ${state.agencyResult ? `<div class="import-result ${state.agencyResult.success ? 'ok' : 'err'}">
           ${state.agencyResult.success
             ? `<div class="import-result-stats">
