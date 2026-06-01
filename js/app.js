@@ -118,6 +118,64 @@ const state = {
 
 const STATUS_LABEL = { lead: 'Leads', live: 'Live', unsubscribed: 'Unsubscribes' };
 
+// ---------- SOURCE HELPERS (for Add/Edit Contact modal) ----------
+// Source is encoded as a tag inside the notes field. GP surgery is the default
+// (no tag) — it's identified by exclusion. All other sources have a known tag.
+const MODAL_SOURCE_TAGS = {
+  gp_surgery:      null,
+  children_homes:  'Ofsted Register',
+  agency:          'Source: Agency Outreach',
+  ahp:             'Source: NHS Jobs AHP',
+  private_theatre: 'Source: Private Theatre',
+  care_home:       'Source: Care Home',
+  bms:             'Source: BMS Outreach',
+  sterile:         'Source: Sterile Services',
+  nhs_staffbank:   'Source: NHS Staff Bank',
+  camhs:           'Source: CAMHS',
+};
+const MODAL_SOURCE_OPTIONS = [
+  { k: 'gp_surgery',      l: 'GP Surgery' },
+  { k: 'children_homes',  l: "Children's Home" },
+  { k: 'agency',          l: 'Agency Outreach' },
+  { k: 'ahp',             l: 'AHP (NHS Jobs)' },
+  { k: 'private_theatre', l: 'Private Theatre' },
+  { k: 'care_home',       l: 'Care Home' },
+  { k: 'bms',             l: 'BMS' },
+  { k: 'sterile',         l: 'Sterile Services' },
+  { k: 'nhs_staffbank',   l: 'NHS Staff Bank' },
+  { k: 'camhs',           l: 'CAMHS' },
+];
+
+// Read the source key out of the notes field by scanning for any known tag.
+function extractSource(notes) {
+  if (!notes) return 'gp_surgery';
+  for (const [key, tag] of Object.entries(MODAL_SOURCE_TAGS)) {
+    if (tag && notes.includes(tag)) return key;
+  }
+  return 'gp_surgery';
+}
+
+// Return the user-facing notes (with any source tag removed). Splits on `|`
+// so other metadata segments like "Specialty: physiotherapy | Band: 7" are
+// preserved unchanged.
+function stripSourceTag(notes) {
+  if (!notes) return '';
+  const tags = new Set(Object.values(MODAL_SOURCE_TAGS).filter(Boolean));
+  return notes.split('|')
+    .map(s => s.trim())
+    .filter(s => s && !tags.has(s))
+    .join(' | ');
+}
+
+// Build the notes field from a chosen source + the user-typed notes.
+function combineSourceAndNotes(sourceKey, userNotes) {
+  const tag = MODAL_SOURCE_TAGS[sourceKey];
+  const cleanNotes = (userNotes || '').trim();
+  if (!tag) return cleanNotes || null;  // GP surgery has no tag
+  if (!cleanNotes) return tag;
+  return tag + ' | ' + cleanNotes;
+}
+
 // ---------- UTILITIES ----------
 function $(sel) { return document.querySelector(sel); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -2383,6 +2441,15 @@ function renderModal() {
   if (state.modal.type === 'edit-contact' || state.modal.type === 'add-contact') {
     const c = state.modal.contact;
     const isEdit = state.modal.type === 'edit-contact';
+    // Determine which source the form should show:
+    //  - Edit mode: parse the existing notes to find an embedded source tag.
+    //  - Add mode: default to whichever source the user is currently filtering on
+    //    in the Database view, falling back to GP surgery.
+    const currentSource = isEdit
+      ? extractSource(c.notes)
+      : (MODAL_SOURCE_TAGS.hasOwnProperty(state.sourceFilter) ? state.sourceFilter : 'gp_surgery');
+    // Show only the user-facing portion of the notes (with the source tag removed).
+    const userNotes = stripSourceTag(c.notes);
     html = `
       <h2>${isEdit ? 'Edit' : 'Add'} Contact</h2>
       <div class="field-row">
@@ -2404,6 +2471,12 @@ function renderModal() {
         <div class="field"><label>Region</label><input id="m-region" value="${esc(c.region)}" /></div>
         <div class="field"><label>Country</label><input id="m-country" value="${esc(c.country)}" /></div>
       </div>
+      <div class="field"><label>Source / Category *</label>
+        <select id="m-source">
+          ${MODAL_SOURCE_OPTIONS.map(o => `<option value="${o.k}" ${currentSource === o.k ? 'selected' : ''}>${o.l}</option>`).join('')}
+        </select>
+        <div class="muted" style="font-size:11px;margin-top:4px;">Which list does this contact belong to? Determines where they appear in the Database tabs.</div>
+      </div>
       ${isEdit ? `
         <div class="field"><label>Status</label>
           <select id="m-status">
@@ -2412,7 +2485,7 @@ function renderModal() {
             <option value="unsubscribed" ${c.status==='unsubscribed'?'selected':''}>Unsubscribed</option>
           </select>
         </div>` : ''}
-      <div class="field"><label>Notes</label><textarea id="m-notes">${esc(c.notes)}</textarea></div>
+      <div class="field"><label>Notes</label><textarea id="m-notes" placeholder="Optional notes (the Source above is stored automatically — you don't need to type it here)">${esc(userNotes)}</textarea></div>
       <div class="modal-actions">
         <button class="btn" id="m-cancel">Cancel</button>
         <button class="btn primary" id="m-save">Save</button>
@@ -2895,7 +2968,10 @@ function bindModalEvents() {
         postcode: overlay.querySelector('#m-postcode').value.trim() || null,
         region: overlay.querySelector('#m-region').value.trim() || null,
         country: overlay.querySelector('#m-country').value.trim() || null,
-        notes: overlay.querySelector('#m-notes').value.trim() || null
+        notes: combineSourceAndNotes(
+          overlay.querySelector('#m-source').value,
+          overlay.querySelector('#m-notes').value
+        )
       };
       if (!payload.first_name || !payload.org || !payload.email) {
         toast('First Name, Org, and Email are required', 'error');
