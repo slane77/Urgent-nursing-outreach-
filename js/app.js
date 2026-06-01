@@ -67,8 +67,6 @@ const state = {
   importResult: null,
   careHomeRunning: false,
   careHomeResult: null,
-  pharmacyRunning: false,
-  pharmacyResult: null,
   userProfile: null,
   senderEmail: '',
   senderName: '',
@@ -313,7 +311,6 @@ async function loadSourceStatusCounts() {
     gp_surgery:      null,
     children_homes:  'Ofsted Register',
     agency:          'Source: Agency Outreach',
-    pharmacy:        'Source: Pharmacy Outreach',
     ahp:             'Source: NHS Jobs AHP',
     private_theatre: 'Source: Private Theatre',
     care_home:       'Source: Care Home',
@@ -365,7 +362,7 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, ahpRes, agencyRes, pharmRes, theatreRes, careRes, gpRes] = await Promise.all([
+  const [allRes, chRes, ahpRes, agencyRes, theatreRes, careRes, gpRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
@@ -373,8 +370,6 @@ async function loadSourceCounts() {
       .ilike('notes', '%Source: NHS Jobs AHP%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Source: Agency Outreach%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: Pharmacy Outreach%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Source: Private Theatre%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
@@ -397,7 +392,6 @@ async function loadSourceCounts() {
     children_homes:  chRes.count      || 0,
     ahp:             ahpRes.count     || 0,
     agency:          agencyRes.count  || 0,
-    pharmacy:        pharmRes.count   || 0,
     private_theatre: theatreRes.count || 0,
     care_home:       careRes.count    || 0,
   };
@@ -445,8 +439,6 @@ async function loadContactsPage() {
     }
   } else if (sf === 'agency') {
     query = query.ilike('notes', '%Source: Agency Outreach%');
-  } else if (sf === 'pharmacy') {
-    query = query.ilike('notes', '%Source: Pharmacy Outreach%');
   } else if (sf === 'private_theatre') {
     query = query.ilike('notes', '%Source: Private Theatre%');
   } else if (sf === 'bms') {
@@ -582,7 +574,6 @@ function applyComposeSourceFilter(q, source) {
   const SOURCE_TAGS = {
     children_homes:  'Ofsted Register',
     agency:          'Source: Agency Outreach',
-    pharmacy:        'Source: Pharmacy Outreach',
     ahp:             'Source: NHS Jobs AHP',
     private_theatre: 'Source: Private Theatre',
     bms:             'Source: BMS Outreach',
@@ -705,7 +696,6 @@ function renderDatabase() {
     { key: 'agency',          label: 'Agency Outreach'   },
     { key: 'ahp',             label: 'NHS Jobs AHP'      },
     { key: 'care_home',       label: 'Care Homes'        },
-    { key: 'pharmacy',        label: 'Pharmacy'          },
     { key: 'private_theatre', label: 'Private Theatres'  },
   ];
 
@@ -1050,7 +1040,6 @@ function renderCompose() {
               {k:'gp_surgery',     l:'GP Surgeries'},
               {k:'children_homes', l:"Children's Homes"},
               {k:'agency',         l:'Agency Outreach'},
-              {k:'pharmacy',       l:'Pharmacy'},
               {k:'private_theatre',l:'Private Theatres'},
               {k:'ahp',            l:'AHP (NHS Jobs)'},
               {k:'care_home',     l:'Care Homes'},
@@ -1362,24 +1351,6 @@ async function runCareHomeScrape() {
   state.careHomeRunning = false; render();
 }
 
-async function runPharmacyScrape() {
-  const region = document.getElementById('ph-region')?.value || '';
-  const limit = parseInt(document.getElementById('ph-limit')?.value || '20');
-  state.pharmacyRunning = true; state.pharmacyResult = null; render();
-  try {
-    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/pharmacy-scraper', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
-      body: JSON.stringify({ region, limit }),
-    });
-    state.pharmacyResult = await res.json();
-    if (state.pharmacyResult.success) {
-      await Promise.all([loadStatusCounts(), loadSourceCounts()]);
-    }
-  } catch(e) { state.pharmacyResult = { success: false, error: e.message }; }
-  state.pharmacyRunning = false; render();
-}
-
 async function runTheatreScrape() {
   const region = document.getElementById('pt-region')?.value || '';
   const limit = parseInt(document.getElementById('pt-limit')?.value || '20');
@@ -1560,7 +1531,6 @@ function renderImport() {
                 ${[
                   { v: 'gp_surgery',      l: 'GP Surgeries' },
                   { v: 'agency',          l: 'Agency Outreach' },
-                  { v: 'pharmacy',        l: 'Pharmacy' },
                   { v: 'private_theatre', l: 'Private Theatres' },
                   { v: 'children_homes',  l: "Children's Homes" },
                   { v: 'bms',             l: 'BMS' },
@@ -1700,49 +1670,6 @@ function renderImport() {
         ${renderCsvUploadCard('care_home', state)}
       </div>
 
-<!-- Pharmacy Scraper -->
-      <div class="import-card">
-        <div class="import-card-header">
-          <div class="import-card-icon">💊</div>
-          <div class="import-card-meta">
-            <div class="import-card-title">Pharmacy — Superintendent Pharmacists</div>
-            <div class="import-card-sub">CQC register + Claude agent finds superintendent pharmacist emails at independent pharmacies</div>
-          </div>
-          <span class="import-badge live">Live</span>
-        </div>
-        <div class="import-form">
-          <div class="import-form-row">
-            <div class="field"><label>Region</label>
-              <select class="select" id="ph-region">
-                <option value="">All England</option>
-                ${REGIONS.map(rg => `<option value="${rg}">${rg}</option>`).join('')}
-              </select>
-            </div>
-            <div class="field"><label>Max Contacts</label>
-              <select class="select" id="ph-limit">
-                ${[10,20,30,50].map(n => `<option value="${n}" ${n===20?'selected':''}>${n}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-          <div class="import-form-actions">
-            <button class="btn primary" id="run-pharmacy-btn" ${state.pharmacyRunning ? 'disabled' : ''}>
-              ${state.pharmacyRunning ? '<span class="spinner-inline"></span> Searching&hellip;' : '&#9654; Run Pharmacy Scraper'}
-            </button>
-            <span class="import-hint">Independent pharmacies from CQC register. Finds superintendent pharmacist email per pharmacy. 2&ndash;5 min.</span>
-          </div>
-        </div>
-        ${state.pharmacyRunning ? `<div class="import-progress"><div class="progress-bar"><div class="fill import-pulse"></div></div></div>` : ''}
-        ${state.pharmacyResult ? `<div class="import-result ${state.pharmacyResult.success ? 'ok' : 'err'}">
-          ${state.pharmacyResult.success
-            ? `<div class="import-result-stats">
-                <div class="import-stat"><div class="import-stat-val">${state.pharmacyResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.pharmacyResult.found}</div><div class="import-stat-lbl">Found</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.pharmacyResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.pharmacyResult.skipped_dup}</div><div class="import-stat-lbl">Dupe</div></div>
-              </div>`
-            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.pharmacyResult.error || 'Error')}</p>`}
-        </div>` : ''}
-      </div>
 
             <!-- Private Theatres CSV Upload -->
       <div class="import-card">
@@ -2346,7 +2273,6 @@ function renderSettings() {
     {k:'children_homes',label:"Children's Homes"},
     {k:'agency',label:'Agency Outreach'},
     {k:'ahp',label:'AHP (NHS Jobs)'},
-    {k:'pharmacy',label:'Pharmacy'},
     {k:'private_theatre',label:'Private Theatres'},
     {k:'care_home',label:'Care Homes'},
     {k:'bms',label:'BMS'},
@@ -2713,8 +2639,6 @@ function bindEvents() {
 
   const runCareHomeBtn = $('#run-carehome-btn');
   if (runCareHomeBtn) runCareHomeBtn.onclick = function() { if (!state.careHomeRunning) runCareHomeScrape(); };
-  const runPharmacyBtn = $('#run-pharmacy-btn');
-  if (runPharmacyBtn) runPharmacyBtn.onclick = () => { if (!state.pharmacyRunning) runPharmacyScrape(); };
   const runTheatreBtn = $('#run-theatre-btn');
   if (runTheatreBtn) runTheatreBtn.onclick = () => { if (!state.theatreRunning) runTheatreScrape(); };
 
@@ -3291,4 +3215,3 @@ async function exportAllAsCsv() {
       };
     }
   });
-
