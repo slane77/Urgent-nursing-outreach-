@@ -133,6 +133,8 @@ const MODAL_SOURCE_TAGS = {
   sterile:         'Source: Sterile Services',
   nhs_staffbank:   'Source: NHS Staff Bank',
   camhs:           'Source: CAMHS',
+  anp:             'Source: ANP',
+  enp:             'Source: ENP',
 };
 const MODAL_SOURCE_OPTIONS = [
   { k: 'gp_surgery',      l: 'GP Surgery' },
@@ -145,6 +147,8 @@ const MODAL_SOURCE_OPTIONS = [
   { k: 'sterile',         l: 'Sterile Services' },
   { k: 'nhs_staffbank',   l: 'NHS Staff Bank' },
   { k: 'camhs',           l: 'CAMHS' },
+  { k: 'anp',             l: 'ANP' },
+  { k: 'enp',             l: 'ENP' },
 ];
 
 // Read the source key out of the notes field by scanning for any known tag.
@@ -377,6 +381,8 @@ async function loadSourceStatusCounts() {
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
     camhs:           'Source: CAMHS',
+    anp:             'Source: ANP',
+    enp:             'Source: ENP',
   };
 
   function applyFilter(q) {
@@ -421,7 +427,7 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, ahpRes, agencyRes, theatreRes, careRes, gpRes] = await Promise.all([
+  const [allRes, chRes, ahpRes, agencyRes, theatreRes, careRes, gpRes, anpRes, enpRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
@@ -443,7 +449,13 @@ async function loadSourceCounts() {
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
       .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
       .not('notes', 'ilike', '%Source: Care Home%')
-      .not('notes', 'ilike', '%Source: CAMHS%'),
+      .not('notes', 'ilike', '%Source: CAMHS%')
+      .not('notes', 'ilike', '%Source: ANP%')
+      .not('notes', 'ilike', '%Source: ENP%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: ANP%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: ENP%'),
   ]);
   state.sourceCounts = {
     all:             allRes.count     || 0,
@@ -453,6 +465,8 @@ async function loadSourceCounts() {
     agency:          agencyRes.count  || 0,
     private_theatre: theatreRes.count || 0,
     care_home:       careRes.count    || 0,
+    anp:             anpRes.count     || 0,
+    enp:             enpRes.count     || 0,
   };
 }
 
@@ -490,7 +504,9 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
       .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
       .not('notes', 'ilike', '%Source: Care Home%')
-      .not('notes', 'ilike', '%Source: CAMHS%');
+      .not('notes', 'ilike', '%Source: CAMHS%')
+      .not('notes', 'ilike', '%Source: ANP%')
+      .not('notes', 'ilike', '%Source: ENP%');
   } else if (sf === 'ahp') {
     query = query.ilike('notes', '%Source: NHS Jobs AHP%');
     if (state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
@@ -510,6 +526,10 @@ async function loadContactsPage() {
     query = query.ilike('notes', '%Source: CAMHS%');
   } else if (sf === 'care_home') {
     query = query.ilike('notes', '%Source: Care Home%');
+  } else if (sf === 'anp') {
+    query = query.ilike('notes', '%Source: ANP%');
+  } else if (sf === 'enp') {
+    query = query.ilike('notes', '%Source: ENP%');
   }
   // sf === 'all' — no filter applied
   // ──────────────────────────────────────────────────────────────────────────
@@ -628,7 +648,9 @@ function applyComposeSourceFilter(q, source) {
       .not('notes', 'ilike', '%Source: NHS Theatre%')
       .not('notes', 'ilike', '%Source: CAMHS%')
       .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
-      .not('notes', 'ilike', '%Source: Care Home%');
+      .not('notes', 'ilike', '%Source: Care Home%')
+      .not('notes', 'ilike', '%Source: ANP%')
+      .not('notes', 'ilike', '%Source: ENP%');
   }
   const SOURCE_TAGS = {
     children_homes:  'Ofsted Register',
@@ -640,6 +662,8 @@ function applyComposeSourceFilter(q, source) {
     nhs_staffbank:   'Source: NHS Staff Bank',
     ahp:             'Source: NHS Jobs AHP',
     camhs:           'Source: CAMHS',
+    anp:             'Source: ANP',
+    enp:             'Source: ENP',
   };
   const tag = SOURCE_TAGS[source];
   if (tag) return q.ilike('notes', `%${tag}%`);
@@ -754,6 +778,8 @@ function renderDatabase() {
     { key: 'children_homes',  label: "Children's Homes"  },
     { key: 'agency',          label: 'Agency Outreach'   },
     { key: 'ahp',             label: 'NHS Jobs AHP'      },
+    { key: 'anp',             label: 'ANP'               },
+    { key: 'enp',             label: 'ENP'               },
     { key: 'care_home',       label: 'Care Homes'        },
     { key: 'private_theatre', label: 'Private Theatres'  },
   ];
@@ -1106,6 +1132,8 @@ function renderCompose() {
               {k:'sterile',        l:'Sterile Services'},
               {k:'nhs_staffbank',  l:'NHS Staff Banks'},
               {k:'camhs',          l:'CAMHS'},
+              {k:'anp',            l:'ANP'},
+              {k:'enp',            l:'ENP'},
             ].map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
           </select>
         </div>
@@ -1623,6 +1651,8 @@ function renderImport() {
     { value: 'paramedic',            label: 'Paramedic' },
     { value: 'prosthetics',          label: 'Prosthetics & Orthotics' },
     { value: 'pharmacy',             label: 'Pharmacy (NHS)' },
+    { value: 'advanced_nurse_practitioner', label: 'Advanced Nurse Practitioner (ANP)' },
+    { value: 'emergency_nurse_practitioner', label: 'Emergency Nurse Practitioner (ENP)' },
     { value: 'gp_surgery',           label: 'GP Surgeries (Practice Managers)' },
   ];
   const BANDS = [
