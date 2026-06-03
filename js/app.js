@@ -846,6 +846,11 @@ function renderDatabase() {
         {k:'paramedic',        l:'Paramedic'},
         {k:'prosthetics',      l:'Prosthetics'},
         {k:'pharmacy',         l:'Pharmacy (NHS)'},
+        {k:'biomedical_science', l:'BMS'},
+        {k:'sterile_services', l:'Sterile Services'},
+        {k:'mental_health', l:'Mental Health'},
+        {k:'operating_theatres', l:'Theatres'},
+        {k:'audiology', l:'Audiology'},
         {k:'gp_surgery',      l:'GP Surgeries'},
       ].map(s => `<button class="stage-tab${state.ahpSpecialtyFilter===s.k?' active':''}" data-specialty="${s.k}">${s.l}</button>`).join('')}
     </div>` : ''}
@@ -1701,6 +1706,11 @@ function renderImport() {
     { value: 'paramedic',            label: 'Paramedic' },
     { value: 'prosthetics',          label: 'Prosthetics & Orthotics' },
     { value: 'pharmacy',             label: 'Pharmacy (NHS)' },
+    { value: 'biomedical_science', label: 'Biomedical Science (BMS)' },
+    { value: 'sterile_services', label: 'Sterile Services' },
+    { value: 'mental_health', label: 'Mental Health' },
+    { value: 'operating_theatres', label: 'Operating Theatres' },
+    { value: 'audiology', label: 'Audiology' },
     { value: 'advanced_nurse_practitioner', label: 'Advanced Nurse Practitioner (ANP)' },
     { value: 'emergency_nurse_practitioner', label: 'Emergency Nurse Practitioner (ENP)' },
     { value: 'gp_surgery',           label: 'GP Surgeries (Practice Managers)' },
