@@ -65,6 +65,8 @@ const state = {
   importLimit: 20,
   importRunning: false,
   importResult: null,
+  importSweepRunning: false,
+  importSweepMsg: '',
   careHomeRunning: false,
   careHomeResult: null,
   userProfile: null,
@@ -1580,8 +1582,54 @@ async function runNHSScrape() {
   render();
 }
 
+// Sweep an entire specialty by calling the scraper repeatedly, advancing the
+// page offset each pass until the backend reports done. DB ignores duplicates,
+// so overlapping passes are harmless.
+async function runNHSScrapeAll() {
+  if (state.importSweepRunning || state.importRunning) return;
+  state.importSweepRunning = true;
+  state.importResult = null;
+  let offset = 0, totalInserted = 0, totalFound = 0, runs = 0;
+  const MAX_RUNS = 40; // safety ceiling
+  state.importSweepMsg = 'Starting full sweep\u2026';
+  render();
+  try {
+    while (runs < MAX_RUNS) {
+      const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-jobs-scraper', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU',
+        },
+        body: JSON.stringify({
+          specialty: state.importSpecialty,
+          region:    state.importRegion,
+          band:      state.importBand,
+          limit:     50,
+          offset:    offset,
+          mode:      'scrape',
+        }),
+      });
+      const data = await res.json();
+      runs++;
+      if (data && typeof data.inserted === 'number') { totalInserted += data.inserted; totalFound += (data.found || 0); }
+      state.importSweepMsg = `Sweeping NHS Jobs \u2014 ${totalInserted} new contacts added so far (pass ${runs})\u2026`;
+      render();
+      if (!data || data.done || typeof data.next_offset !== 'number') break;
+      offset = data.next_offset;
+    }
+    state.importResult = { success: true, inserted: totalInserted, found: totalFound, jobs_checked: 0, skipped_dup: 0, specialty: state.importSpecialty, sweep: true, runs };
+    await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+  } catch (err) {
+    state.importResult = { success: false, error: err.message };
+  }
+  state.importSweepRunning = false;
+  state.importSweepMsg = '';
+  render();
+}
 
-// ── Smart CSV upload card renderer (reusable) ─────────────────────────────────
+
+// --- Smart CSV upload card renderer (reusable) ---
 function renderCsvUploadCard(sourceKey, state) {
   const stateKey = 'csv_' + sourceKey;
   const csvText = state['csvText_' + sourceKey] || '';
@@ -1809,10 +1857,13 @@ function renderImport() {
             </div>
           </div>
           <div class="import-form-actions">
-            <button class="btn primary" id="run-scrape-btn" ${state.importRunning ? 'disabled' : ''}>
+            <button class="btn primary" id="run-scrape-btn" ${state.importRunning || state.importSweepRunning ? 'disabled' : ''}>
               ${state.importRunning ? '<span class="spinner-inline"></span> Scraping NHS Jobs&hellip;' : '&#9654; Run Scraper'}
             </button>
-            <span class="import-hint">Agent reads NHS Jobs postings and extracts "For further details" contact blocks. Takes 1&ndash;3 minutes.</span>
+            <button class="btn" id="run-scrape-all-btn" ${state.importRunning || state.importSweepRunning ? 'disabled' : ''}>
+              ${state.importSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : '&#9851; Scrape ALL'}
+            </button>
+            <span class="import-hint">Run Scraper grabs up to 50. Scrape ALL sweeps every page of this specialty (several minutes).</span>
           </div>
         </div>
 
@@ -1820,6 +1871,12 @@ function renderImport() {
           <div class="import-progress">
             <div class="progress-bar"><div class="fill import-pulse"></div></div>
             <p class="muted" style="margin-top:8px;font-size:12px;">Searching NHS Jobs and reading postings&hellip; please wait</p>
+          </div>` : ''}
+
+        ${state.importSweepRunning ? `
+          <div class="import-progress">
+            <div class="progress-bar"><div class="fill import-pulse"></div></div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">${esc(state.importSweepMsg || 'Sweeping all pages\u2026')}</p>
           </div>` : ''}
 
         ${r ? `<div class="import-result ${r.success ? 'ok' : 'err'}">
@@ -2809,6 +2866,8 @@ function bindEvents() {
 
   const runScrapeBtn = $('#run-scrape-btn');
   if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
+  const runScrapeAllBtn = $('#run-scrape-all-btn');
+  if (runScrapeAllBtn) runScrapeAllBtn.onclick = () => { if (!state.importRunning && !state.importSweepRunning) runNHSScrapeAll(); };
   // Agency CSV upload
   const runEnrichBtn = $('#run-enrich-btn');
   if (runEnrichBtn) runEnrichBtn.onclick = () => { if (!state.enrichRunning) runEnrichment(); };
