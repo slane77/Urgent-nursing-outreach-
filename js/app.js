@@ -901,6 +901,7 @@ function renderDatabase() {
             ${!['ahp','anp','enp'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="first_name">Contact</th><th data-sort="job_title">Role</th><th data-sort="email">Email</th><th data-sort="town">Town</th><th data-sort="region">Region</th>` : ''}
             ${['ahp','anp','enp'].includes(state.sourceFilter) ? `
               <th>Contact Name</th>
+              <th>Job Title</th>
               <th>Email</th>
               <th>Phone</th>
               <th>NHS Trust</th>
@@ -929,6 +930,7 @@ function renderDatabase() {
               <td>${esc(c.region)}</td>` : ''}
               ${['ahp','anp','enp'].includes(state.sourceFilter)
                 ? `<td>${esc(([c.first_name,c.last_name].filter(Boolean).join(' ')) || '—')}</td>
+                   <td>${esc(c.job_title || '—')}</td>
                    <td class="ellipsis" title="${esc(c.email)}">${esc(c.email || '—')}</td>
                    <td>${esc(c.phone || '—')}</td>
                    <td class="ellipsis" title="${esc(c.org)}">${esc(c.org || '—')}</td>
