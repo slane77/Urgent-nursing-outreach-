@@ -910,8 +910,8 @@ function renderDatabase() {
               <th>Email</th>
               <th>Phone</th>
               <th>NHS Trust</th>
-              <th>Department</th>
               <th>Specialty</th>
+              <th>Last Emailed</th>
               <th>Band</th>
               <th>Date Added</th>
               <th>NHS Jobs</th>` : `
@@ -939,8 +939,8 @@ function renderDatabase() {
                    <td class="ellipsis" title="${esc(c.email)}">${esc(c.email || '—')}</td>
                    <td>${esc(c.phone || '—')}</td>
                    <td class="ellipsis" title="${esc(c.org)}">${esc(c.org || '—')}</td>
-                   <td>${esc(c.department || '—')}</td>
                    <td>${esc(extractSpecialty(c.notes))}</td>
+                   <td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
                    <td>${esc(c.band_requested || '—')}</td>
                    <td>${c.created_at ? esc(c.created_at.slice(0,10)) : '—'}</td>
                    <td>${c.source_url ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener" class="nhs-jobs-link" title="View on NHS Jobs">🔗 NHS Jobs</a>` : '<span class="muted">—</span>'}</td>`
