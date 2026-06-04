@@ -2521,6 +2521,71 @@ async function saveSenderDetails() {
   state.senderSaving = false; render();
 }
 
+// ===== Vacancy Title Keywords editor (table: specialty_title_keywords) =====
+var KW_SPECS = [
+  ['pharmacy','Pharmacy'],
+  ['gp_surgery','GP Surgery'],
+  ['physiotherapy','Physiotherapy'],
+  ['occupational_therapy','Occupational Therapy'],
+  ['radiography','Radiography'],
+  ['speech_language','Speech & Language'],
+  ['audiology','Audiology'],
+  ['biomedical_science','Biomedical Science'],
+  ['sterile_services','Sterile Services'],
+  ['mental_health','Mental Health'],
+  ['operating_theatres','Operating Theatres'],
+  ['dietetics','Dietetics'],
+  ['podiatry','Podiatry'],
+  ['orthoptics','Orthoptics'],
+  ['art_therapy','Art Therapy'],
+  ['paramedic','Paramedic'],
+  ['prosthetics','Prosthetics'],
+  ['advanced_nurse_practitioner','Advanced Nurse Practitioner (ANP)'],
+  ['emergency_nurse_practitioner','Emergency Nurse Practitioner (ENP)']
+];
+var specKw = { loading:false, loaded:false, rows:[] };
+async function loadSpecKeywords() {
+  if (specKw.loading) return;
+  specKw.loading = true;
+  try {
+    var r = await sb.from('specialty_title_keywords').select('id,specialty,keyword').order('keyword', { ascending: true });
+    specKw.rows = (r && r.data) ? r.data : [];
+    specKw.loaded = true;
+  } catch (e) { console.warn('Keyword load (non-fatal):', e.message); }
+  specKw.loading = false;
+  render();
+}
+function renderSpecKeywordsSection() {
+  if (!specKw.loaded) {
+    if (!specKw.loading) loadSpecKeywords();
+    return '<div class="settings-section"><h3 class="settings-section-title">&#x1F50D; Vacancy Title Keywords</h3><p class="muted" style="font-size:12px;">Loading keywords&hellip;</p></div>';
+  }
+  var byspec = {};
+  specKw.rows.forEach(function(r){ (byspec[r.specialty] = byspec[r.specialty] || []).push(r); });
+  var blocks = KW_SPECS.map(function(p){
+    var spec = p[0], label = p[1];
+    var list = byspec[spec] || [];
+    var chips = list.length ? list.map(function(r){
+      return '<span style="display:inline-flex;align-items:center;gap:4px;background:#EEF2FF;color:#3730A3;border-radius:12px;padding:2px 6px 2px 10px;font-size:12px;">'
+        + esc(r.keyword)
+        + '<button data-kw-del="' + r.id + '" title="Remove" style="border:none;background:transparent;color:#6366F1;cursor:pointer;font-size:15px;line-height:1;padding:0 2px;">&times;</button></span>';
+    }).join('') : '<span class="muted" style="font-size:12px;">No keywords yet &mdash; add one below.</span>';
+    return '<div style="margin-bottom:14px;">'
+      + '<div style="font-weight:600;font-size:13px;margin-bottom:6px;">' + esc(label) + ' <span class="muted" style="font-weight:400;font-size:11px;">(' + list.length + ')</span></div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">' + chips + '</div>'
+      + '<div style="display:flex;gap:6px;max-width:440px;">'
+      + '<input class="search kw-add-input" id="kw-add-input-' + spec + '" placeholder="add a vacancy-title term&hellip;" style="flex:1;" />'
+      + '<button class="btn small" data-kw-add="' + spec + '">+ Add</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+  return '<div class="settings-section">'
+    + '<h3 class="settings-section-title">&#x1F50D; Vacancy Title Keywords</h3>'
+    + '<p class="muted" style="font-size:12px;margin-bottom:14px;">A job is scraped into a source only if its <strong>vacancy title</strong> contains one of these terms. Add spelling variants (e.g. &ldquo;medicine management&rdquo; vs &ldquo;medicines management&rdquo;) to catch more roles, or remove terms that pull in the wrong jobs. Matching is case-insensitive partial match. Changes take effect on the next scrape.</p>'
+    + blocks
+    + '</div>';
+}
+
 function renderSettings() {
   var isAdmin = !state.userProfile || state.userProfile.role === 'admin';
 
@@ -2613,9 +2678,11 @@ function renderSettings() {
       + '</div>';
   }
 
+  var kwSection = renderSpecKeywordsSection();
   return '<div class="settings-wrap">'
     + senderSection
     + teamSection
+    + kwSection
     + '<div class="settings-section">'
     + '<h3 class="settings-section-title">&#x1F4E4; Export Data</h3>'
     + '<p class="muted" style="font-size:12px;margin-bottom:10px;">Download all contacts as CSV for backup or analysis.</p>'
@@ -3078,6 +3145,27 @@ function bindEvents() {
   var snd_name = $('#sender-name-input'); if (snd_name) snd_name.oninput = function(e) { state.senderName = e.target.value; };
   var snd_email = $('#sender-email-input'); if (snd_email) snd_email.oninput = function(e) { state.senderEmail = e.target.value; };
   var snd_save = $('#save-sender-btn'); if (snd_save) snd_save.onclick = function() { if (!state.senderSaving) saveSenderDetails(); };
+  document.querySelectorAll('[data-kw-del]').forEach(function(btn){
+    btn.onclick = async function(){
+      try { await sb.from('specialty_title_keywords').delete().eq('id', parseInt(btn.dataset.kwDel, 10)); }
+      catch(e){ alert('Could not remove keyword: ' + e.message); return; }
+      await loadSpecKeywords();
+    };
+  });
+  document.querySelectorAll('[data-kw-add]').forEach(function(btn){
+    btn.onclick = async function(){
+      var spec = btn.dataset.kwAdd;
+      var inp = document.getElementById('kw-add-input-' + spec);
+      var val = (inp && inp.value) ? inp.value.trim().toLowerCase() : '';
+      if (!val) return;
+      try { await sb.from('specialty_title_keywords').insert({ specialty: spec, keyword: val }); }
+      catch(e){ alert('Could not add keyword: ' + e.message); return; }
+      await loadSpecKeywords();
+    };
+  });
+  document.querySelectorAll('.kw-add-input').forEach(function(inp){
+    inp.onkeydown = function(e){ if (e.key === 'Enter') { var b = document.querySelector('[data-kw-add="' + inp.id.replace('kw-add-input-','') + '"]'); if (b) b.onclick(); } };
+  });
   // Team invite bindings
   var inv_name = $('#invite-name'); if (inv_name) inv_name.oninput = function(e) { state.inviteName = e.target.value; };
   var inv_email = $('#invite-email'); if (inv_email) inv_email.oninput = function(e) { state.inviteEmail = e.target.value; };
