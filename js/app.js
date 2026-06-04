@@ -1778,81 +1778,6 @@ function renderImport() {
     <div class="import-wrap">
       <h2 class="section-title">Import Contacts</h2>
 
-            <!-- Agency Outreach CSV Upload -->
-      <div class="import-card">
-        <div class="import-card-header">
-          <div class="import-card-icon">📂</div>
-          <div class="import-card-meta">
-            <div class="import-card-title">Contact List — CSV Upload</div>
-            <div class="import-card-sub">Upload any contact CSV. Supports GP Surgeries, Agency Outreach and all other sources. Auto-maps columns: name, email, org, job title, phone, region/geographic area, town etc.</div>
-          </div>
-          <span class="import-badge live">Live</span>
-        </div>
-        <div class="import-form">
-          <div class="import-form-row">
-            <div class="field">
-              <label>Source / List Type</label>
-              <select class="select" id="agency-csv-source">
-                ${[
-                  { v: 'gp_surgery',      l: 'GP Surgeries' },
-                  { v: 'agency',          l: 'Agency Outreach' },
-                  { v: 'private_theatre', l: 'Private Theatres' },
-                  { v: 'children_homes',  l: "Children's Homes" },
-                  { v: 'bms',             l: 'BMS' },
-                  { v: 'sterile',         l: 'Sterile Services' },
-                  { v: 'nhs_staffbank',   l: 'NHS Staff Banks' },
-                  { v: 'camhs',           l: 'CAMHS' },
-                ].map(s => `<option value="${s.v}" ${state.agencyCsvSource === s.v ? 'selected' : ''}>${s.l}</option>`).join('')}
-              </select>
-            </div>
-            <div class="field">
-              <label>Select CSV file</label>
-              <input type="file" id="agency-csv-input" accept=".csv,.txt" style="font-size:13px;padding:6px 0;" />
-            </div>
-          </div>
-
-          ${state.agencyCsvPreview && state.agencyCsvPreview.success ? `
-          <div class="csv-preview">
-            <div class="csv-preview-header">
-              <strong>${state.agencyCsvPreview.totalRows} rows</strong> &nbsp;·&nbsp;
-              ${state.agencyCsvPreview.hasEmail ? '<span style="color:var(--green-dark)">✓ Email column detected</span>' : '<span style="color:var(--red)">⚠ No email column found</span>'}
-            </div>
-            <div class="csv-col-map">
-              ${state.agencyCsvPreview.headers.map((h, i) => `
-                <span class="csv-col ${state.agencyCsvPreview.mapped[i] ? 'mapped' : 'unmapped'}">
-                  ${esc(h)} ${state.agencyCsvPreview.mapped[i] ? '→ '+state.agencyCsvPreview.mapped[i] : '(ignored)'}
-                </span>`).join('')}
-            </div>
-          </div>` : ''}
-
-          <div class="import-form-actions">
-            <button class="btn primary" id="agency-upload-btn"
-              ${!state.agencyCsvText || state.agencyUploading ? 'disabled' : ''}>
-              ${state.agencyUploading ? '<span class="spinner-inline"></span> Uploading&hellip;' : '&#8593; Upload to Database'}
-            </button>
-            <span class="import-hint">Contacts tagged <code>Source: Agency Outreach</code>. Duplicates (same email) skipped automatically.</span>
-          </div>
-        </div>
-        ${state.agencyUploading ? `<div class="import-progress">
-          <div class="progress-bar"><div class="fill" style="width:${state.agencyProgress ? Math.round((state.agencyProgress.currentChunk / state.agencyProgress.totalChunks) * 100) : 5}%;transition:width 0.3s;"></div></div>
-          <p class="muted" style="margin-top:8px;font-size:12px;">${state.agencyProgress
-            ? `Uploading chunk ${state.agencyProgress.currentChunk} of ${state.agencyProgress.totalChunks} &mdash; ${state.agencyProgress.rowsDone.toLocaleString()} of ${state.agencyProgress.totalRowsInFile.toLocaleString()} rows processed&hellip;`
-            : 'Preparing upload&hellip;'}</p>
-        </div>` : ''}
-        ${state.agencyResult ? `<div class="import-result ${state.agencyResult.success ? 'ok' : 'err'}">
-          ${state.agencyResult.success
-            ? `<div class="import-result-stats">
-                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.total_rows}</div><div class="import-stat-lbl">Total rows</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
-                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.skipped_dup}</div><div class="import-stat-lbl">Duplicate</div></div>
-              </div>
-              <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${state.agencyResult.inserted} contacts added &mdash; view in Database under the appropriate source tab</p>`
-            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.agencyResult.error || 'Upload failed')}</p>`}
-        </div>` : ''}
-      </div>
-
-
       <div class="import-card">
         <div class="import-card-header">
           <div class="import-card-icon">🏥</div>
@@ -1930,6 +1855,80 @@ function renderImport() {
             <p style="color:#DC2626;font-size:13px;">&#10005; ${esc(r.error || 'Unknown error')}</p>
             ${(r.error||'').includes('ANTHROPIC_API_KEY') ? '<p class="muted" style="margin-top:6px;font-size:12px;">Add key: Supabase Dashboard &rarr; Project Settings &rarr; Edge Functions &rarr; Secrets &rarr; ANTHROPIC_API_KEY</p>' : ''}
           `}
+        </div>` : ''}
+      </div>
+
+            <!-- Agency Outreach CSV Upload -->
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">📂</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">Contact List — CSV Upload</div>
+            <div class="import-card-sub">Upload any contact CSV. Supports GP Surgeries, Agency Outreach and all other sources. Auto-maps columns: name, email, org, job title, phone, region/geographic area, town etc.</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+        <div class="import-form">
+          <div class="import-form-row">
+            <div class="field">
+              <label>Source / List Type</label>
+              <select class="select" id="agency-csv-source">
+                ${[
+                  { v: 'gp_surgery',      l: 'GP Surgeries' },
+                  { v: 'agency',          l: 'Agency Outreach' },
+                  { v: 'private_theatre', l: 'Private Theatres' },
+                  { v: 'children_homes',  l: "Children's Homes" },
+                  { v: 'bms',             l: 'BMS' },
+                  { v: 'sterile',         l: 'Sterile Services' },
+                  { v: 'nhs_staffbank',   l: 'NHS Staff Banks' },
+                  { v: 'camhs',           l: 'CAMHS' },
+                ].map(s => `<option value="${s.v}" ${state.agencyCsvSource === s.v ? 'selected' : ''}>${s.l}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Select CSV file</label>
+              <input type="file" id="agency-csv-input" accept=".csv,.txt" style="font-size:13px;padding:6px 0;" />
+            </div>
+          </div>
+
+          ${state.agencyCsvPreview && state.agencyCsvPreview.success ? `
+          <div class="csv-preview">
+            <div class="csv-preview-header">
+              <strong>${state.agencyCsvPreview.totalRows} rows</strong> &nbsp;·&nbsp;
+              ${state.agencyCsvPreview.hasEmail ? '<span style="color:var(--green-dark)">✓ Email column detected</span>' : '<span style="color:var(--red)">⚠ No email column found</span>'}
+            </div>
+            <div class="csv-col-map">
+              ${state.agencyCsvPreview.headers.map((h, i) => `
+                <span class="csv-col ${state.agencyCsvPreview.mapped[i] ? 'mapped' : 'unmapped'}">
+                  ${esc(h)} ${state.agencyCsvPreview.mapped[i] ? '→ '+state.agencyCsvPreview.mapped[i] : '(ignored)'}
+                </span>`).join('')}
+            </div>
+          </div>` : ''}
+
+          <div class="import-form-actions">
+            <button class="btn primary" id="agency-upload-btn"
+              ${!state.agencyCsvText || state.agencyUploading ? 'disabled' : ''}>
+              ${state.agencyUploading ? '<span class="spinner-inline"></span> Uploading&hellip;' : '&#8593; Upload to Database'}
+            </button>
+            <span class="import-hint">Contacts tagged <code>Source: Agency Outreach</code>. Duplicates (same email) skipped automatically.</span>
+          </div>
+        </div>
+        ${state.agencyUploading ? `<div class="import-progress">
+          <div class="progress-bar"><div class="fill" style="width:${state.agencyProgress ? Math.round((state.agencyProgress.currentChunk / state.agencyProgress.totalChunks) * 100) : 5}%;transition:width 0.3s;"></div></div>
+          <p class="muted" style="margin-top:8px;font-size:12px;">${state.agencyProgress
+            ? `Uploading chunk ${state.agencyProgress.currentChunk} of ${state.agencyProgress.totalChunks} &mdash; ${state.agencyProgress.rowsDone.toLocaleString()} of ${state.agencyProgress.totalRowsInFile.toLocaleString()} rows processed&hellip;`
+            : 'Preparing upload&hellip;'}</p>
+        </div>` : ''}
+        ${state.agencyResult ? `<div class="import-result ${state.agencyResult.success ? 'ok' : 'err'}">
+          ${state.agencyResult.success
+            ? `<div class="import-result-stats">
+                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.inserted}</div><div class="import-stat-lbl">Added</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.total_rows}</div><div class="import-stat-lbl">Total rows</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.skipped_no_email}</div><div class="import-stat-lbl">No email</div></div>
+                <div class="import-stat"><div class="import-stat-val">${state.agencyResult.skipped_dup}</div><div class="import-stat-lbl">Duplicate</div></div>
+              </div>
+              <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${state.agencyResult.inserted} contacts added &mdash; view in Database under the appropriate source tab</p>`
+            : `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.agencyResult.error || 'Upload failed')}</p>`}
         </div>` : ''}
       </div>
 
