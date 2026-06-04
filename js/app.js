@@ -1636,6 +1636,46 @@ async function runNHSScrapeAll() {
 }
 
 
+async function runNHSScrapeEverything() {
+  if (state.importSweepRunning || state.importRunning) return;
+  const ALL_SPECS = ['physiotherapy','occupational_therapy','radiography','speech_language','dietetics','podiatry','orthoptics','art_therapy','paramedic','prosthetics','pharmacy','biomedical_science','sterile_services','mental_health','operating_theatres','audiology','advanced_nurse_practitioner','emergency_nurse_practitioner','gp_surgery'];
+  state.importSweepRunning = true;
+  state.importResult = null;
+  let grandInserted = 0, grandFound = 0;
+  const MAX_RUNS = 40;
+  state.importSweepMsg = 'Starting full sweep of every specialty\u2026';
+  render();
+  try {
+    for (let si = 0; si < ALL_SPECS.length; si++) {
+      const spec = ALL_SPECS[si];
+      let offset = 0, runs = 0, specInserted = 0;
+      while (runs < MAX_RUNS) {
+        state.importSweepMsg = `Sweeping ${spec.replace(/_/g,' ')} (${si + 1}/${ALL_SPECS.length}) \u2014 ${grandInserted + specInserted} new contacts so far\u2026`;
+        render();
+        const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-jobs-scraper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+          body: JSON.stringify({ specialty: spec, region: state.importRegion, band: state.importBand, limit: 50, offset: offset, mode: 'scrape' }),
+        });
+        const data = await res.json();
+        runs++;
+        if (data && typeof data.inserted === 'number') { specInserted += data.inserted; grandFound += (data.found || 0); }
+        if (!data || data.done || typeof data.next_offset !== 'number') break;
+        offset = data.next_offset;
+      }
+      grandInserted += specInserted;
+    }
+    state.importResult = { success: true, inserted: grandInserted, found: grandFound, jobs_checked: 0, skipped_dup: 0, specialty: 'all specialties', sweep: true };
+    await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+  } catch (err) {
+    state.importResult = { success: false, error: err.message };
+  }
+  state.importSweepRunning = false;
+  state.importSweepMsg = '';
+  render();
+}
+
+
 // --- Smart CSV upload card renderer (reusable) ---
 function renderCsvUploadCard(sourceKey, state) {
   const stateKey = 'csv_' + sourceKey;
@@ -1858,7 +1898,10 @@ function renderImport() {
             <button class="btn" id="run-scrape-all-btn" ${state.importRunning || state.importSweepRunning ? 'disabled' : ''}>
               ${state.importSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : '&#9851; Scrape ALL'}
             </button>
-            <span class="import-hint">Run Scraper grabs up to 50. Scrape ALL sweeps every page of this specialty (several minutes).</span>
+            <button class="btn" id="run-scrape-every-btn" ${state.importRunning || state.importSweepRunning ? 'disabled' : ''}>
+              ${state.importSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : '&#9851; Scrape ALL Specialties'}
+            </button>
+            <span class="import-hint">Run Scraper grabs up to 50. Scrape ALL sweeps this specialty; Scrape ALL Specialties sweeps every specialty (can take several minutes).</span>
           </div>
         </div>
 
@@ -2919,6 +2962,8 @@ function bindEvents() {
   if (runScrapeBtn) runScrapeBtn.onclick = () => { if (!state.importRunning) runNHSScrape(); };
   const runScrapeAllBtn = $('#run-scrape-all-btn');
   if (runScrapeAllBtn) runScrapeAllBtn.onclick = () => { if (!state.importRunning && !state.importSweepRunning) runNHSScrapeAll(); };
+  const runScrapeEveryBtn = $('#run-scrape-every-btn');
+  if (runScrapeEveryBtn) runScrapeEveryBtn.onclick = () => { if (!state.importRunning && !state.importSweepRunning) runNHSScrapeEverything(); };
   // Agency CSV upload
   const runEnrichBtn = $('#run-enrich-btn');
   if (runEnrichBtn) runEnrichBtn.onclick = () => { if (!state.enrichRunning) runEnrichment(); };
