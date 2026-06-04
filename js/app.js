@@ -675,6 +675,7 @@ function applyComposeSourceFilter(q, source) {
 async function buildComposeQueueFromDb() {
   let query = sb.from('contacts').select('*').eq('status', state.composeListFilter);
   query = applyComposeSourceFilter(query, state.composeSourceFilter);
+  if (state.composeSourceFilter === 'ahp' && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
   if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
@@ -696,6 +697,7 @@ async function previewComposeCounts() {
   let q = sb.from('contacts').select('*', { count: 'exact', head: true })
     .eq('status', state.composeListFilter);
   q = applyComposeSourceFilter(q, state.composeSourceFilter);
+  if (state.composeSourceFilter === 'ahp' && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') q = q.eq('department', state.composeSpecialtyFilter);
   if (state.composeRegionFilter) q = q.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) q = q.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) q = q.ilike('town', `%${state.composeTownFilter}%`);
@@ -1146,6 +1148,15 @@ function renderCompose() {
             ].map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
           </select>
         </div>
+        ${state.composeSourceFilter === 'ahp' ? `
+        <div class="field">
+          <label>Specialty</label>
+          <select class="select" id="compose-specialty">
+            <option value="all" ${(!state.composeSpecialtyFilter||state.composeSpecialtyFilter==='all')?'selected':''}>All AHP specialties</option>
+            ${[['physiotherapy','Physiotherapy'],['occupational_therapy','Occupational Therapy'],['radiography','Radiography'],['speech_language','Speech &amp; Language'],['dietetics','Dietetics'],['podiatry','Podiatry'],['orthoptics','Orthoptics'],['art_therapy','Art Therapy'],['paramedic','Paramedic'],['prosthetics','Prosthetics'],['pharmacy','Pharmacy'],['audiology','Audiology'],['biomedical_science','Biomedical Science (BMS)'],['sterile_services','Sterile Services'],['mental_health','Mental Health'],['operating_theatres','Operating Theatres']].map(o => `<option value="${o[0]}" ${state.composeSpecialtyFilter===o[0]?'selected':''}>${o[1]}</option>`).join('')}
+          </select>
+        </div>
+        ` : ''}
         <div class="field">
           <label>Status</label>
           <select class="select" id="compose-list">
@@ -3096,7 +3107,9 @@ function bindEvents() {
   if (composeTemplate) composeTemplate.onchange = (e) => { state.composeTemplateId = e.target.value; render(); };
   const composeList = $('#compose-list');
   const composeSource = $('#compose-source');
-  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composePreviewCounts = null; render(); };
+  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composeSpecialtyFilter = 'all'; state.composePreviewCounts = null; render(); };
+  const composeSpecialty = $('#compose-specialty');
+  if (composeSpecialty) composeSpecialty.onchange = (e) => { state.composeSpecialtyFilter = e.target.value; state.composePreviewCounts = null; render(); };
   if (composeList) composeList.onchange = (e) => { state.composeListFilter = e.target.value; state.composePreviewCounts = null; render(); };
   const composeRegion = $('#compose-region');
   if (composeRegion) composeRegion.onchange = (e) => { state.composeRegionFilter = e.target.value; state.composePreviewCounts = null; render(); };
