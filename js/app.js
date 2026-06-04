@@ -1738,24 +1738,7 @@ function renderImport() {
     <div class="import-wrap">
       <h2 class="section-title">Import Contacts</h2>
 
-            <!-- Children's Homes CSV Upload -->
-      <div class="import-card">
-        <div class="import-card-header">
-          <div class="import-card-icon">🏠</div>
-          <div class="import-card-meta">
-            <div class="import-card-title">Children's Homes — CSV Upload</div>
-            <div class="import-card-sub">Upload a CSV of children's home contacts. Auto-detects columns for name, email, phone, home name, town and region.</div>
-          </div>
-          <span class="import-badge live">Live</span>
-        </div>
-        <div class="import-card-template-hint" style="font-size:12px;color:var(--grey-500);margin:0 0 12px 0;padding:0 4px;">
-          Expected columns: <code>Home Name</code> <code>Contact Name</code> <code>Email</code> <code>Phone</code> <code>Town</code> <code>Region</code> &mdash;
-          <a href="data:text/csv;charset=utf-8,Home%20Name%2CContact%20Name%2CEmail%2CPhone%2CTown%2CRegion%0AExample%20Children's%20Home%2CJane%20Smith%2Cjane%40example.co.uk%2C01234%20567890%2CManchester%2CNorth%20West" download="childrens_homes_template.csv" style="color:var(--primary);">Download template</a>
-        </div>
-        ${renderCsvUploadCard('children_homes', state)}
-      </div>
-
-<!-- Agency Outreach CSV Upload -->
+            <!-- Agency Outreach CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
           <div class="import-card-icon">📂</div>
@@ -1899,7 +1882,7 @@ function renderImport() {
               <div class="import-stat"><div class="import-stat-val">${r.jobs_checked||r.skipped_no_email||0}</div><div class="import-stat-lbl">${r.jobs_checked ? 'Checked' : 'No email'}</div></div>
               <div class="import-stat"><div class="import-stat-val">${r.skipped_dup}</div><div class="import-stat-lbl">Duplicate</div></div>
             </div>
-            <p class="muted" style="margin-top:8px;font-size:12px;">&#10003; ${r.inserted} new ${(r.specialty||'').replace('_',' ')} contacts added &mdash; switch to Database &rarr; All Sources to view them</p>
+            <p class="muted" style="margin-top:8px;font-size:12px;">${r.inserted > 0 ? '&#10003; ' + r.inserted + ' new ' + (r.specialty||'').replace('_',' ') + ' contacts added &mdash; switch to Database &rarr; All Sources to view them' : '&#10003; Already up to date &mdash; no new ' + (r.specialty||'').replace('_',' ') + ' contacts found. Anything matching is already in your database.'}</p>
           ` : `
             <p style="color:#DC2626;font-size:13px;">&#10005; ${esc(r.error || 'Unknown error')}</p>
             ${(r.error||'').includes('ANTHROPIC_API_KEY') ? '<p class="muted" style="margin-top:6px;font-size:12px;">Add key: Supabase Dashboard &rarr; Project Settings &rarr; Edge Functions &rarr; Secrets &rarr; ANTHROPIC_API_KEY</p>' : ''}
@@ -1945,18 +1928,7 @@ function renderImport() {
         ${renderCsvUploadCard('private_theatre', state)}
       </div>
 
-      ${placeholders.map(p => `
-        <div class="import-card disabled">
-          <div class="import-card-header">
-            <div class="import-card-icon">${p.icon}</div>
-            <div class="import-card-meta">
-              <div class="import-card-title">${p.title}</div>
-              <div class="import-card-sub">${p.sub}</div>
-            </div>
-            <span class="import-badge soon">Soon</span>
-          </div>
-        </div>
-      `).join('')}
+
     </div>
   `;
 }
