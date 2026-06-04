@@ -981,8 +981,12 @@ function renderTemplates() {
     </div>
     <div class="token-helper">
       <strong>Available personalisation tokens</strong> — paste these into any template:
-      <code>{{FirstName}}</code> <code>{{LastName}}</code> <code>{{Title}}</code>
-      <code>{{Org}}</code> <code>{{Town}}</code> <code>{{Region}}</code> <code>{{JobTitle}}</code>
+      <code>{{FirstName}}</code> <code>{{LastName}}</code> <code>{{Name}}</code>
+      <code>{{VacancyTitle}}</code> <code>{{Org}}</code> <code>{{Band}}</code> <code>{{Specialty}}</code>
+      <code>{{Town}}</code> <code>{{Region}}</code> <code>{{Title}}</code> <code>{{SenderName}}</code>
+      <div class="muted" style="margin-top:8px;font-size:12px;line-height:1.55;">
+        <strong>{{VacancyTitle}}</strong> = the exact role from their advert (e.g. &ldquo;Band 6 Physiotherapist&rdquo;) &mdash; the key token for NHS Jobs &amp; GP leads. <code>{{Vacancy}}</code> and <code>{{Role}}</code> are the same thing. <code>{{Band}}</code> and <code>{{Specialty}}</code> also come from the advert. Everything degrades gracefully if a field is blank (e.g. {{FirstName}} &rarr; &ldquo;there&rdquo;, {{Org}} &rarr; &ldquo;your organisation&rdquo;). Heads-up: {{Town}} and {{Region}} are usually empty on NHS Jobs leads, so don&rsquo;t build the message around them there.
+      </div>
     </div>
     <div class="template-list">
       ${state.templates.length === 0 ? '<div class="empty">No templates yet.</div>' :
