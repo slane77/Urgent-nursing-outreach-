@@ -2655,7 +2655,7 @@ function renderSettings() {
         + '<td class="muted" style="font-size:11px;">' + esc(srcs) + '</td>'
         + '<td class="muted" style="font-size:11px;">' + esc(u.sender_email || '—') + '</td>'
         + '<td class="muted" style="font-size:11px;">' + lastLogin + '</td>'
-        + '<td>' + (isScott ? '<span class="muted">Admin</span>' : '<button class="btn small danger" data-delete-user="' + esc(u.user_id) + '" data-user-email="' + esc(u.email) + '">Remove</button>') + '</td>'
+        + '<td>' + (isScott ? '<span class="muted">Admin</span>' : '<button class="btn small" data-reset-user="' + esc(u.user_id) + '" data-user-email="' + esc(u.email) + '">Reset password</button> <button class="btn small danger" data-delete-user="' + esc(u.user_id) + '" data-user-email="' + esc(u.email) + '">Remove</button>') + '</td>'
         + '</tr>';
     }).join('');
 
@@ -3203,6 +3203,22 @@ function bindEvents() {
         body: JSON.stringify({ action: 'delete', target_user_id: btn.dataset.deleteUser }),
       });
       await loadTeamUsers();
+    };
+  });
+  document.querySelectorAll('[data-reset-user]').forEach(function(btn) {
+    btn.onclick = async function() {
+      var pw = prompt('Set a new password for ' + btn.dataset.userEmail + ' (min 8 characters). Give it to them so they can log in:');
+      if (pw === null) return;
+      pw = pw.trim();
+      if (pw.length < 8) { alert('Password must be at least 8 characters.'); return; }
+      var sess2 = (await sb.auth.getSession()).data.session;
+      var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/user-manager', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + sess2.access_token },
+        body: JSON.stringify({ action: 'set_password', target_user_id: btn.dataset.resetUser, new_password: pw }),
+      });
+      var d = await res.json().catch(function() { return {}; });
+      if (res.ok && d.success) { toast('Password updated for ' + btn.dataset.userEmail); }
+      else { alert('Could not update password: ' + (d.error || ('HTTP ' + res.status))); }
     };
   });
   // M365 responses bindings
