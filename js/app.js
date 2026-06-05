@@ -432,7 +432,7 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, ahpRes, agencyRes, theatreRes, careRes, gpRes, anpRes, enpRes] = await Promise.all([
+  const [allRes, chRes, ahpRes, agencyRes, theatreRes, careRes, gpRes, anpRes, enpRes, scotRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
@@ -461,6 +461,8 @@ async function loadSourceCounts() {
       .ilike('notes', '%Source: ANP%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Source: ENP%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: NHS Scotland%'),
   ]);
   state.sourceCounts = {
     all:             allRes.count     || 0,
@@ -472,6 +474,7 @@ async function loadSourceCounts() {
     care_home:       careRes.count    || 0,
     anp:             anpRes.count     || 0,
     enp:             enpRes.count     || 0,
+    nhs_scotland:    scotRes.count    || 0,
   };
 }
 
@@ -793,6 +796,7 @@ function renderDatabase() {
     { key: 'children_homes',  label: "Children's Homes"  },
     { key: 'agency',          label: 'Agency Outreach'   },
     { key: 'ahp',             label: 'NHS Jobs AHP'      },
+    { key: 'nhs_scotland',    label: 'NHS Scotland'     },
     { key: 'anp',             label: 'ANP'               },
     { key: 'enp',             label: 'ENP'               },
     { key: 'care_home',       label: 'Care Homes'        },
