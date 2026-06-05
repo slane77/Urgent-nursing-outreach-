@@ -129,6 +129,7 @@ const MODAL_SOURCE_TAGS = {
   children_homes:  'Ofsted Register',
   agency:          'Source: Agency Outreach',
   ahp:             'Source: NHS Jobs AHP',
+  nhs_scotland:    'Source: NHS Scotland',
   private_theatre: 'Source: Private Theatre',
   care_home:       'Source: Care Home',
   bms:             'Source: BMS Outreach',
@@ -143,6 +144,7 @@ const MODAL_SOURCE_OPTIONS = [
   { k: 'children_homes',  l: "Children's Home" },
   { k: 'agency',          l: 'Agency Outreach' },
   { k: 'ahp',             l: 'AHP (NHS Jobs)' },
+  { k: 'nhs_scotland',    l: 'NHS Scotland (AHP)' },
   { k: 'private_theatre', l: 'Private Theatre' },
   { k: 'care_home',       l: 'Care Home' },
   { k: 'bms',             l: 'BMS' },
@@ -377,6 +379,7 @@ async function loadSourceStatusCounts() {
     children_homes:  'Ofsted Register',
     agency:          'Source: Agency Outreach',
     ahp:             'Source: NHS Jobs AHP',
+    nhs_scotland:    'Source: NHS Scotland',
     private_theatre: 'Source: Private Theatre',
     care_home:       'Source: Care Home',
     bms:             'Source: BMS Outreach',
@@ -508,9 +511,15 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: Care Home%')
       .not('notes', 'ilike', '%Source: CAMHS%')
       .not('notes', 'ilike', '%Source: ANP%')
-      .not('notes', 'ilike', '%Source: ENP%');
+      .not('notes', 'ilike', '%Source: ENP%')
+      .not('notes', 'ilike', '%Source: NHS Scotland%');
   } else if (sf === 'ahp') {
     query = query.ilike('notes', '%Source: NHS Jobs AHP%');
+    if (state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
+      query = query.ilike('notes', `%Specialty: ${state.ahpSpecialtyFilter}%`);
+    }
+  } else if (sf === 'nhs_scotland') {
+    query = query.ilike('notes', '%Source: NHS Scotland%');
     if (state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
       query = query.ilike('notes', `%Specialty: ${state.ahpSpecialtyFilter}%`);
     }
@@ -652,12 +661,14 @@ function applyComposeSourceFilter(q, source) {
       .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
       .not('notes', 'ilike', '%Source: Care Home%')
       .not('notes', 'ilike', '%Source: ANP%')
-      .not('notes', 'ilike', '%Source: ENP%');
+      .not('notes', 'ilike', '%Source: ENP%')
+      .not('notes', 'ilike', '%Source: NHS Scotland%');
   }
   const SOURCE_TAGS = {
     children_homes:  'Ofsted Register',
     agency:          'Source: Agency Outreach',
     ahp:             'Source: NHS Jobs AHP',
+    nhs_scotland:    'Source: NHS Scotland',
     private_theatre: 'Source: Private Theatre',
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
@@ -675,7 +686,7 @@ function applyComposeSourceFilter(q, source) {
 async function buildComposeQueueFromDb() {
   let query = sb.from('contacts').select('*').eq('status', state.composeListFilter);
   query = applyComposeSourceFilter(query, state.composeSourceFilter);
-  if (state.composeSourceFilter === 'ahp' && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
+  if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
   if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
@@ -697,7 +708,7 @@ async function previewComposeCounts() {
   let q = sb.from('contacts').select('*', { count: 'exact', head: true })
     .eq('status', state.composeListFilter);
   q = applyComposeSourceFilter(q, state.composeSourceFilter);
-  if (state.composeSourceFilter === 'ahp' && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') q = q.eq('department', state.composeSpecialtyFilter);
+  if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') q = q.eq('department', state.composeSpecialtyFilter);
   if (state.composeRegionFilter) q = q.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) q = q.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) q = q.ilike('town', `%${state.composeTownFilter}%`);
@@ -1093,7 +1104,7 @@ async function buildAllComposeContactsFromDb() {
   for (let from = 0; ; from += PAGE) {
     let query = sb.from('contacts').select('*').eq('status', state.composeListFilter);
     query = applyComposeSourceFilter(query, state.composeSourceFilter);
-    if (state.composeSourceFilter === 'ahp' && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
+    if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
     if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
     if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
     if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
