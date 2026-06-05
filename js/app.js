@@ -426,7 +426,7 @@ async function loadFilterOptions() {
   // Get distinct regions and countries (small, cacheable)
   const { data: rData } = await sb.from('contacts').select('region').not('region', 'is', null).neq('region', '');
   const { data: cData } = await sb.from('contacts').select('country').not('country', 'is', null).neq('country', '');
-  state.regions = Array.from(new Set((rData || []).map(r => r.region))).sort();
+  state.regions = Array.from(new Set((rData || []).map(r => r.region))).filter(r => r && !/^\d+$/.test(String(r).trim())).sort();
   state.countries = Array.from(new Set((cData || []).map(r => r.country))).sort();
 }
 
@@ -1204,6 +1204,7 @@ function renderCompose() {
               {k:'agency',         l:'Agency Outreach'},
               {k:'private_theatre',l:'Private Theatres'},
               {k:'ahp',            l:'AHP (NHS Jobs)'},
+              {k:'nhs_scotland',   l:'NHS Scotland (AHP)'},
               {k:'care_home',     l:'Care Homes'},
               {k:'bms',            l:'BMS'},
               {k:'sterile',        l:'Sterile Services'},
@@ -1214,7 +1215,7 @@ function renderCompose() {
             ].map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
           </select>
         </div>
-        ${state.composeSourceFilter === 'ahp' ? `
+        ${(state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') ? `
         <div class="field">
           <label>Specialty</label>
           <select class="select" id="compose-specialty">
