@@ -1012,52 +1012,99 @@ async function sendFilteredViaBrevo() {
   const template = state.templates.find(t => t.id === state.composeTemplateId);
   if (!template) return toast('Select a template first');
 
+  // Pull EVERY contact matching the current filters (not just one batch).
+  const all = await buildAllComposeContactsFromDb();
+  if (!all.length) {
+    state.composeBrevoResult = { error: 'No contacts match your current filters' };
+    state.composeBrevoSending = false;
+    state.composeBrevoProgress = null;
+    render();
+    return;
+  }
+
+  const CHUNK_SIZE = 250;
+  const ids = all.map(c => c.id);
+  const totalToSend = ids.length;
+  const numBatches = Math.ceil(totalToSend / CHUNK_SIZE);
+
+  if (totalToSend > CHUNK_SIZE) {
+    const ok = confirm('This will email ' + totalToSend + ' contacts in ' + numBatches +
+      ' batches of up to ' + CHUNK_SIZE + ', sent one after another. Continue?');
+    if (!ok) return;
+  }
+
   state.composeBrevoSending = true;
   state.composeBrevoResult = null;
+  state.composeBrevoProgress = { done: 0, total: totalToSend, batch: 0, batches: numBatches };
   render();
 
+  let sent = 0, failed = 0, total = 0;
   try {
-    // Build queue from current filters
-    const queue = await buildComposeQueueFromDb();
-    if (!queue.length) {
-      state.composeBrevoResult = { error: 'No contacts match your current filters' };
-      state.composeBrevoSending = false;
-      render();
-      return;
-    }
-
-    const ids = queue.map(c => c.id);
     const { data: { session } } = await sb.auth.getSession();
     const token = session?.access_token;
     if (!token) throw new Error('Not authenticated');
 
-    const batchId = 'batch_' + Date.now();
-    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + token,
-      },
-      body: JSON.stringify({
-        templateId: template.id,
-        contactIds: ids,
-        batchId,
-        senderEmail: 'scott.lane@daywebster.com',
-        senderName: 'Day Webster Group',
-      }),
-    });
+    const stamp = 'batch_' + Date.now();
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const batchNo = Math.floor(i / CHUNK_SIZE) + 1;
+      state.composeBrevoProgress.batch = batchNo;
+      render();
 
-    state.composeBrevoResult = await res.json();
-    if (state.composeBrevoResult.sent > 0) {
-      await Promise.all([loadStatusCounts(), loadSourceCounts(), loadContactsPage()]);
-      toast(state.composeBrevoResult.sent + ' emails sent via Brevo ✓');
+      let d = {};
+      try {
+        const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ templateId: template.id, contactIds: chunk, batchId: stamp + '_' + batchNo }),
+        });
+        d = await res.json();
+      } catch (err) {
+        d = { error: err.message };
+      }
+
+      if (d && typeof d.sent === 'number') {
+        sent += d.sent; failed += (d.failed || 0); total += (d.total || chunk.length);
+      } else {
+        failed += chunk.length; total += chunk.length;
+      }
+
+      state.composeBrevoProgress.done = Math.min(i + CHUNK_SIZE, totalToSend);
+      render();
+
+      if (i + CHUNK_SIZE < ids.length) await new Promise(r => setTimeout(r, 1500));
     }
-  } catch(e) {
-    state.composeBrevoResult = { error: e.message };
+
+    state.composeBrevoResult = { sent, failed, total };
+    await Promise.all([loadStatusCounts(), loadSourceCounts(), loadContactsPage()]);
+    toast(sent + ' emails sent via Brevo \u2713');
+  } catch (e) {
+    state.composeBrevoResult = { error: e.message, sent, failed, total };
   }
 
   state.composeBrevoSending = false;
+  state.composeBrevoProgress = null;
   render();
+}
+
+async function buildAllComposeContactsFromDb() {
+  const PAGE = 1000;
+  const out = [];
+  for (let from = 0; ; from += PAGE) {
+    let query = sb.from('contacts').select('*').eq('status', state.composeListFilter);
+    query = applyComposeSourceFilter(query, state.composeSourceFilter);
+    if (state.composeSourceFilter === 'ahp' && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
+    if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
+    if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
+    if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
+    query = query.order('updated_at', { ascending: true }).range(from, from + PAGE - 1);
+    const { data, error } = await query;
+    if (error) { toast('Failed to load contacts for compose: ' + error.message, 'error'); break; }
+    if (!data || !data.length) break;
+    out.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return out.filter(c => c.email && c.email.includes('@'));
 }
 
 async function sendSelectedViaBrevo() {
@@ -1212,7 +1259,7 @@ function renderCompose() {
 
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
         <button class="btn primary" id="brevo-filter-send-btn" ${!template || !previewMatch ? 'disabled' : ''}>
-          ${state.composeBrevoSending ? '<span class="spinner-inline"></span> Sending&hellip;' : '&#9654;&nbsp;Send ' + Math.min(previewMatch, state.composeBatchSize) + ' Emails via Brevo'}
+          ${state.composeBrevoSending ? '<span class="spinner-inline"></span> Sending&hellip;' : '&#9654;&nbsp;Send all ' + previewMatch + ' Emails via Brevo' + (previewMatch > 250 ? ' (' + Math.ceil(previewMatch/250) + ' batches)' : '')}
         </button>
         ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
         ${!previewMatch ? '<span class="muted" style="font-size:12px;">No contacts match — adjust filters</span>' : ''}
@@ -1221,7 +1268,7 @@ function renderCompose() {
       ${state.composeBrevoSending ? `
         <div class="import-progress" style="margin-top:12px;">
           <div class="progress-bar"><div class="fill import-pulse"></div></div>
-          <p class="muted" style="margin-top:6px;font-size:12px;">Sending personalised emails via Brevo&hellip;</p>
+          <p class="muted" style="margin-top:6px;font-size:12px;">${state.composeBrevoProgress ? ('Batch ' + state.composeBrevoProgress.batch + ' of ' + state.composeBrevoProgress.batches + ' &mdash; ' + state.composeBrevoProgress.done + ' of ' + state.composeBrevoProgress.total + ' processed') : 'Sending personalised emails via Brevo&hellip;'}</p>
         </div>` : ''}
 
       ${state.composeBrevoResult && !state.composeBrevoSending && !state.composeSelectedIds ? `
