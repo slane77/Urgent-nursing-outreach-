@@ -130,7 +130,7 @@ const MODAL_SOURCE_TAGS = {
   agency:          'Source: Agency Outreach',
   ahp:             'Source: NHS Jobs AHP',
   nhs_scotland:    'Source: NHS Scotland',
-  private_theatre: 'Source: Private Theatre',
+  private_theatre: 'Source: Theatres',
   care_home:       'Source: Care Home',
   bms:             'Source: BMS Outreach',
   sterile:         'Source: Sterile Services',
@@ -145,7 +145,7 @@ const MODAL_SOURCE_OPTIONS = [
   { k: 'agency',          l: 'Agency Outreach' },
   { k: 'ahp',             l: 'AHP (NHS Jobs)' },
   { k: 'nhs_scotland',    l: 'NHS Scotland (AHP)' },
-  { k: 'private_theatre', l: 'Private Theatre' },
+  { k: 'private_theatre', l: 'Theatres' },
   { k: 'care_home',       l: 'Care Home' },
   { k: 'bms',             l: 'BMS' },
   { k: 'sterile',         l: 'Sterile Services' },
@@ -380,7 +380,7 @@ async function loadSourceStatusCounts() {
     agency:          'Source: Agency Outreach',
     ahp:             'Source: NHS Jobs AHP',
     nhs_scotland:    'Source: NHS Scotland',
-    private_theatre: 'Source: Private Theatre',
+    private_theatre: 'Source: Theatres',
     care_home:       'Source: Care Home',
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
@@ -398,7 +398,7 @@ async function loadSourceStatusCounts() {
         .not('notes', 'ilike', '%Source: Pharmacy%')
         .not('notes', 'ilike', '%Source: BMS%')
         .not('notes', 'ilike', '%Source: Sterile%')
-        .not('notes', 'ilike', '%Source: Private Theatre%')
+        .not('notes', 'ilike', '%Source: Theatres%')
         .not('notes', 'ilike', '%Source: NHS Staff Bank%')
         .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
         .not('notes', 'ilike', '%Source: Care Home%')
@@ -441,7 +441,7 @@ async function loadSourceCounts() {
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Source: Agency Outreach%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: Private Theatre%'),
+      .ilike('notes', '%Source: Theatres%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Source: Care Home%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
@@ -450,7 +450,7 @@ async function loadSourceCounts() {
       .not('notes', 'ilike', '%Source: Pharmacy%')
       .not('notes', 'ilike', '%Source: BMS%')
       .not('notes', 'ilike', '%Source: Sterile%')
-      .not('notes', 'ilike', '%Source: Private Theatre%')
+      .not('notes', 'ilike', '%Source: Theatres%')
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
       .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
       .not('notes', 'ilike', '%Source: Care Home%')
@@ -508,7 +508,7 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: Pharmacy%')
       .not('notes', 'ilike', '%Source: BMS%')
       .not('notes', 'ilike', '%Source: Sterile%')
-      .not('notes', 'ilike', '%Source: Private Theatre%')
+      .not('notes', 'ilike', '%Source: Theatres%')
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
       .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
       .not('notes', 'ilike', '%Source: Care Home%')
@@ -529,7 +529,7 @@ async function loadContactsPage() {
   } else if (sf === 'agency') {
     query = query.ilike('notes', '%Source: Agency Outreach%');
   } else if (sf === 'private_theatre') {
-    query = query.ilike('notes', '%Source: Private Theatre%');
+    query = query.ilike('notes', '%Source: Theatres%');
   } else if (sf === 'bms') {
     query = query.ilike('notes', '%Source: BMS Outreach%');
   } else if (sf === 'sterile') {
@@ -657,7 +657,7 @@ function applyComposeSourceFilter(q, source) {
       .not('notes', 'ilike', '%Source: Pharmacy%')
       .not('notes', 'ilike', '%Source: BMS%')
       .not('notes', 'ilike', '%Source: Sterile%')
-      .not('notes', 'ilike', '%Source: Private Theatre%')
+      .not('notes', 'ilike', '%Source: Theatres%')
       .not('notes', 'ilike', '%Source: NHS Staff Bank%')
       .not('notes', 'ilike', '%Source: NHS Theatre%')
       .not('notes', 'ilike', '%Source: CAMHS%')
@@ -672,7 +672,7 @@ function applyComposeSourceFilter(q, source) {
     agency:          'Source: Agency Outreach',
     ahp:             'Source: NHS Jobs AHP',
     nhs_scotland:    'Source: NHS Scotland',
-    private_theatre: 'Source: Private Theatre',
+    private_theatre: 'Source: Theatres',
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
@@ -800,7 +800,7 @@ function renderDatabase() {
     { key: 'anp',             label: 'ANP'               },
     { key: 'enp',             label: 'ENP'               },
     { key: 'care_home',       label: 'Care Homes'        },
-    { key: 'private_theatre', label: 'Private Theatres'  },
+    { key: 'private_theatre', label: 'Theatres'  },
   ];
 
   const total = state.totalRows;
@@ -1202,7 +1202,7 @@ function renderCompose() {
               {k:'gp_surgery',     l:'GP Surgeries'},
               {k:'children_homes', l:"Children's Homes"},
               {k:'agency',         l:'Agency Outreach'},
-              {k:'private_theatre',l:'Private Theatres'},
+              {k:'private_theatre',l:'Theatres'},
               {k:'ahp',            l:'AHP (NHS Jobs)'},
               {k:'nhs_scotland',   l:'NHS Scotland (AHP)'},
               {k:'care_home',     l:'Care Homes'},
@@ -1954,7 +1954,7 @@ function renderImport() {
                 ${[
                   { v: 'gp_surgery',      l: 'GP Surgeries' },
                   { v: 'agency',          l: 'Agency Outreach' },
-                  { v: 'private_theatre', l: 'Private Theatres' },
+                  { v: 'private_theatre', l: 'Theatres' },
                   { v: 'children_homes',  l: "Children's Homes" },
                   { v: 'bms',             l: 'BMS' },
                   { v: 'sterile',         l: 'Sterile Services' },
@@ -2030,7 +2030,7 @@ function renderImport() {
       </div>
 
 
-            <!-- Private Theatres CSV Upload -->
+            <!-- Theatres CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
           <div class="import-card-icon">&#x1F3E8;</div>
@@ -2686,7 +2686,7 @@ function renderSettings() {
     {k:'children_homes',label:"Children's Homes"},
     {k:'agency',label:'Agency Outreach'},
     {k:'ahp',label:'AHP (NHS Jobs)'},
-    {k:'private_theatre',label:'Private Theatres'},
+    {k:'private_theatre',label:'Theatres'},
     {k:'care_home',label:'Care Homes'},
     {k:'bms',label:'BMS'},
     {k:'sterile',label:'Sterile Services'},
@@ -3642,7 +3642,7 @@ async function exportAllAsCsv() {
     render();
   }
 })();
-  // Smart CSV upload cards — Children's Homes, Care Homes, Private Theatres
+  // Smart CSV upload cards — Children's Homes, Care Homes, Theatres
   ['children_homes', 'care_home', 'private_theatre'].forEach(function(src) {
     var inp = document.getElementById('csv-input-' + src);
     if (inp) {
