@@ -920,8 +920,8 @@ function renderDatabase() {
             <th style="width:36px;text-align:center">
               <input type="checkbox" id="select-all-cb" ${allPageSel ? 'checked' : ''} />
             </th>
-            ${!['ahp','anp','enp'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="first_name">Contact</th><th data-sort="job_title">Role</th><th data-sort="email">Email</th><th data-sort="town">Town</th><th data-sort="region">Region</th>` : ''}
-            ${['ahp','anp','enp'].includes(state.sourceFilter) ? `
+            ${!['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="first_name">Contact</th><th data-sort="job_title">Role</th><th data-sort="email">Email</th><th data-sort="town">Town</th><th data-sort="region">Region</th>` : ''}
+            ${['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `
               <th>Contact Name</th>
               <th>Job Title</th><th>Vacancy</th>
               <th>Email</th>
@@ -943,14 +943,14 @@ function renderDatabase() {
               <td style="width:36px;text-align:center">
                 <input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />
               </td>
-              ${!['ahp','anp','enp'].includes(state.sourceFilter) ? `
+              ${!['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `
               <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
               <td>${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' '))}</td>
               <td>${esc(c.job_title)}</td>
               <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
               <td>${esc(c.town)}</td>
               <td>${esc(c.region)}</td>` : ''}
-              ${['ahp','anp','enp'].includes(state.sourceFilter)
+              ${['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter)
                 ? `<td>${esc(([c.first_name,c.last_name].filter(Boolean).join(' ')) || '—')}</td>
                    <td>${esc(c.job_title || '—')}</td><td>${esc(c.vacancy_title || '—')}</td>
                    <td class="ellipsis" title="${esc(c.email)}">${esc(c.email || '—')}</td>
