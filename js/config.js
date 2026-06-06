@@ -22,5 +22,5 @@ window.CONFIG = {
 
   // Public "Prefer to chat?" registration agent. Flip to true on Monday once the
   // ANTHROPIC_API_KEY secret is set on the chat-intake function.
-  CHAT_ENABLED: false
+  CHAT_ENABLED: true
 };
