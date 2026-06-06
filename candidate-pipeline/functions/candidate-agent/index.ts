@@ -228,6 +228,10 @@ CONDUCT:
 AVAILABLE TAXONOMY (discipline_code -> [specialty_code]):
 ${ctx.taxonomy}
 
+COMPLIANCE REQUIREMENTS FOR THIS CANDIDATE (request the required ones with request_compliance_items, using these exact codes, once you have established their discipline):
+${ctx.requirements}
+- You may REQUEST any of these. Items marked [human-decided] you request but never accept/verify — flag_for_human handles the decision.
+
 CURRENT CANDIDATE STATE:
 ${ctx.state}`;
 }
@@ -238,19 +242,27 @@ Deno.serve(async (req) => {
     if (!candidate_id) return new Response(JSON.stringify({ error: "candidate_id required" }), { status: 400 });
 
     // --- Load context (taxonomy, candidate, recent transcript) ---
-    const [{ data: disciplines }, { data: specialties }, { data: cand }, { data: history }] = await Promise.all([
+    const [{ data: disciplines }, { data: specialties }, { data: cand }, { data: history }, { data: allReqs }] = await Promise.all([
       sb.from("disciplines").select("code,name").eq("active", true),
       sb.from("specialties").select("code,name,discipline_id,is_registered_manager"),
       sb.from("candidates").select("*").eq("id", candidate_id).maybeSingle(),
       sb.from("messages").select("direction,body,author").eq("candidate_id", candidate_id).order("created_at").limit(30),
+      sb.from("compliance_requirements").select("code,name,required,needs_human,discipline_id").eq("active", true),
     ]);
     if (!cand) return new Response(JSON.stringify({ error: "candidate not found" }), { status: 404 });
+
+    // Requirements that apply to this candidate: global (null discipline) + their discipline's.
+    const reqs = (allReqs ?? []).filter((r: any) => r.discipline_id === null || r.discipline_id === cand.discipline_id);
+    const requirements = reqs.length
+      ? reqs.map((r: any) => `${r.code} — ${r.name}${r.required ? " (required)" : " (optional)"}${r.needs_human ? " [human-decided]" : ""}`).join("\n")
+      : "(no requirements configured for this discipline yet — qualify first, then a human will set them)";
 
     const taxonomy = (disciplines ?? [])
       .map((d: any) => `${d.code} (${d.name}): ${(specialties ?? []).filter((s: any) => s.discipline_id).map((s: any) => s.code).join(", ")}`)
       .join("\n");
     const ctx = {
       taxonomy,
+      requirements,
       state: JSON.stringify({
         status: cand.status,
         discipline_id: cand.discipline_id,

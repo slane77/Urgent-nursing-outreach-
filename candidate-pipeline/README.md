@@ -17,6 +17,9 @@ Foundation + agent drafted, **not yet applied/deployed**:
   messages, consent, compliance config + items, review queue).
 - `sql/11_candidate_policies.sql` — RLS (authorised-domain access).
 - `sql/12_candidate_seed.sql` — day-one disciplines & specialties.
+- `sql/13_compliance_requirements.sql` — per-discipline compliance requirement
+  set (tiers/expiry/coverage/human-gate) derived from the compliance
+  assessment; the agent reads these to request the right documents.
 - `functions/candidate-agent/` — the Claude-powered recruiter agent
   (engage → qualify → request compliance; human-gated past that line).
 - `functions/candidate-intake/` + `/intake.html` — public self-registration
@@ -37,7 +40,7 @@ Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
 
 ## Next steps
 
-1. Review the schema + functions, then apply `sql/10 → 11 → 12` and deploy
+1. Review the schema + functions, then apply `sql/10 → 11 → 12 → 13` and deploy
    `candidate-agent`, `candidate-intake`, `csv-import` (ideally on a Supabase
    **dev branch** first). Set `csv-import` + `candidate-agent` to verify_jwt;
    `candidate-intake` to public (verify_jwt false).

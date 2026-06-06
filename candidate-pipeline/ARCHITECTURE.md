@@ -51,8 +51,9 @@ This is the Tier-B semi-auto model agreed earlier, applied end to end.
 4. **Classify-and-judge + validation layer** — CV/document parsing, field
    extraction with format validation (PIN/NI/DBS/dates), low-confidence routing
    to the review queue. Shared with the compliance engine. *Not yet built.*
-5. **Compliance config** — `compliance_requirements` rows imported from the
-   compliance project. Structure ready; content pluggable. *Awaiting import.*
+5. **Compliance config** — `compliance_requirements` rows. *First per-discipline
+   set seeded (`sql/13`) from the assessment; the agent reads it to request the
+   right documents. Refine against the live compliance project.*
 6. **Human review surface** — the `review_queue` view + a Candidates tab in the
    app. *App work not yet built.*
 
