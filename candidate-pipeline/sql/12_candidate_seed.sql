@@ -113,5 +113,6 @@ on conflict (discipline_id, code) do nothing;
 -- A starter inbound source so the agent has somewhere to file day-one arrivals
 insert into candidate.sources (code, name, channel_type, default_consent_basis) values
   ('inbound_web', 'Inbound web enquiry', 'inbound',  'consent'),
-  ('referral',    'Referral',            'referral', 'consent')
+  ('referral',    'Referral',            'referral', 'consent'),
+  ('import',      'Spreadsheet import',  'import',   'legitimate_interest')
 on conflict (code) do nothing;

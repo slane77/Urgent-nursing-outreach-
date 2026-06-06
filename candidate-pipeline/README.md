@@ -19,17 +19,28 @@ Foundation + agent drafted, **not yet applied/deployed**:
 - `sql/12_candidate_seed.sql` — day-one disciplines & specialties.
 - `functions/candidate-agent/` — the Claude-powered recruiter agent
   (engage → qualify → request compliance; human-gated past that line).
+- `functions/candidate-intake/` + `/intake.html` — public self-registration
+  form → creates a `sourced` candidate with consent.
+- `functions/csv-import/` + `/candidate-import.html` — smart bulk importer for
+  old spreadsheets: Claude maps each file's columns once, applied
+  deterministically to every row; dedupes on email; lands rows as `sourced`.
+
+(`intake.html` and `candidate-import.html` live at the repo root so GitHub
+Pages serves them alongside the existing app.)
 
 Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
 
 ## Next steps
 
-1. Review the schema + agent, then apply `sql/10 → 11 → 12` and deploy
-   `candidate-agent` (ideally on a Supabase **dev branch** first).
+1. Review the schema + functions, then apply `sql/10 → 11 → 12` and deploy
+   `candidate-agent`, `candidate-intake`, `csv-import` (ideally on a Supabase
+   **dev branch** first). Set `csv-import` + `candidate-agent` to verify_jwt;
+   `candidate-intake` to public (verify_jwt false).
 2. Set `ANTHROPIC_API_KEY` and confirm the §11 data-protection terms before
    running on real candidate data.
-3. Build the **inbound-email pipeline** + the search connectors for the chosen
-   sourcing channels (inbound web/apply, referrals, paid CV-DB APIs; social
-   via compliant/official routes only).
+3. Use `candidate-import.html` to load the old spreadsheets; share
+   `intake.html` for inbound registration.
 4. Build the **Candidates tab** (review queue UI) in the app.
-5. Import the compliance requirement set from the compliance project.
+5. Build the **inbound-email pipeline** + search connectors for the chosen
+   sourcing channels (referrals, paid CV-DB APIs; social via official routes).
+6. Import the compliance requirement set from the compliance project.
