@@ -24,9 +24,14 @@ Foundation + agent drafted, **not yet applied/deployed**:
 - `functions/csv-import/` + `/candidate-import.html` — smart bulk importer for
   old spreadsheets: Claude maps each file's columns once, applied
   deterministically to every row; dedupes on email; lands rows as `sourced`.
+- `/candidates.html` — the staff **review cockpit**: pipeline funnel by status,
+  candidate detail (profile/transcript/employment/consent/compliance), edit +
+  status control (incl. the human-gated `ready`/`placed`), one-click "run
+  agent", and the human review queue. Reads/writes the `candidate` schema
+  directly under RLS — never touches the outreach app.
 
-(`intake.html` and `candidate-import.html` live at the repo root so GitHub
-Pages serves them alongside the existing app.)
+(`intake.html`, `candidate-import.html` and `candidates.html` live at the repo
+root so GitHub Pages serves them alongside the existing app.)
 
 Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
 
@@ -38,9 +43,10 @@ Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
    `candidate-intake` to public (verify_jwt false).
 2. Set `ANTHROPIC_API_KEY` and confirm the §11 data-protection terms before
    running on real candidate data.
-3. Use `candidate-import.html` to load the old spreadsheets; share
-   `intake.html` for inbound registration.
-4. Build the **Candidates tab** (review queue UI) in the app.
+3. Expose the `candidate` schema to the API (Supabase → Settings → API →
+   Exposed schemas) so `candidates.html` can read/write it under RLS.
+4. Use `candidate-import.html` to load the old spreadsheets; share
+   `intake.html` for inbound registration; work candidates in `candidates.html`.
 5. Build the **inbound-email pipeline** + search connectors for the chosen
    sourcing channels (referrals, paid CV-DB APIs; social via official routes).
 6. Import the compliance requirement set from the compliance project.
