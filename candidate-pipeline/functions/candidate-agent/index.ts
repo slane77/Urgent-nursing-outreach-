@@ -25,6 +25,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { createClient } from "npm:@supabase/supabase-js";
+import { sendBrevoEmail, emailHtml } from "../_shared/email.ts";
 
 const MODEL = "claude-opus-4-8";
 
@@ -238,7 +239,7 @@ ${ctx.state}`;
 
 Deno.serve(async (req) => {
   try {
-    const { candidate_id, inbound_message, channel = "web" } = await req.json();
+    const { candidate_id, inbound_message, channel = "web", no_send = false } = await req.json();
     if (!candidate_id) return new Response(JSON.stringify({ error: "candidate_id required" }), { status: 400 });
 
     // --- Load context (taxonomy, candidate, recent transcript) ---
@@ -317,16 +318,25 @@ Deno.serve(async (req) => {
       messages.push({ role: "user", content: toolResults });
     }
 
-    // Log the agent's outbound reply (status 'draft' — wiring to an actual
-    // send channel, e.g. Brevo, is a later step and stays human-reviewable).
+    // Send the agent's reply to the candidate by email (replies route back via
+    // inbound-email, matched by the candidate's address). Falls back to a draft
+    // if sending is disabled, the candidate has no email, or Brevo isn't set up.
+    let sendStatus = "draft", sendId: string | undefined, sent = false;
+    if (reply && !no_send && cand.email) {
+      const r = await sendBrevoEmail({
+        to: cand.email, toName: [cand.first_name, cand.last_name].filter(Boolean).join(" "),
+        subject: "Day Webster — your registration", html: emailHtml(reply),
+      });
+      sent = r.ok; sendStatus = r.ok ? "sent" : "draft"; sendId = r.id;
+    }
     if (reply) {
       await sb.from("messages").insert({
-        candidate_id, direction: "outbound", channel,
-        body: reply, author: "agent", llm_generated: true, status: "draft",
+        candidate_id, direction: "outbound", channel: sent ? "email" : channel,
+        body: reply, author: "agent", llm_generated: true, status: sendStatus, external_ref: sendId ?? null,
       });
     }
 
-    return new Response(JSON.stringify({ reply }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ reply, sent }), { headers: { "Content-Type": "application/json" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500 });
   }

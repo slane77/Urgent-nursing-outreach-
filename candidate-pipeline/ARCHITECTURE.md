@@ -99,6 +99,17 @@ details required before this is scoped.**
   zero-data-retention options) must be confirmed and recorded before the agent
   processes real candidate data. *To confirm and document.*
 
+## 7a. Outbound + monitoring (built)
+
+- **Sending** — `functions/_shared/email.ts` (Brevo, candidate-side sender,
+  tokenised Reply-To). The agent now *sends* its replies (draft fallback).
+- **Reference requests + confirmation handshake** — `reference-request` issues a
+  token and emails the referee; `inbound-email` ingests the reference, then
+  emails the referee to confirm authorship, and a "yes" reply marks it
+  confirmed. Acceptance of the reference itself remains human.
+- **Early Warnings** — `early-warnings` (scheduled): auto-chases candidates
+  before documents lapse and flags expired items for a human (assessment §6).
+
 ## 8. Open decisions (block specific legs, not the foundation)
 
 1. **Sourcing channels** — what the agent is allowed to *search*. This is the

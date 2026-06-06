@@ -28,6 +28,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { createClient } from "npm:@supabase/supabase-js";
+import { sendBrevoEmail, emailHtml, replyToFor } from "../_shared/email.ts";
 
 const MODEL = "claude-opus-4-8";
 const BUCKET = "candidate-docs";
@@ -89,6 +90,7 @@ Deno.serve(async (req) => {
     const body = (p.text ?? p.html ?? "").toString();
     const attachments = Array.isArray(p.attachments) ? p.attachments : [];
     const senderDomain = domainOf(from);
+    const senderEmail = (from.match(/[^<\s]+@[^>\s]+/) ?? [""])[0].toLowerCase();
     const institutional = senderDomain && !FREE_WEBMAIL.includes(senderDomain);
 
     // 1. Identify candidate (token first, else sender email).
@@ -98,12 +100,9 @@ Deno.serve(async (req) => {
       const { data } = await sb.from("email_tokens").select("candidate_id,requirement_id,purpose").eq("token", tok).maybeSingle();
       if (data) { candidateId = data.candidate_id; tokenReqId = data.requirement_id; purpose = data.purpose; }
     }
-    if (!candidateId) {
-      const senderEmail = (from.match(/[^<\s]+@[^>\s]+/) ?? [""])[0].toLowerCase();
-      if (senderEmail) {
-        const { data } = await sb.from("candidates").select("id").eq("email", senderEmail).maybeSingle();
-        candidateId = data?.id ?? null;
-      }
+    if (!candidateId && senderEmail) {
+      const { data } = await sb.from("candidates").select("id").eq("email", senderEmail).maybeSingle();
+      candidateId = data?.id ?? null;
     }
     if (!candidateId) return new Response(JSON.stringify({ ok: true, matched: false }), { headers: { "Content-Type": "application/json" } });
 
@@ -121,6 +120,23 @@ Deno.serve(async (req) => {
       author: "candidate", subject, body: `${c.summary}\n\n${body.slice(0, 4000)}`,
       external_ref: from,
     });
+
+    // Confirmation handshake: a short "yes I confirm" on a reference token, when
+    // we're already awaiting confirmation, marks that reference confirmed.
+    if (tok && purpose === "reference" && body.length < 600 &&
+        /\b(yes|i can confirm|confirmed?|that'?s correct|i wrote|i completed)\b/i.test(body)) {
+      const { data: item } = await sb.from("compliance_items")
+        .select("id,extracted,human_notes").eq("candidate_id", candidateId).eq("requirement_id", tokenReqId)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (item && (item.extracted as any)?.confirmation === "requested") {
+        await sb.from("compliance_items").update({
+          extracted: { ...(item.extracted as any), confirmation: "confirmed" },
+          source_confidence: "high",
+          human_notes: `${item.human_notes ? item.human_notes + " " : ""}Referee confirmed authorship via handshake.`,
+        }).eq("id", item.id);
+        return new Response(JSON.stringify({ ok: true, matched: true, type: "reference_confirmation", confirmed: true }), { headers: { "Content-Type": "application/json" } });
+      }
+    }
 
     if (c.type === "candidate_reply" || c.type === "noise") {
       return new Response(JSON.stringify({ ok: true, matched: true, type: c.type }), { headers: { "Content-Type": "application/json" } });
@@ -165,10 +181,31 @@ Deno.serve(async (req) => {
       artefact_path: artefactPath, needs_human: needsHuman,
       human_notes: needsHuman ? `Inbound ${c.type} from ${senderDomain || "unknown"} — needs review. ${c.summary}` : null,
     };
-    if (itemId) await sb.from("compliance_items").update(payload).eq("id", itemId);
-    else await sb.from("compliance_items").insert(payload);
+    let finalItemId = itemId;
+    if (itemId) {
+      await sb.from("compliance_items").update(payload).eq("id", itemId);
+    } else {
+      const { data: ins } = await sb.from("compliance_items").insert(payload).select("id").maybeSingle();
+      finalItemId = ins?.id ?? null;
+    }
 
-    return new Response(JSON.stringify({ ok: true, matched: true, type: c.type, requirement: c.requirement_code, confidence, needs_human: needsHuman }), { headers: { "Content-Type": "application/json" } });
+    // Confirmation handshake (send): for an institutional reference received via
+    // token, email the referee to confirm authorship and mark it 'requested'.
+    let confirmationRequested = false;
+    if (isReference && tok && institutional && senderEmail && finalItemId && !(c.extracted?.confirmation)) {
+      const r = await sendBrevoEmail({
+        to: senderEmail,
+        subject: "Please confirm your reference",
+        html: emailHtml(`Thank you for the reference you've provided. For our records, could you simply reply "Yes, I can confirm" to verify that you completed it yourself?`),
+        replyTo: replyToFor(tok),
+      });
+      if (r.ok) {
+        await sb.from("compliance_items").update({ extracted: { ...payload.extracted, confirmation: "requested" } }).eq("id", finalItemId);
+        confirmationRequested = true;
+      }
+    }
+
+    return new Response(JSON.stringify({ ok: true, matched: true, type: c.type, requirement: c.requirement_code, confidence, needs_human: needsHuman, confirmation_requested: confirmationRequested }), { headers: { "Content-Type": "application/json" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: String(e) }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
