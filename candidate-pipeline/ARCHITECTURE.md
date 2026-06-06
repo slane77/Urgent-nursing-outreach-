@@ -47,7 +47,9 @@ This is the Tier-B semi-auto model agreed earlier, applied end to end.
 3. **Inbound-email pipeline** — classify inbound email → locate artefact (body
    vs attachment, through Fwd chains) → ingest → check sender domain. This is
    the exact spine the assessment's references (§8f) and bookings half need;
-   building it here de-risks both. *Not yet built.*
+   building it here de-risks both. *Built (draft, not deployed):
+   `functions/inbound-email/` + `sql/15`; files to the `candidate-docs` bucket;
+   lands documents as `received` for human acceptance.*
 4. **Classify-and-judge + validation layer** — CV/document parsing, field
    extraction with format validation (PIN/NI/DBS/dates), low-confidence routing
    to the review queue. Shared with the compliance engine. *Not yet built.*

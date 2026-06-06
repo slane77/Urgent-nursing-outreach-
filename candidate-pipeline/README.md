@@ -40,7 +40,7 @@ Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
 
 ## Next steps
 
-1. Review the schema + functions, then apply `sql/10 → 11 → 12 → 13` and deploy
+1. Review the schema + functions, then apply `sql/10 → 15` and deploy
    `candidate-agent`, `candidate-intake`, `csv-import` (ideally on a Supabase
    **dev branch** first). Set `csv-import` + `candidate-agent` to verify_jwt;
    `candidate-intake` to public (verify_jwt false).
