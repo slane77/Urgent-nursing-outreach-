@@ -61,8 +61,8 @@
 <!-- LOGIN -->
 <div class="loginwrap card hidden" id="login">
   <h3 style="margin-top:0">Sign in</h3>
-  <p class="muted">Day Webster email — a magic link will be sent.</p>
-  <div style="display:flex; gap:8px;"><input type="email" id="email" placeholder="you@daywebster.com" style="flex:1" /><button class="btn" id="loginBtn">Send link</button></div>
+  <p class="muted">Day Webster email &amp; password.</p>
+  <div style="display:flex; gap:8px; flex-direction:column;"><input type="email" id="email" placeholder="you@daywebster.com" /><input type="password" id="password" placeholder="Password" /><button class="btn" id="loginBtn">Sign in</button></div>
   <p class="muted" id="loginMsg"></p>
 </div>
 
@@ -125,10 +125,12 @@ async function refreshAuth() {
 }
 sb.auth.onAuthStateChange(refreshAuth);
 $('loginBtn').onclick = async () => {
-  const email = $('email').value.trim(); if (!email) return;
-  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.href } });
-  $('loginMsg').textContent = error ? error.message : 'Check your email, then return here.';
+  const email = $('email').value.trim(), password = $('password').value; if (!email || !password) return;
+  $('loginMsg').textContent = 'Signing in…';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  $('loginMsg').textContent = error ? error.message : '';
 };
+$('password').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('loginBtn').click(); });
 
 // ---- Init ----
 let inited = false;
