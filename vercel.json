@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/", "has": [{ "type": "host", "value": "join.daywebster.com" }], "destination": "/intake.html" },
+    { "source": "/register", "destination": "/intake.html" },
+    { "source": "/join", "destination": "/intake.html" },
+    { "source": "/poster", "destination": "/register-poster.html" },
+    { "source": "/qr", "destination": "/qr.html" }
+  ]
+}
