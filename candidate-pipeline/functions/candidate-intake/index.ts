@@ -54,6 +54,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Optional attribution: applied to a specific vacancy and/or campaign.
+    let vacancyId: string | null = null, campaignId: string | null = null, vacDiscipline: string | null = null;
+    if (b.vacancy) {
+      const { data: v } = await sb.from("vacancies").select("id,discipline_id").eq("slug", b.vacancy).maybeSingle();
+      if (v) { vacancyId = v.id; vacDiscipline = v.discipline_id; }
+    }
+    if (b.campaign) {
+      const { data: cm } = await sb.from("sourcing_campaigns").select("id").eq("id", b.campaign).maybeSingle();
+      campaignId = cm?.id ?? null;
+    }
+
     // Dedupe on email — if they already exist, just log a fresh enquiry note.
     const { data: existing } = await sb.from("candidates").select("id").eq("email", email).maybeSingle();
     let candidateId = existing?.id ?? null;
@@ -61,7 +72,10 @@ Deno.serve(async (req) => {
     if (!candidateId) {
       const { data, error } = await sb.from("candidates").insert({
         status: "sourced",
-        source_id: sourceId,
+        source_id: sourceId,            // inbound_web; the vacancy carries the discipline
+        vacancy_id: vacancyId,
+        campaign_id: campaignId,
+        discipline_id: vacDiscipline,
         first_name: (b.first_name ?? "").toString().trim() || null,
         last_name: (b.last_name ?? "").toString().trim() || null,
         email,

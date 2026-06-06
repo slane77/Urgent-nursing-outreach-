@@ -52,6 +52,7 @@
       <label>Availability (optional)</label><input name="availability" placeholder="e.g. immediate, days/nights, from June" />
       <label>Anything else?</label><textarea name="message" rows="3"></textarea>
       <input class="hp" name="website" tabindex="-1" autocomplete="off" />
+      <input type="hidden" name="vacancy" /><input type="hidden" name="campaign" />
       <div class="consent">
         <input type="checkbox" id="consent" required />
         <label for="consent" style="font-weight:400; margin:0;">I consent to Day Webster storing my details and contacting me about work opportunities. I can withdraw consent at any time.</label>
@@ -64,6 +65,10 @@
 <script src="js/config.js"></script>
 <script>
 const FN = window.CONFIG.SUPABASE_URL + '/functions/v1/candidate-intake';
+// Attribution: ?vacancy=<slug>&campaign=<id> (set on adverts / landing links)
+const qp = new URLSearchParams(location.search);
+if (qp.get('vacancy')) document.querySelector('[name=vacancy]').value = qp.get('vacancy');
+if (qp.get('campaign')) document.querySelector('[name=campaign]').value = qp.get('campaign');
 document.getElementById('form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target, msg = document.getElementById('msg'), btn = document.getElementById('submit');
