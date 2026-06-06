@@ -15,6 +15,7 @@
   <div class="tabs" id="tabs">
     <div class="tab active" data-view="pipeline">Pipeline</div>
     <div class="tab" data-view="review">Review queue <span id="reviewCount"></span></div>
+    <div class="tab" data-view="audit">Audit / readiness</div>
   </div>
 </div>
 
@@ -52,6 +53,16 @@
       <h4 style="margin-top:0">Flagged for human review</h4>
       <p class="muted">Items the agent routed to a person: adverse disclosures, mismatches, registration/right-to-work doubts, and any acceptance decision.</p>
       <table><thead><tr><th>Candidate</th><th>Discipline</th><th>Requirement</th><th>Note</th><th>Updated</th></tr></thead><tbody id="reviewRows"></tbody></table>
+    </div>
+  </div>
+
+  <!-- AUDIT / READINESS VIEW -->
+  <div id="auditView" class="hidden">
+    <div class="card">
+      <h4 style="margin-top:0">File readiness &amp; audit</h4>
+      <p class="muted">Everything collected is held <strong>unverified — for audit</strong>. Open a candidate to review the full file and sign off to <strong>Maintenance</strong> (compliant &amp; bookable).</p>
+      <div class="controls"><select id="compFilter"><option value="">All compliance states</option><option value="processing">Processing</option><option value="maintenance">Maintenance</option><option value="requires_update">Requires update</option><option value="not_started">Not started</option></select></div>
+      <table><thead><tr><th>Candidate</th><th>Discipline</th><th>Compliance</th><th>Collected / required</th><th>To review</th><th>Expired</th></tr></thead><tbody id="auditRows"></tbody></table>
     </div>
   </div>
 </main>
@@ -176,6 +187,20 @@ async function openCandidate(id) {
     </div>
 
     <div class="card">
+      <h4 style="margin-top:0">Compliance file</h4>
+      <div class="grid2">
+        <div><label>Compliance status</label><select id="f_compstatus">${['not_started','processing','maintenance','requires_update','on_hold'].map(s=>`<option value="${s}" ${s===(c.compliance_status||'not_started')?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select></div>
+        <div><label>Audit</label><div class="muted" style="padding-top:9px">${c.audited_at?('Signed off '+(c.audited_at||'').slice(0,10)):'Not yet audited'}</div></div>
+      </div>
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <button class="btn sm" id="signoffBtn">Sign off → Maintenance</button>
+        <button class="btn sm secondary" id="reqUpdateBtn">Requires update</button>
+        <span class="muted" id="compMsg"></span>
+      </div>
+      <p class="muted" style="margin-top:8px">Collected documents are held <strong>unverified — for audit</strong>. Signing off to Maintenance marks the candidate compliant and bookable, and records you + the date.</p>
+    </div>
+
+    <div class="card">
       <h4 style="margin-top:0">Run the agent</h4>
       <p class="muted">The agent engages, qualifies and requests compliance — it never decides acceptance or marks work-ready (that's you). Its reply is saved as a draft.</p>
       <textarea id="agentMsg" rows="2" style="width:100%" placeholder="Optional: paste the candidate's latest message to continue the conversation"></textarea>
@@ -208,6 +233,8 @@ async function openCandidate(id) {
   $('f_disc').onchange = () => { $('f_spec').innerHTML = specOpts($('f_disc').value); };
   $('saveBtn').onclick = saveProfile;
   $('runBtn').onclick = runAgent;
+  $('signoffBtn').onclick = signOff;
+  $('reqUpdateBtn').onclick = () => setComp('requires_update');
   $('detail').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>resolveItem(b.dataset.resolve,b.dataset.st));
 }
 $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); current=null; };
@@ -226,11 +253,41 @@ async function saveProfile() {
     town: $('f_town').value || null,
     postcode: $('f_pc').value || null,
     notes: $('f_notes').value || null,
+    compliance_status: $('f_compstatus').value,
   };
   const { error } = await sb.from('candidates').update(patch).eq('id', current.id);
   $('saveMsg').textContent = error ? error.message : 'Saved ✓';
   renderStatusTabs(); loadList();
 }
+
+async function signOff() {
+  if (!confirm('Sign this candidate off as Maintenance (compliant & bookable)? This records you and today’s date.')) return;
+  const { data:{ session } } = await sb.auth.getSession();
+  const { error } = await sb.from('candidates').update({ compliance_status:'maintenance', audited_by: session?.user?.id ?? null, audited_at: new Date().toISOString() }).eq('id', current.id);
+  $('compMsg').textContent = error ? error.message : 'Signed off ✓';
+  if (!error) openCandidate(current.id);
+}
+async function setComp(s) {
+  const { error } = await sb.from('candidates').update({ compliance_status: s }).eq('id', current.id);
+  $('compMsg').textContent = error ? error.message : 'Updated ✓';
+  if (!error) openCandidate(current.id);
+}
+
+async function loadAudit() {
+  const f = $('compFilter').value;
+  let q = sb.from('file_readiness').select('*').order('compliance_status');
+  if (f) q = q.eq('compliance_status', f);
+  const { data } = await q;
+  $('auditRows').innerHTML = (data??[]).map(r=>`<tr class="click" data-id="${r.candidate_id}">
+    <td>${esc(r.first_name)} ${esc(r.last_name)}</td>
+    <td>${esc(r.discipline)||'—'}</td>
+    <td><span class="pill ${r.compliance_status==='maintenance'?'':'flag'}">${(r.compliance_status||'not started').replace(/_/g,' ')}</span></td>
+    <td>${r.collected_count||0} / ${r.required_count||0}</td>
+    <td>${r.needs_human||0}</td>
+    <td>${r.expired||0}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No candidates yet.</td></tr>';
+  $('auditRows').querySelectorAll('tr.click').forEach(tr=>tr.onclick=()=>openCandidate(tr.dataset.id));
+}
+document.getElementById('compFilter')?.addEventListener('change', loadAudit);
 
 async function runAgent() {
   $('runBtn').disabled = true; $('runMsg').textContent = 'Thinking…';
@@ -274,9 +331,11 @@ $('tabs').querySelectorAll('.tab').forEach(t => t.onclick = () => {
   $('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');
   const v = t.dataset.view;
-  $('pipelineView').classList.toggle('hidden', v==='review');
+  $('pipelineView').classList.toggle('hidden', v!=='pipeline');
   $('reviewView').classList.toggle('hidden', v!=='review');
+  $('auditView').classList.toggle('hidden', v!=='audit');
   if (v==='review') loadReview();
+  if (v==='audit') loadAudit();
 });
 
 sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
