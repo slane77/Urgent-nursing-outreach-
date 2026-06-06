@@ -40,7 +40,7 @@ Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
 
 ## Next steps
 
-1. Review the schema + functions, then apply `sql/10 → 18` and deploy the edge
+1. Review the schema + functions, then apply `sql/10 → 19` and deploy the edge
    functions (ideally on a Supabase **dev branch** first):
    - `candidate-agent`, `csv-import`, `reference-request`, `job-advert`,
      `outreach-campaign` — verify_jwt (staff)

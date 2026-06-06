@@ -39,6 +39,7 @@ In the dev project's **SQL Editor**, run each file in order:
 ☐ `sql/16_sourcing.sql`
 ☐ `sql/17_dashboard.sql`
 ☐ `sql/18_desks.sql`
+☐ `sql/19_app_users.sql`
 
 ☐ **Expose the schema:** Settings → API → *Exposed schemas* → add `candidate`.
 ☐ **Storage:** create a **private** bucket named `candidate-docs`.
@@ -173,7 +174,7 @@ Validate JSON-LD at search.google.com/test/rich-results before relying on Google
 
 When dev is proven and the §11 terms are signed off:
 
-1. ☐ Run `sql/10 → 18` on the **production** project (or merge the branch).
+1. ☐ Run `sql/10 → 19` on the **production** project (or merge the branch).
 2. ☐ Expose `candidate` schema; create the `candidate-docs` bucket.
 3. ☐ Set the same secrets with **production** values.
 4. ☐ Deploy the functions to production; schedule cron; point the inbound webhook.

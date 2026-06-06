@@ -36,7 +36,7 @@
   <h1>Control Tower</h1>
   <nav>
     <a class="here">Dashboard</a><a href="candidates.html">Candidates</a>
-    <a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a>
+    <a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="admin.html">Admin</a>
   </nav>
 </header>
 
@@ -69,7 +69,7 @@ const STATUSES=['sourced','contacted','engaged','qualified','compliance','ready'
 const $=(id)=>document.getElementById(id);
 const esc=(s)=>(s??'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-async function refreshAuth(){const {data:{session}}=await sb.auth.getSession();if(session){$('login').classList.add('hidden');$('app').classList.remove('hidden');load();}else{$('login').classList.remove('hidden');$('app').classList.add('hidden');}}
+async function refreshAuth(){const {data:{session}}=await sb.auth.getSession();if(session){sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{});$('login').classList.add('hidden');$('app').classList.remove('hidden');load();}else{$('login').classList.remove('hidden');$('app').classList.add('hidden');}}
 sb.auth.onAuthStateChange(refreshAuth);
 $('loginBtn').onclick=async()=>{const e=$('email').value.trim();if(!e)return;const {error}=await sb.auth.signInWithOtp({email:e,options:{emailRedirectTo:location.href}});$('loginMsg').textContent=error?error.message:'Check your email, then return here.';};
 
