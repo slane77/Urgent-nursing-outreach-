@@ -18,6 +18,9 @@
   input, select, textarea { width:100%; padding:10px 12px; border:1px solid var(--grey-200); border-radius:8px; font-size:14px; font-family:inherit; background:#fff; }
   .row { display:flex; gap:12px; }
   .row > div { flex:1; }
+  fieldset { border:1px solid var(--grey-200); border-radius:10px; padding:6px 16px 16px; margin:22px 0 0; }
+  legend { font-size:13px; font-weight:700; color:var(--grey-900); padding:0 6px; }
+  .hint { font-size:12px; color:var(--grey-500); margin:6px 0 0; }
   .consent { display:flex; gap:10px; align-items:flex-start; margin:18px 0; font-size:13px; }
   .consent input { width:auto; margin-top:2px; }
   button { width:100%; background:var(--green); color:#fff; border:none; border-radius:8px; padding:13px; font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; }
@@ -26,6 +29,7 @@
   .msg { margin-top:14px; font-size:14px; }
   .ok { color:var(--green); font-weight:600; }
   .err { color:#dc2626; }
+  .hidden { display:none; }
   .privacy { margin-top:16px; font-size:12px; color:var(--grey-500); text-align:center; }
 </style>
 </head>
@@ -44,9 +48,7 @@
       <label>Mobile number</label><input name="phone" inputmode="tel" />
       <div class="row">
         <div><label>Profession</label>
-          <select name="discipline_code" id="disc" required>
-            <option value="">Select…</option>
-          </select>
+          <select name="discipline_code" id="disc" required><option value="">Select…</option></select>
         </div>
         <div><label>Speciality / role</label>
           <select name="specialty_code" id="spec"><option value="">Select…</option></select>
@@ -64,6 +66,53 @@
         <div><label>Postcode</label><input name="postcode" /></div>
       </div>
       <label>Availability (optional)</label><input name="availability" placeholder="e.g. immediate, days/nights, from June" />
+
+      <label>How did you hear about us?</label>
+      <select name="heard_about" id="heard">
+        <option value="">Select…</option>
+        <option value="Indeed">Indeed</option>
+        <option value="Reed">Reed</option>
+        <option value="CV-Library / Totaljobs">CV-Library / Totaljobs</option>
+        <option value="NHS Jobs">NHS Jobs</option>
+        <option value="Google search">Google search</option>
+        <option value="Facebook">Facebook</option>
+        <option value="Instagram">Instagram</option>
+        <option value="TikTok">TikTok</option>
+        <option value="LinkedIn">LinkedIn</option>
+        <option value="X / Twitter">X / Twitter</option>
+        <option value="WhatsApp">WhatsApp</option>
+        <option value="Word of mouth">Word of mouth — someone recommended you</option>
+        <option value="Returning candidate">I've worked with Day Webster before</option>
+        <option value="Day Webster staff">A Day Webster employee</option>
+        <option value="Job fair / event">Job fair / event</option>
+        <option value="Flyer / poster / QR">Flyer / poster / QR code</option>
+        <option value="Day Webster website">Day Webster website</option>
+        <option value="Email">Email from Day Webster</option>
+        <option value="Other">Other</option>
+      </select>
+      <div id="referrerWrap" class="hidden">
+        <label>Who recommended you?</label>
+        <input name="referrer_name" placeholder="Their name (so we can say thank you)" />
+      </div>
+
+      <fieldset>
+        <legend>Refer a friend (optional)</legend>
+        <p class="hint">Know someone looking for work? Pop their details here and we'll reach out — please only share them if they're happy to hear from us.</p>
+        <label>Friend's name</label><input name="friend_name" />
+        <div class="row">
+          <div><label>Friend's email</label><input type="email" name="friend_email" /></div>
+          <div><label>Friend's mobile</label><input name="friend_phone" inputmode="tel" /></div>
+        </div>
+        <div class="row">
+          <div><label>Their profession</label>
+            <select name="friend_discipline_code" id="fdisc"><option value="">Select…</option></select>
+          </div>
+          <div><label>Their speciality / role</label>
+            <select name="friend_specialty_code" id="fspec"><option value="">Select…</option></select>
+          </div>
+        </div>
+      </fieldset>
+
       <label>Anything else? (optional)</label><textarea name="message" rows="3"></textarea>
       <input class="hp" name="website" tabindex="-1" autocomplete="off" />
       <input type="hidden" name="vacancy" /><input type="hidden" name="campaign" />
@@ -92,11 +141,20 @@ const TAXONOMY = {
   care_homes:   { name:'Care Home', specs:[['care_assistant','Care Assistant'],['senior_carer','Senior Carer'],['nurse','Nurse (Care Home)'],['registered_mgr','Registered Manager']] },
   insurance:    { name:'Insurance', specs:[['underwriter','Underwriter'],['broker','Broker'],['claims','Claims']] },
 };
+function fillDiscipline(sel){ for (const [code, d] of Object.entries(TAXONOMY)) sel.add(new Option(d.name, code)); }
+function wireSpecs(discSel, specSel){
+  discSel.addEventListener('change', () => {
+    specSel.innerHTML = '<option value="">Select…</option>';
+    (TAXONOMY[discSel.value]?.specs || []).forEach(([c, n]) => specSel.add(new Option(n, c)));
+  });
+}
 const disc = document.getElementById('disc'), spec = document.getElementById('spec');
-for (const [code, d] of Object.entries(TAXONOMY)) disc.add(new Option(d.name, code));
-disc.addEventListener('change', () => {
-  spec.innerHTML = '<option value="">Select…</option>';
-  (TAXONOMY[disc.value]?.specs || []).forEach(([c, n]) => spec.add(new Option(n, c)));
+const fdisc = document.getElementById('fdisc'), fspec = document.getElementById('fspec');
+fillDiscipline(disc); fillDiscipline(fdisc); wireSpecs(disc, spec); wireSpecs(fdisc, fspec);
+
+// Show "who recommended you?" only for word of mouth.
+document.getElementById('heard').addEventListener('change', (e) => {
+  document.getElementById('referrerWrap').classList.toggle('hidden', e.target.value !== 'Word of mouth');
 });
 
 // Attribution: ?vacancy=<slug>&campaign=<id> (set on adverts / landing links)
@@ -117,8 +175,13 @@ document.getElementById('form').addEventListener('submit', async (e) => {
       body: JSON.stringify(data),
     });
     const out = await res.json();
-    if (out.ok) { f.reset(); spec.innerHTML = '<option value="">Select…</option>'; msg.className = 'msg ok'; msg.textContent = 'Thank you — you are registered. The right consultant will be in touch.'; }
-    else { msg.className = 'msg err'; msg.textContent = out.error || 'Something went wrong. Please try again.'; btn.disabled = false; }
+    if (out.ok) {
+      f.reset();
+      spec.innerHTML = '<option value="">Select…</option>'; fspec.innerHTML = '<option value="">Select…</option>';
+      document.getElementById('referrerWrap').classList.add('hidden');
+      msg.className = 'msg ok';
+      msg.textContent = out.referred ? 'Thank you — you are registered, and we’ll reach out to your friend too.' : 'Thank you — you are registered. The right consultant will be in touch.';
+    } else { msg.className = 'msg err'; msg.textContent = out.error || 'Something went wrong. Please try again.'; btn.disabled = false; }
   } catch (err) { msg.className = 'msg err'; msg.textContent = 'Network error. Please try again.'; btn.disabled = false; }
 });
 </script>
