@@ -4,16 +4,27 @@ A self-playing, full-screen animated walkthrough of the candidate pipeline.
 It's a **concept walkthrough** (the system is a build-in-progress) — honest, but
 polished enough to show internally or to stakeholders.
 
-## How to turn it into a video
+It is **responsive**: landscape on a laptop (16:9), and full-screen **portrait
+on a phone** (9:16 — ideal for WhatsApp / socials).
 
-1. Open `promo.html` full-screen (press `F11` / green full-screen button).
-   It auto-plays, loops, and scales to any screen.
-   - `Space` = pause/play · `→` = skip scene · `↻ Restart` button.
-2. Screen-record it:
-   - **Mac:** QuickTime → File → New Screen Recording (or `⌘⇧5`).
-   - **Windows:** Game Bar `Win+G` → record.
-   - **Either:** Loom / OBS.
-3. Record one clean loop (~40s), then add the voiceover below (or music).
+## On your phone (easiest — gives a vertical video)
+
+1. Open `promo.html` in the phone browser (e.g. the GitHub Pages URL once this
+   branch is live, or AirDrop/email the file to yourself and open it).
+2. Turn the screen recorder on:
+   - **iPhone:** swipe into Control Centre → tap the ⏺ Record button
+     (add it via Settings → Control Centre if it isn't there). Mute
+     notifications first.
+   - **Android:** swipe down Quick Settings → **Screen record**.
+3. Let it play one full loop (~40s), then stop. That's your video.
+   - Tap once to reveal controls: ❚❚ pause, ↻ restart.
+
+## On a laptop
+
+1. Open `promo.html` full-screen (`F11`). It auto-plays and loops.
+   `Space` = pause/play · `→` = skip scene.
+2. Record: **Mac** QuickTime/`⌘⇧5` · **Windows** Game Bar `Win+G` · or Loom/OBS.
+3. Capture one clean loop, then add the voiceover below (or music).
 
 It needs no internet and no deploy — it's fully self-contained.
 

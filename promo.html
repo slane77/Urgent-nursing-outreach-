@@ -80,6 +80,35 @@
   .file{width:6vw; height:7.4vw; background:#fff; border:1px solid var(--line); border-radius:.6vw; box-shadow:0 .8vw 2vw rgba(15,23,42,.08); display:flex; align-items:flex-end; justify-content:center; padding-bottom:.6vw; font-size:.85vw; color:var(--grey); position:relative;}
   .file::before{content:""; position:absolute; top:0; left:0; right:0; height:1vw; background:#e2e8f0; border-radius:.6vw .6vw 0 0;}
   .muted{color:var(--grey); font-size:1.2vw;}
+
+  /* ── Portrait / phone: fill the screen, stack everything, scale up type ── */
+  @media (orientation:portrait){
+    #stage{width:100vw; height:100vh; max-height:none; max-width:none;}
+    .scene{padding:9vw 6vw;}
+    .row{flex-direction:column; gap:5vw;}
+    .device,.panel,.chat,.flag,.col,.files{width:86vw !important; max-width:86vw !important;}
+    .kicker{font-size:3.4vw;}
+    h1{font-size:11vw;} h2{font-size:8vw;}
+    .lead{font-size:4.4vw; max-width:90vw;}
+    .center{gap:5vw;}
+    .pill,.tag{font-size:3.6vw; padding:1.6vw 3vw;}
+    .stat{font-size:13vw;}
+    .b{font-size:4.4vw; padding:3vw 4vw; border-radius:4vw;}
+    label{font-size:2.8vw; margin:2.4vw 0 1vw;}
+    .inp{font-size:4vw; padding:2.8vw 3vw; min-height:5vw; border-radius:2vw;}
+    .btn{font-size:4.4vw; padding:3vw; border-radius:2vw;}
+    .field{font-size:4vw; padding:2.4vw 0;}
+    .files{display:flex; gap:3vw; justify-content:center; flex-wrap:wrap;}
+    .file{width:24vw; height:30vw; font-size:3vw; border-radius:2vw;}
+    .file::before{height:4vw;}
+    .device{border-radius:4vw;} .device .scr{padding:5vw;}
+    .panel{border-radius:4vw; padding:5vw;}
+    #brand{font-size:4vw; top:6vw; left:6vw;} #brand .d{width:3.4vw; height:3.4vw;}
+    #bar{height:1.4vw;}
+    #controls{bottom:5vw; right:5vw; gap:2vw;}
+    #controls button{font-size:3.4vw; padding:2vw 3.4vw; border-radius:2vw;}
+    .muted{font-size:3.8vw;}
+  }
 </style>
 </head>
 <body>
