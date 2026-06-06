@@ -118,12 +118,11 @@ const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<'
 let state = { status:'sourced', disc:'', desk:'', search:'', page:0, disciplines:[], specialties:[], desks:[] };
 
 // ---- Auth ----
-async function refreshAuth() {
-  const { data:{ session } } = await sb.auth.getSession();
+function refreshAuth(session) {
   if (session) { sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{}); $('login').classList.add('hidden'); $('app').classList.remove('hidden'); init(); }
   else { $('login').classList.remove('hidden'); $('app').classList.add('hidden'); }
 }
-sb.auth.onAuthStateChange(refreshAuth);
+sb.auth.onAuthStateChange((_e,session)=>refreshAuth(session));
 $('loginBtn').onclick = async () => {
   const email = $('email').value.trim(), password = $('password').value; if (!email || !password) return;
   $('loginMsg').textContent = 'Signing in…';
@@ -320,7 +319,7 @@ $('tabs').querySelectorAll('.tab').forEach(t => t.onclick = () => {
   if (v==='review') loadReview();
 });
 
-refreshAuth();
+sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
 </script>
 </body>
 </html>

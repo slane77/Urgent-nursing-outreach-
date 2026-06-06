@@ -69,8 +69,8 @@ const STATUSES=['sourced','contacted','engaged','qualified','compliance','ready'
 const $=(id)=>document.getElementById(id);
 const esc=(s)=>(s??'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-async function refreshAuth(){const {data:{session}}=await sb.auth.getSession();if(session){sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{});$('login').classList.add('hidden');$('app').classList.remove('hidden');load();}else{$('login').classList.remove('hidden');$('app').classList.add('hidden');}}
-sb.auth.onAuthStateChange(refreshAuth);
+function refreshAuth(session){if(session){sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{});$('login').classList.add('hidden');$('app').classList.remove('hidden');load();}else{$('login').classList.remove('hidden');$('app').classList.add('hidden');}}
+sb.auth.onAuthStateChange((_e,session)=>refreshAuth(session));
 $('loginBtn').onclick=async()=>{const e=$('email').value.trim(),p=$('password').value;if(!e||!p)return;$('loginMsg').textContent='Signing in…';const {error}=await sb.auth.signInWithPassword({email:e,password:p});$('loginMsg').textContent=error?error.message:'';};
 $('password').addEventListener('keydown',ev=>{if(ev.key==='Enter')$('loginBtn').click();});
 
@@ -114,7 +114,7 @@ async function load(){ if(loaded)return; loaded=true;
   const {data:feed}=await sb.from('messages').select('created_at,direction,author,subject,body,candidates(first_name,last_name)').in('author',['agent','system']).order('created_at',{ascending:false}).limit(25);
   $('feed').innerHTML=(feed||[]).map(m=>{const who=`${m.candidates?.first_name||''} ${m.candidates?.last_name||''}`.trim()||'—';return `<div><span class="t">${(m.created_at||'').slice(0,16).replace('T',' ')}</span> · <strong>${esc(m.author)}</strong> → ${esc(who)}: ${esc(m.subject||m.body||'').slice(0,90)}</div>`;}).join('')||'<p class="muted">No activity yet.</p>';
 }
-refreshAuth();
+sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
 </script>
 </body>
 </html>
