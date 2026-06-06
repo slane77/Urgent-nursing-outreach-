@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Register — poster (print me)</title>
+<style>
+  :root { --green:#16a34a; --grey-700:#374151; --grey-500:#6b7280; }
+  * { box-sizing:border-box; }
+  body { font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin:0; color:var(--grey-700); background:#f3f4f6; }
+  .sheet { width:210mm; min-height:297mm; margin:16px auto; background:#fff; padding:24mm 20mm; text-align:center; display:flex; flex-direction:column; align-items:center; box-shadow:0 2px 16px rgba(0,0,0,.1); }
+  img.logo { height:64px; margin-bottom:32px; }
+  h1 { font-size:52px; margin:0 0 8px; color:#111827; }
+  p.sub { font-size:22px; color:var(--grey-500); margin:0 0 36px; max-width:18em; }
+  #qr { padding:18px; border:2px solid #e5e7eb; border-radius:16px; display:inline-block; background:#fff; }
+  #qr img, #qr canvas { display:block; }
+  .url { margin-top:28px; font-size:24px; font-weight:700; color:var(--green); word-break:break-all; }
+  .scan { margin-top:10px; font-size:18px; color:var(--grey-500); }
+  .foot { margin-top:auto; padding-top:32px; font-size:16px; color:var(--grey-500); }
+  .printbar { text-align:center; margin:16px; }
+  .printbar button { background:var(--green); color:#fff; border:none; border-radius:8px; padding:12px 22px; font-size:15px; font-weight:600; cursor:pointer; }
+  @media print { body { background:#fff; } .printbar { display:none; } .sheet { box-shadow:none; margin:0; } }
+</style>
+</head>
+<body>
+<div class="printbar"><button onclick="window.print()">Print / Save as PDF</button></div>
+<div class="sheet">
+  <img class="logo" src="dw-logo.jpg" alt="Day Webster" />
+  <h1>Looking for work?</h1>
+  <p class="sub">Register your interest with Day Webster — nursing, doctors, AHP, care &amp; more. It takes under a minute.</p>
+  <div id="qr"></div>
+  <div class="url">urgent-nursing-outreach.vercel.app/intake.html</div>
+  <div class="scan">Scan the code with your phone camera, or type the link above.</div>
+  <div class="foot">Day Webster — connecting great people with great work.</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+  new QRCode(document.getElementById('qr'), {
+    text: 'https://urgent-nursing-outreach.vercel.app/intake.html',
+    width: 320, height: 320, correctLevel: QRCode.CorrectLevel.M
+  });
+</script>
+</body>
+</html>
