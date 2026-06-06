@@ -80,6 +80,7 @@
   <header class="hero">
     <h1>Your next role <span class="accent">starts here.</span></h1>
     <p>Register with Day Webster in under a minute — nursing, doctors, allied health, care and more. The right consultant will be in touch.</p>
+    <p id="chatOption" class="hidden" style="margin-top:16px;"><a href="chat.html" style="display:inline-block;background:#fff;color:var(--green);border:1px solid var(--green);border-radius:980px;padding:10px 20px;font-weight:600;font-size:15px;text-decoration:none;">💬 Prefer to chat? Register by chat →</a></p>
   </header>
 
   <div class="wrap">
@@ -165,6 +166,7 @@
 <script src="js/config.js"></script>
 <script>
 const FN = window.CONFIG.SUPABASE_URL + '/functions/v1/candidate-intake';
+if (window.CONFIG.CHAT_ENABLED) document.getElementById('chatOption')?.classList.remove('hidden');
 
 // Discipline → specialties taxonomy (mirrors the database seed) so registrants
 // and their referrals self-route to the right desk without a logged-in call.
