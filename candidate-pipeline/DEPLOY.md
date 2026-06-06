@@ -148,8 +148,10 @@ filter for an admin to place. (North/South routing needs the candidate's
 `region` to read "North"/"South" — normalise region for full auto-split, or
 route those manually for now.)
 
-A desk-admin UI (manage staff, desk membership, coverage) is a later increment;
-for now use the SQL above.
+**Easier:** once deployed, use **`admin.html`** to do all of this by clicking —
+toggle who's an admin, put recruiters on desks, create desks, and edit routing
+rules. (The SQL above is just the manual fallback.) Staff appear in the admin
+people list automatically after they've signed into any staff page once.
 
 ---
 
