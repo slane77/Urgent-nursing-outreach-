@@ -42,14 +42,16 @@ Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
 
 1. Review the schema + functions, then apply `sql/10 → 16` and deploy the edge
    functions (ideally on a Supabase **dev branch** first):
-   - `candidate-agent`, `csv-import`, `reference-request` — verify_jwt (staff)
-   - `candidate-intake`, `inbound-email`, `early-warnings` — verify_jwt false
-     (public/provider/cron; `inbound-email` + `early-warnings` guard with a
-     `?secret=`). Create a private Storage bucket `candidate-docs`.
+   - `candidate-agent`, `csv-import`, `reference-request`, `job-advert`,
+     `outreach-campaign` — verify_jwt (staff)
+   - `candidate-intake`, `inbound-email`, `early-warnings`, `jobs` — verify_jwt
+     false (public/provider/cron; `inbound-email` + `early-warnings` guard with
+     a `?secret=`). Create a private Storage bucket `candidate-docs`.
    - Schedule `early-warnings` daily (Supabase Cron).
 2. Set secrets: `ANTHROPIC_API_KEY`, `BREVO_API_KEY`, `CANDIDATE_SENDER_EMAIL` /
    `CANDIDATE_SENDER_NAME`, `REPLY_DOMAIN` / `REPLY_LOCAL`, `INBOUND_SECRET`,
-   `CRON_SECRET`. Confirm the §11 data-protection terms before real PII.
+   `CRON_SECRET`, `PUBLIC_SITE_URL` (where intake.html is hosted), `ORG_NAME` /
+   `ORG_URL`. Confirm the §11 data-protection terms before real PII.
 3. Expose the `candidate` schema to the API (Supabase → Settings → API →
    Exposed schemas) so `candidates.html` can read/write it under RLS.
 4. Use `candidate-import.html` to load the old spreadsheets; share

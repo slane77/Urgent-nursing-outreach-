@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vacancies — Day Webster</title>
+<style>
+  :root{--green:#16a34a;--green-l:#f0fdf4;--grey-50:#f9fafb;--grey-200:#e5e7eb;--grey-500:#6b7280;--grey-700:#374151;}
+  *{box-sizing:border-box;} body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--grey-50);color:var(--grey-700);}
+  header{background:#fff;border-bottom:1px solid var(--grey-200);padding:14px 22px;} header h1{margin:0;font-size:17px;}
+  main{max-width:900px;margin:20px auto;padding:0 16px;}
+  .card{background:#fff;border:1px solid var(--grey-200);border-radius:8px;padding:18px;margin-bottom:14px;}
+  label{display:block;font-size:12px;font-weight:600;color:var(--grey-500);margin:10px 0 4px;}
+  input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--grey-200);border-radius:6px;font-size:14px;font-family:inherit;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;} .row>div{flex:1;min-width:160px;}
+  .btn{background:var(--green);color:#fff;border:none;border-radius:6px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;}
+  .btn:disabled{opacity:.5;} .muted{color:var(--grey-500);font-size:13px;} .hidden{display:none;}
+  pre{white-space:pre-wrap;background:var(--grey-50);border:1px solid var(--grey-200);border-radius:6px;padding:10px;font-size:13px;font-family:inherit;}
+  table{width:100%;border-collapse:collapse;font-size:13px;} th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--grey-200);}
+  a{color:var(--green);}
+</style>
+</head>
+<body>
+<header><h1>Vacancies &amp; adverts</h1></header>
+<main>
+  <div class="card hidden" id="login">
+    <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email — a magic link will be sent.</p>
+    <div style="display:flex;gap:8px;"><input type="email" id="email" placeholder="you@daywebster.com" style="flex:1"/><button class="btn" id="loginBtn">Send link</button></div>
+    <p class="muted" id="loginMsg"></p>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card">
+      <h3 style="margin-top:0">New vacancy</h3>
+      <label>Title</label><input id="title" placeholder="e.g. Theatres Nurse (RGN)"/>
+      <div class="row">
+        <div><label>Discipline</label><select id="disc"></select></div>
+        <div><label>Specialty</label><select id="spec"><option value="">—</option></select></div>
+      </div>
+      <div class="row">
+        <div><label>Town</label><input id="town"/></div>
+        <div><label>Region</label><input id="region"/></div>
+      </div>
+      <div class="row">
+        <div><label>Pay</label><input id="pay" placeholder="Band 5 / £18–22/hr"/></div>
+        <div><label>Type</label><select id="etype"><option value="">—</option><option>full_time</option><option>part_time</option><option>contract</option><option>temporary</option></select></div>
+      </div>
+      <label>Notes for the advert (optional)</label><textarea id="notes" rows="2" placeholder="shifts, setting, must-haves…"></textarea>
+      <div style="margin-top:12px;"><button class="btn" id="gen">Generate advert</button> <span class="muted" id="genMsg"></span></div>
+    </div>
+
+    <div class="card hidden" id="result">
+      <h3 style="margin-top:0">Generated</h3>
+      <p class="muted">Public job page: <a id="pub" target="_blank"></a></p>
+      <h4>Description</h4><pre id="desc"></pre>
+      <div class="row"><div><h4>Indeed</h4><pre id="ad_indeed"></pre></div><div><h4>Reed</h4><pre id="ad_reed"></pre></div><div><h4>CV-Library</h4><pre id="ad_cvlibrary"></pre></div></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Open vacancies</h3>
+      <table><thead><tr><th>Title</th><th>Discipline</th><th>Location</th><th>Public page</th></tr></thead><tbody id="rows"></tbody></table>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script>
+const sb = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY, { db:{ schema:'candidate' } });
+const JOB_FN = window.CONFIG.SUPABASE_URL + '/functions/v1/job-advert';
+const JOBS_PUB = window.CONFIG.SUPABASE_URL + '/functions/v1/jobs?slug=';
+const $ = (id)=>document.getElementById(id);
+let disciplines=[], specialties=[];
+
+async function refreshAuth(){ const {data:{session}}=await sb.auth.getSession(); if(session){$('login').classList.add('hidden');$('app').classList.remove('hidden');init();} else {$('login').classList.remove('hidden');$('app').classList.add('hidden');} }
+sb.auth.onAuthStateChange(refreshAuth);
+$('loginBtn').onclick=async()=>{const email=$('email').value.trim();if(!email)return;const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.href}});$('loginMsg').textContent=error?error.message:'Check your email, then return here.';};
+
+let inited=false;
+async function init(){ if(inited)return; inited=true;
+  const [{data:d},{data:s}]=await Promise.all([sb.from('disciplines').select('id,code,name').order('sort_order'),sb.from('specialties').select('id,code,name,discipline_id').order('sort_order')]);
+  disciplines=d||[]; specialties=s||[];
+  $('disc').innerHTML='<option value="">—</option>'+disciplines.map(x=>`<option value="${x.code}" data-id="${x.id}">${x.name}</option>`).join('');
+  $('disc').onchange=()=>{ const id=$('disc').selectedOptions[0]?.dataset.id; $('spec').innerHTML='<option value="">—</option>'+specialties.filter(x=>x.discipline_id===id).map(x=>`<option value="${x.code}">${x.name}</option>`).join(''); };
+  loadList();
+}
+async function loadList(){
+  const {data}=await sb.from('vacancies').select('slug,title,town,region,disciplines(name)').eq('status','open').order('date_posted',{ascending:false});
+  $('rows').innerHTML=(data||[]).map(v=>`<tr><td>${v.title||''}</td><td>${v.disciplines?.name||'—'}</td><td>${[v.town,v.region].filter(Boolean).join(', ')}</td><td><a href="${JOBS_PUB+encodeURIComponent(v.slug)}" target="_blank">view</a></td></tr>`).join('')||'<tr><td colspan="4" class="muted">None yet.</td></tr>';
+}
+$('gen').onclick=async()=>{
+  if(!$('title').value.trim()){$('genMsg').textContent='Title required';return;}
+  $('gen').disabled=true;$('genMsg').textContent='Writing advert…';
+  const {data:{session}}=await sb.auth.getSession();
+  const body={create:{title:$('title').value.trim(),discipline_code:$('disc').value||null,specialty_code:$('spec').value||null,town:$('town').value||null,region:$('region').value||null,pay:$('pay').value||null,employment_type:$('etype').value||null,notes:$('notes').value||null}};
+  try{
+    const res=await fetch(JOB_FN,{method:'POST',headers:{'Content-Type':'application/json','apikey':window.CONFIG.SUPABASE_ANON_KEY,'Authorization':'Bearer '+(session?.access_token??'')},body:JSON.stringify(body)});
+    const out=await res.json();
+    if(out.error){$('genMsg').textContent='Error: '+out.error;}
+    else{
+      $('genMsg').textContent='Done ✓';
+      $('desc').textContent=out.description; $('ad_indeed').textContent=out.channels.indeed; $('ad_reed').textContent=out.channels.reed; $('ad_cvlibrary').textContent=out.channels.cvlibrary;
+      const url=JOBS_PUB+encodeURIComponent(out.slug); $('pub').textContent=url; $('pub').href=url;
+      $('result').classList.remove('hidden'); loadList();
+    }
+  }catch(e){$('genMsg').textContent='Error: '+e;}
+  $('gen').disabled=false;
+};
+refreshAuth();
+</script>
+</body>
+</html>

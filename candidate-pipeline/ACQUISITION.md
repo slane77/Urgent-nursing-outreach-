@@ -53,12 +53,13 @@ Adverts and applicants are all attributed, so cost-per-candidate is automatic.
 
 ## Build order (Phase 2)
 
-1. ✅ Sourcing/attribution model + intake attribution (`sql/16`, this commit).
-2. **Vacancies UI + advert generator** — staff create a vacancy; Claude writes
-   channel-tailored advert copy + the `JobPosting` JSON-LD.
-3. **Google-for-Jobs `jobs` function** — public, structured-data job pages.
-4. **Referral + re-engagement** functions (credential-free, high leverage).
-5. **Board connectors** — Indeed / Reed / CV-Library, once credentials arrive.
+1. ✅ Sourcing/attribution model + intake attribution (`sql/16`).
+2. ✅ **Vacancies UI + advert generator** — `vacancies.html` + `job-advert`
+   (Claude writes the copy + channel variants; JSON-LD built in code).
+3. ✅ **Google-for-Jobs `jobs` function** — public, structured-data job pages.
+4. ✅ **Referral + re-engagement** — `outreach-campaign` (credential-free).
+5. **Board connectors** — Indeed / Reed / CV-Library, once credentials arrive
+   (implement `postAdvert` / `searchCVs` against the interface above).
 6. **Control tower (Phase 3)** — dashboard over `intake_by_channel`,
    cost-per-candidate, discipline-integrity review, agent action log.
 
