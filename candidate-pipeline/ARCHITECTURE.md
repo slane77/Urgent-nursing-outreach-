@@ -40,9 +40,10 @@ This is the Tier-B semi-auto model agreed earlier, applied end to end.
 ## 3. Components (all reuse one spine — "no new build primitive")
 
 1. **Candidate store** — the schema in `sql/10_*` (this is built, in draft).
-2. **Conversation/agent engine** — a Claude-powered edge function that drives
-   the engage→qualify→compliance-request conversation and writes structured
-   results back to the DB. *Not yet built.*
+2. **Conversation/agent engine** — a Claude-powered edge function
+   (`functions/candidate-agent/`, `claude-opus-4-8`, adaptive thinking, tool
+   use) that drives the engage→qualify→compliance-request conversation and
+   writes structured results back to the DB. *Built (draft, not deployed).*
 3. **Inbound-email pipeline** — classify inbound email → locate artefact (body
    vs attachment, through Fwd chains) → ingest → check sender domain. This is
    the exact spine the assessment's references (§8f) and bookings half need;
