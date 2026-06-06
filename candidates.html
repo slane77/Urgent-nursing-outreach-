@@ -4,65 +4,25 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Candidates — Day Webster</title>
-<style>
-  :root { --green:#16a34a; --green-light:#f0fdf4; --grey-50:#f9fafb; --grey-100:#f3f4f6; --grey-200:#e5e7eb; --grey-300:#d1d5db; --grey-500:#6b7280; --grey-700:#374151; --grey-800:#1f2937; --amber:#b45309; --amber-light:#fffbeb; }
-  * { box-sizing:border-box; }
-  body { font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin:0; background:var(--grey-50); color:var(--grey-700); }
-  header { background:#fff; border-bottom:1px solid var(--grey-200); padding:14px 22px; display:flex; align-items:center; gap:16px; }
-  header h1 { margin:0; font-size:17px; }
-  .tabs { display:flex; gap:4px; margin-left:auto; }
-  .tab { padding:8px 14px; border-radius:6px; font-size:13px; cursor:pointer; color:var(--grey-500); }
-  .tab.active { background:var(--green-light); color:var(--green); font-weight:600; }
-  main { max-width:1100px; margin:18px auto; padding:0 16px; }
-  .card { background:#fff; border:1px solid var(--grey-200); border-radius:8px; padding:16px; margin-bottom:14px; }
-  .subtabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
-  .subtab { padding:6px 11px; border-radius:999px; font-size:12px; cursor:pointer; background:#fff; border:1px solid var(--grey-200); }
-  .subtab.active { background:var(--green); color:#fff; border-color:var(--green); }
-  .subtab .n { opacity:.75; margin-left:5px; }
-  .controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-  input, select, textarea { padding:8px 11px; border:1px solid var(--grey-200); border-radius:6px; font-size:13px; font-family:inherit; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--grey-100); }
-  th { background:var(--grey-50); font-weight:600; color:var(--grey-700); }
-  tr.click:hover { background:var(--grey-50); cursor:pointer; }
-  .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--grey-100); color:var(--grey-700); white-space:nowrap; }
-  .pill.flag { background:var(--amber-light); color:var(--amber); }
-  .btn { background:var(--green); color:#fff; border:none; border-radius:6px; padding:8px 14px; font-size:13px; font-weight:500; cursor:pointer; }
-  .btn.secondary { background:#fff; color:var(--grey-700); border:1px solid var(--grey-200); }
-  .btn.sm { padding:5px 9px; font-size:12px; }
-  .btn:disabled { opacity:.5; cursor:not-allowed; }
-  .muted { color:var(--grey-500); font-size:12px; }
-  .hidden { display:none; }
-  /* modal */
-  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; justify-content:flex-end; z-index:50; }
-  .panel { width:min(680px,100%); height:100%; background:var(--grey-50); overflow-y:auto; box-shadow:-4px 0 24px rgba(0,0,0,.1); }
-  .panel header { position:sticky; top:0; }
-  .panel .body { padding:18px; }
-  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  label { display:block; font-size:11px; font-weight:600; color:var(--grey-500); margin:8px 0 3px; text-transform:uppercase; letter-spacing:.03em; }
-  .msg { padding:9px 12px; border-radius:8px; margin-bottom:8px; font-size:13px; max-width:85%; }
-  .msg.inbound { background:#fff; border:1px solid var(--grey-200); }
-  .msg.outbound { background:var(--green-light); margin-left:auto; }
-  .msg .meta { font-size:10px; color:var(--grey-500); margin-top:4px; }
-  .timeline li { font-size:13px; margin-bottom:5px; }
-  h4 { margin:18px 0 6px; font-size:13px; color:var(--grey-800); }
-  .loginwrap { max-width:420px; margin:80px auto; }
-</style>
+<link rel="stylesheet" href="dw-theme.css" />
 </head>
 <body>
-<header>
-  <h1>Candidates</h1>
+<header class="topbar">
+  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a class="here" href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="admin.html">Admin</a></nav>
+</header>
+<div class="subbar">
   <div class="tabs" id="tabs">
     <div class="tab active" data-view="pipeline">Pipeline</div>
     <div class="tab" data-view="review">Review queue <span id="reviewCount"></span></div>
   </div>
-</header>
+</div>
 
 <!-- LOGIN -->
 <div class="loginwrap card hidden" id="login">
   <h3 style="margin-top:0">Sign in</h3>
   <p class="muted">Day Webster email &amp; password.</p>
-  <div style="display:flex; gap:8px; flex-direction:column;"><input type="email" id="email" placeholder="you@daywebster.com" /><input type="password" id="password" placeholder="Password" /><button class="btn" id="loginBtn">Sign in</button></div>
+  <div class="loginform"><input type="email" id="email" placeholder="you@daywebster.com" /><input type="password" id="password" placeholder="Password" /><button class="btn" id="loginBtn">Sign in</button></div>
   <p class="muted" id="loginMsg"></p>
 </div>
 
@@ -229,7 +189,7 @@ async function openCandidate(id) {
 
     <div class="card">
       <h4 style="margin-top:0">Compliance items</h4>
-      ${(items??[]).map(it=>`<div style="border-bottom:1px solid var(--grey-100); padding:8px 0;">
+      ${(items??[]).map(it=>`<div style="border-bottom:1px solid var(--hair); padding:8px 0;">
         <strong>${esc(it.compliance_requirements?.name)||'(unlabelled)'}</strong>
         <span class="pill ${it.needs_human?'flag':''}">${it.needs_human?'needs review':it.status}</span>
         ${it.human_notes?`<div class="muted">${esc(it.human_notes)}</div>`:''}
