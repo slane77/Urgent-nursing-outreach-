@@ -106,12 +106,11 @@ async function call(body) {
 }
 
 // ---- Auth ----
-async function refreshAuth() {
-  const { data: { session } } = await sb.auth.getSession();
+function refreshAuth(session) {
   if (session) { hide('login'); show('uploader'); }
   else { show('login'); hide('uploader'); }
 }
-sb.auth.onAuthStateChange(refreshAuth);
+sb.auth.onAuthStateChange((_e,session)=>refreshAuth(session));
 $('loginBtn').onclick = async () => {
   const email = $('email').value.trim(), password = $('password').value;
   if (!email || !password) return;
@@ -179,7 +178,7 @@ const reset = () => { rows = []; headers = []; mapping = []; $('file').value = '
 $('resetBtn').onclick = reset;
 $('againBtn').onclick = reset;
 
-refreshAuth();
+sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
 </script>
 </body>
 </html>

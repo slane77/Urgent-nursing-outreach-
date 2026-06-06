@@ -72,8 +72,8 @@ const JOBS_PUB = window.CONFIG.SUPABASE_URL + '/functions/v1/jobs?slug=';
 const $ = (id)=>document.getElementById(id);
 let disciplines=[], specialties=[];
 
-async function refreshAuth(){ const {data:{session}}=await sb.auth.getSession(); if(session){sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{});$('login').classList.add('hidden');$('app').classList.remove('hidden');init();} else {$('login').classList.remove('hidden');$('app').classList.add('hidden');} }
-sb.auth.onAuthStateChange(refreshAuth);
+function refreshAuth(session){ if(session){sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{});$('login').classList.add('hidden');$('app').classList.remove('hidden');init();} else {$('login').classList.remove('hidden');$('app').classList.add('hidden');} }
+sb.auth.onAuthStateChange((_e,session)=>refreshAuth(session));
 $('loginBtn').onclick=async()=>{const email=$('email').value.trim(),password=$('password').value;if(!email||!password)return;$('loginMsg').textContent='Signing in…';const {error}=await sb.auth.signInWithPassword({email,password});$('loginMsg').textContent=error?error.message:'';};
 $('password').addEventListener('keydown',ev=>{if(ev.key==='Enter')$('loginBtn').click();});
 
@@ -107,7 +107,7 @@ $('gen').onclick=async()=>{
   }catch(e){$('genMsg').textContent='Error: '+e;}
   $('gen').disabled=false;
 };
-refreshAuth();
+sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
 </script>
 </body>
 </html>

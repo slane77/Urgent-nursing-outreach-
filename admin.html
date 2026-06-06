@@ -81,10 +81,10 @@ const $=(id)=>document.getElementById(id);
 const esc=(s)=>(s??'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 let desks=[], disciplines=[], specialties=[];
 
-async function refreshAuth(){const {data:{session}}=await sb.auth.getSession();
+function refreshAuth(session){
   if(session){ $('whoami').textContent='Signed in as '+session.user.email; sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{}); $('login').classList.add('hidden');$('app').classList.remove('hidden');load(); }
   else { $('login').classList.remove('hidden');$('app').classList.add('hidden'); } }
-sb.auth.onAuthStateChange(refreshAuth);
+sb.auth.onAuthStateChange((_e,session)=>refreshAuth(session));
 $('loginBtn').onclick=async()=>{const e=$('email').value.trim(),p=$('password').value;if(!e||!p)return;$('loginMsg').textContent='Signing in…';const {error}=await sb.auth.signInWithPassword({email:e,password:p});$('loginMsg').textContent=error?error.message:'';};
 $('password').addEventListener('keydown',ev=>{if(ev.key==='Enter')$('loginBtn').click();});
 $('logoutBtn').onclick=()=>sb.auth.signOut();
@@ -153,7 +153,7 @@ $('addCov').onclick=async()=>{
   if(error){alert(error.message);return;}
   $('c_region').value=''; renderCoverage();
 };
-refreshAuth();
+sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
 </script>
 </body>
 </html>
