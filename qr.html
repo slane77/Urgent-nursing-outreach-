@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QR playground — Day Webster</title>
+<link rel="stylesheet" href="dw-theme.css" />
+<style>
+  .stage { display:flex; flex-direction:column; align-items:center; gap:18px; }
+  #qr { padding:20px; background:#fff; border:1px solid var(--line); border-radius:18px; }
+  #qr canvas, #qr img { display:block; }
+  .sizes { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .chip { padding:8px 16px; border-radius:980px; border:1px solid var(--line); background:#fff; cursor:pointer; font-size:13px; font-weight:600; color:var(--ink-soft); }
+  .chip.on { background:var(--green); color:#fff; border-color:var(--green); }
+</style>
+</head>
+<body>
+  <div class="topbar"><a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+    <nav class="topnav"><a href="intake.html">Register form</a><a href="register-poster.html">Poster</a></nav>
+  </div>
+  <main style="max-width:560px;">
+    <h1 style="font-size:30px;margin:8px 0 4px;">QR playground</h1>
+    <p class="muted" style="margin-bottom:18px;">Generate a QR code for any link, resize it, and download it as a PNG to drop into posters, emails or socials.</p>
+
+    <div class="card">
+      <label>Link the QR points to</label>
+      <input id="url" type="url" value="https://urgent-nursing-outreach.vercel.app/intake.html" style="width:100%;" />
+
+      <label style="margin-top:16px;">Size</label>
+      <div class="sizes" id="sizes" style="justify-content:flex-start;">
+        <span class="chip" data-s="240">Small</span>
+        <span class="chip on" data-s="360">Medium</span>
+        <span class="chip" data-s="520">Large</span>
+        <span class="chip" data-s="800">XL (print)</span>
+      </div>
+
+      <div class="stage" style="margin-top:22px;">
+        <div id="qr"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+          <button class="btn" id="dl">Download PNG</button>
+          <button class="btn secondary" id="copy">Copy link</button>
+        </div>
+        <p class="muted" id="msg"></p>
+      </div>
+    </div>
+  </main>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let size = 360;
+  function render() {
+    $('qr').innerHTML = '';
+    new QRCode($('qr'), { text: $('url').value || ' ', width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
+  }
+  $('sizes').querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    $('sizes').querySelectorAll('.chip').forEach(x => x.classList.remove('on'));
+    c.classList.add('on'); size = +c.dataset.s; render();
+  });
+  let t; $('url').addEventListener('input', () => { clearTimeout(t); t = setTimeout(render, 250); });
+  $('dl').onclick = () => {
+    const cv = $('qr').querySelector('canvas');
+    const img = $('qr').querySelector('img');
+    const data = cv ? cv.toDataURL('image/png') : (img ? img.src : null);
+    if (!data) return;
+    const a = document.createElement('a'); a.href = data; a.download = 'daywebster-qr.png'; a.click();
+  };
+  $('copy').onclick = async () => { try { await navigator.clipboard.writeText($('url').value); $('msg').textContent = 'Link copied ✓'; } catch { $('msg').textContent = $('url').value; } };
+  render();
+</script>
+</body>
+</html>
