@@ -21,6 +21,12 @@
   fieldset { border:1px solid var(--grey-200); border-radius:10px; padding:6px 16px 16px; margin:22px 0 0; }
   legend { font-size:13px; font-weight:700; color:var(--grey-900); padding:0 6px; }
   .hint { font-size:12px; color:var(--grey-500); margin:6px 0 0; }
+  .friend { border-top:1px dashed var(--grey-200); padding-top:12px; margin-top:14px; }
+  .friend:first-child { border-top:0; padding-top:4px; margin-top:4px; }
+  .friend .fhead { display:flex; justify-content:space-between; align-items:center; }
+  .friend .fhead span { font-size:12px; font-weight:700; color:var(--grey-500); }
+  .rm { width:auto; background:#fff; color:#dc2626; border:1px solid var(--grey-200); padding:5px 10px; font-size:12px; font-weight:600; margin:0; cursor:pointer; border-radius:6px; }
+  .addbtn { width:auto; background:#fff; color:var(--green); border:1px solid var(--green); padding:9px 16px; font-size:14px; margin-top:14px; }
   .consent { display:flex; gap:10px; align-items:flex-start; margin:18px 0; font-size:13px; }
   .consent input { width:auto; margin-top:2px; }
   button { width:100%; background:var(--green); color:#fff; border:none; border-radius:8px; padding:13px; font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; }
@@ -96,21 +102,10 @@
       </div>
 
       <fieldset>
-        <legend>Refer a friend — earn up to £350</legend>
-        <p class="hint">Know someone looking for work? Refer them and earn a reward once they complete <strong>100 hours</strong> with us: Doctors £350 · Nurses &amp; AHPs £150 · HCAs, Carers &amp; care home staff £50. Referral rewards are for registered Day Webster Group candidates. Please only share their details if they're happy to hear from us.</p>
-        <label>Friend's name</label><input name="friend_name" />
-        <div class="row">
-          <div><label>Friend's email</label><input type="email" name="friend_email" /></div>
-          <div><label>Friend's mobile</label><input name="friend_phone" inputmode="tel" /></div>
-        </div>
-        <div class="row">
-          <div><label>Their profession</label>
-            <select name="friend_discipline_code" id="fdisc"><option value="">Select…</option></select>
-          </div>
-          <div><label>Their speciality / role</label>
-            <select name="friend_specialty_code" id="fspec"><option value="">Select…</option></select>
-          </div>
-        </div>
+        <legend>Refer a friend — earn up to £350 each</legend>
+        <p class="hint">Know people looking for work? Refer as many as you like and earn a reward for each once they complete <strong>100 hours</strong> with us: Doctors £350 · Nurses &amp; AHPs £150 · HCAs, Carers &amp; care home staff £50. Referral rewards are for registered Day Webster Group candidates. Please only share details of people happy to hear from us.</p>
+        <div id="friends"></div>
+        <button type="button" id="addFriend" class="addbtn">+ Add another friend</button>
       </fieldset>
 
       <label>Anything else? (optional)</label><textarea name="message" rows="3"></textarea>
@@ -131,7 +126,7 @@
 const FN = window.CONFIG.SUPABASE_URL + '/functions/v1/candidate-intake';
 
 // Discipline → specialties taxonomy (mirrors the database seed) so registrants
-// self-route to the right desk without needing a logged-in API call.
+// and their referrals self-route to the right desk without a logged-in call.
 const TAXONOMY = {
   nursing:      { name:'Nursing', specs:[['general','General Nursing'],['ward','Ward Nursing'],['ae','A&E Nursing'],['itu','ITU/ICU Nursing'],['theatres','Theatres'],['theatres_odp','Theatres (ODP)'],['midwifery','Midwifery'],['neonatal','Neonatal'],['paediatrics','Paediatrics'],['rmn','RMN (Mental Health)'],['hca','Healthcare Assistant'],['primary_care','Primary Care'],['anp','Advanced Nurse Practitioner'],['enp','Emergency Nurse Practitioner']] },
   doctors:      { name:'Doctor', specs:[['general','General / Locum'],['gp','GP'],['specialty','Specialty Doctor'],['consultant','Consultant']] },
@@ -149,13 +144,32 @@ function wireSpecs(discSel, specSel){
   });
 }
 const disc = document.getElementById('disc'), spec = document.getElementById('spec');
-const fdisc = document.getElementById('fdisc'), fspec = document.getElementById('fspec');
-fillDiscipline(disc); fillDiscipline(fdisc); wireSpecs(disc, spec); wireSpecs(fdisc, fspec);
+fillDiscipline(disc); wireSpecs(disc, spec);
 
 // Show "who recommended you?" only for word of mouth.
 document.getElementById('heard').addEventListener('change', (e) => {
   document.getElementById('referrerWrap').classList.toggle('hidden', e.target.value !== 'Word of mouth');
 });
+
+// Repeatable refer-a-friend rows.
+const friendsWrap = document.getElementById('friends');
+function addFriendRow() {
+  const row = document.createElement('div');
+  row.className = 'friend';
+  row.innerHTML =
+    '<div class="fhead"><span>Friend ' + (friendsWrap.children.length + 1) + '</span><button type="button" class="rm">Remove</button></div>' +
+    '<div class="row"><div><label>Name</label><input class="f-name" /></div><div><label>Mobile</label><input class="f-phone" inputmode="tel" /></div></div>' +
+    '<label>Email</label><input class="f-email" type="email" />' +
+    '<div class="row"><div><label>Their profession</label><select class="f-disc"><option value="">Select…</option></select></div>' +
+    '<div><label>Their speciality / role</label><select class="f-spec"><option value="">Select…</option></select></div></div>';
+  const fdisc = row.querySelector('.f-disc'), fspec = row.querySelector('.f-spec');
+  fillDiscipline(fdisc); wireSpecs(fdisc, fspec);
+  row.querySelector('.rm').onclick = () => { row.remove(); renumber(); };
+  friendsWrap.appendChild(row);
+}
+function renumber(){ [...friendsWrap.children].forEach((r,i)=>{ r.querySelector('.fhead span').textContent = 'Friend ' + (i+1); }); }
+document.getElementById('addFriend').onclick = addFriendRow;
+addFriendRow(); // start with one (optional) row
 
 // Attribution: ?vacancy=<slug>&campaign=<id> (set on adverts / landing links)
 const qp = new URLSearchParams(location.search);
@@ -167,6 +181,14 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   const f = e.target, msg = document.getElementById('msg'), btn = document.getElementById('submit');
   const data = Object.fromEntries(new FormData(f).entries());
   data.consent = document.getElementById('consent').checked;
+  // Gather referred friends (only rows with a name or email).
+  data.friends = [...friendsWrap.children].map((r) => ({
+    name: r.querySelector('.f-name').value.trim(),
+    email: r.querySelector('.f-email').value.trim(),
+    phone: r.querySelector('.f-phone').value.trim(),
+    discipline_code: r.querySelector('.f-disc').value,
+    specialty_code: r.querySelector('.f-spec').value,
+  })).filter((x) => x.name || x.email);
   btn.disabled = true; msg.textContent = 'Submitting…'; msg.className = 'msg';
   try {
     const res = await fetch(FN, {
@@ -177,10 +199,13 @@ document.getElementById('form').addEventListener('submit', async (e) => {
     const out = await res.json();
     if (out.ok) {
       f.reset();
-      spec.innerHTML = '<option value="">Select…</option>'; fspec.innerHTML = '<option value="">Select…</option>';
+      spec.innerHTML = '<option value="">Select…</option>';
+      friendsWrap.innerHTML = ''; addFriendRow();
       document.getElementById('referrerWrap').classList.add('hidden');
       msg.className = 'msg ok';
-      msg.textContent = out.referred ? 'Thank you — you are registered, and we’ll reach out to your friend too.' : 'Thank you — you are registered. The right consultant will be in touch.';
+      msg.textContent = out.referred > 0
+        ? 'Thank you — you are registered, and we’ll reach out to the ' + out.referred + (out.referred === 1 ? ' friend' : ' friends') + ' you referred.'
+        : 'Thank you — you are registered. The right consultant will be in touch.';
     } else { msg.className = 'msg err'; msg.textContent = out.error || 'Something went wrong. Please try again.'; btn.disabled = false; }
   } catch (err) { msg.className = 'msg err'; msg.textContent = 'Network error. Please try again.'; btn.disabled = false; }
 });
