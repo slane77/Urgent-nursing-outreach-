@@ -16,6 +16,11 @@
   #qr img, #qr canvas { display:block; }
   .url { margin-top:28px; font-size:24px; font-weight:700; color:var(--green); word-break:break-all; }
   .scan { margin-top:10px; font-size:18px; color:var(--grey-500); }
+  .refer { margin-top:30px; width:100%; border-top:2px dashed #e5e7eb; padding-top:22px; }
+  .refer h2 { font-size:26px; color:#111827; margin:0 0 14px; }
+  .rewards { display:flex; flex-wrap:wrap; justify-content:center; gap:8px 10px; }
+  .rewards span { background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; font-weight:700; font-size:16px; padding:6px 12px; border-radius:999px; }
+  .terms { font-size:13px; color:var(--grey-500); margin:16px auto 0; max-width:34em; }
   .foot { margin-top:auto; padding-top:32px; font-size:16px; color:var(--grey-500); }
   .printbar { text-align:center; margin:16px; }
   .printbar button { background:var(--green); color:#fff; border:none; border-radius:8px; padding:12px 22px; font-size:15px; font-weight:600; cursor:pointer; }
@@ -31,6 +36,13 @@
   <div id="qr"></div>
   <div class="url">urgent-nursing-outreach.vercel.app/intake.html</div>
   <div class="scan">Scan the code with your phone camera, or type the link above.</div>
+  <div class="refer">
+    <h2>Already with us? Refer a friend &amp; earn up to £350</h2>
+    <div class="rewards">
+      <span>Doctors £350</span><span>Nurses £150</span><span>AHPs £150</span><span>HCAs £50</span><span>Carers £50</span><span>Care home staff £50</span>
+    </div>
+    <p class="terms">Reward paid once your friend completes <strong>100 hours</strong> of work with us. Referral rewards are available to <strong>registered Day Webster Group candidates</strong>.</p>
+  </div>
   <div class="foot">Day Webster — connecting great people with great work.</div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
