@@ -41,8 +41,8 @@
 </header>
 
 <div class="loginwrap card hidden" id="login">
-  <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email — a magic link will be sent.</p>
-  <div style="display:flex;gap:8px;"><input id="email" type="email" placeholder="you@daywebster.com" style="flex:1;padding:9px 11px;border:1px solid var(--grey-200);border-radius:6px;"/><button id="loginBtn" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;cursor:pointer;">Send link</button></div>
+  <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email &amp; password.</p>
+  <div style="display:flex;gap:8px;flex-direction:column;"><input id="email" type="email" placeholder="you@daywebster.com" style="padding:9px 11px;border:1px solid var(--grey-200);border-radius:6px;"/><input id="password" type="password" placeholder="Password" style="padding:9px 11px;border:1px solid var(--grey-200);border-radius:6px;"/><button id="loginBtn" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;cursor:pointer;">Sign in</button></div>
   <p class="muted" id="loginMsg"></p>
 </div>
 
@@ -71,7 +71,8 @@ const esc=(s)=>(s??'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','
 
 async function refreshAuth(){const {data:{session}}=await sb.auth.getSession();if(session){sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{});$('login').classList.add('hidden');$('app').classList.remove('hidden');load();}else{$('login').classList.remove('hidden');$('app').classList.add('hidden');}}
 sb.auth.onAuthStateChange(refreshAuth);
-$('loginBtn').onclick=async()=>{const e=$('email').value.trim();if(!e)return;const {error}=await sb.auth.signInWithOtp({email:e,options:{emailRedirectTo:location.href}});$('loginMsg').textContent=error?error.message:'Check your email, then return here.';};
+$('loginBtn').onclick=async()=>{const e=$('email').value.trim(),p=$('password').value;if(!e||!p)return;$('loginMsg').textContent='Signing in…';const {error}=await sb.auth.signInWithPassword({email:e,password:p});$('loginMsg').textContent=error?error.message:'';};
+$('password').addEventListener('keydown',ev=>{if(ev.key==='Enter')$('loginBtn').click();});
 
 const cnt=async(b)=>{const {count}=await b;return count??0;};
 let loaded=false;
