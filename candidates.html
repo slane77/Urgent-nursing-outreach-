@@ -73,6 +73,7 @@
       <div class="subtabs" id="statusTabs"></div>
       <div class="controls">
         <input id="search" placeholder="Search name or email…" style="flex:1; min-width:200px" />
+        <select id="deskFilter"><option value="">All desks</option><option value="unassigned">⚠ Unassigned (to route)</option></select>
         <select id="discFilter"><option value="">All disciplines</option></select>
         <button class="btn secondary" id="refresh">Refresh</button>
       </div>
@@ -114,7 +115,7 @@ const PAGE = 50;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
-let state = { status:'sourced', disc:'', search:'', page:0, disciplines:[], specialties:[] };
+let state = { status:'sourced', disc:'', desk:'', search:'', page:0, disciplines:[], specialties:[], desks:[] };
 
 // ---- Auth ----
 async function refreshAuth() {
@@ -133,12 +134,15 @@ $('loginBtn').onclick = async () => {
 let inited = false;
 async function init() {
   if (inited) return; inited = true;
-  const [{ data:disc }, { data:spec }] = await Promise.all([
+  const [{ data:disc }, { data:spec }, { data:desks }] = await Promise.all([
     sb.from('disciplines').select('id,code,name').order('sort_order'),
     sb.from('specialties').select('id,code,name,discipline_id').order('sort_order'),
+    sb.from('desks').select('id,code,name').eq('active',true),
   ]);
-  state.disciplines = disc ?? []; state.specialties = spec ?? [];
+  state.disciplines = disc ?? []; state.specialties = spec ?? []; state.desks = desks ?? [];
   $('discFilter').innerHTML = '<option value="">All disciplines</option>' + state.disciplines.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  $('deskFilter').innerHTML = '<option value="">All desks</option><option value="unassigned">⚠ Unassigned (to route)</option>' + state.desks.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  $('deskFilter').onchange = () => { state.desk = $('deskFilter').value; state.page = 0; loadList(); };
   await renderStatusTabs();
   loadList();
   loadReviewCount();
@@ -159,6 +163,8 @@ async function loadList() {
   let q = sb.from('candidates').select('id,first_name,last_name,email,status,created_at,discipline_id,disciplines(name)', { count:'exact' })
     .eq('status', state.status).order('created_at',{ascending:false}).range(state.page*PAGE,(state.page+1)*PAGE-1);
   if (state.disc) q = q.eq('discipline_id', state.disc);
+  if (state.desk === 'unassigned') q = q.is('desk_id', null);
+  else if (state.desk) q = q.eq('desk_id', state.desk);
   if (state.search) q = q.or(`first_name.ilike.%${state.search}%,last_name.ilike.%${state.search}%,email.ilike.%${state.search}%`);
   const { data, count } = await q;
   $('rows').innerHTML = (data??[]).map(c=>`<tr class="click" data-id="${c.id}">
@@ -196,6 +202,7 @@ async function openCandidate(id) {
         <div><label>Right to work</label><select id="f_rtw">${RTW.map(r=>`<option value="${r}" ${r===(c.right_to_work_status||'')?'selected':''}>${r||'—'}</option>`).join('')}</select></div>
         <div><label>Discipline</label><select id="f_disc"><option value="">—</option>${state.disciplines.map(d=>`<option value="${d.id}" ${d.id===c.discipline_id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
         <div><label>Specialty</label><select id="f_spec">${specOpts(c.discipline_id)}</select></div>
+        <div><label>Desk</label><select id="f_desk"><option value="">— unassigned —</option>${state.desks.map(d=>`<option value="${d.id}" ${d.id===c.desk_id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
         <div><label>Registration body</label><input id="f_regb" value="${esc(c.registration_body)}" /></div>
         <div><label>Registration no. (unverified)</label><input id="f_regn" value="${esc(c.registration_number)}" /></div>
         <div><label>Phone</label><input id="f_phone" value="${esc(c.phone)}" /></div>
@@ -250,6 +257,7 @@ async function saveProfile() {
     right_to_work_status: $('f_rtw').value || null,
     discipline_id: $('f_disc').value || null,
     primary_specialty_id: $('f_spec').value || null,
+    desk_id: $('f_desk').value || null,
     registration_body: $('f_regb').value || null,
     registration_number: $('f_regn').value || null,
     phone: $('f_phone').value || null,

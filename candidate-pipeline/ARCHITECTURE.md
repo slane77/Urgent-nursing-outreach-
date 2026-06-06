@@ -112,6 +112,24 @@ details required before this is scoped.**
 - **Early Warnings** — `early-warnings` (scheduled): auto-chases candidates
   before documents lapse and flags expired items for a human (assessment §6).
 
+## 7b. Desks & co-pilot (built — `sql/18`)
+
+Desks are an organisational layer **separate** from the discipline/specialty
+taxonomy, so the org chart can change without touching what a candidate *is*.
+
+- `desks` + `desk_coverage` (specialty/discipline ± region → desk) → candidates
+  **auto-route** to a desk on qualification (a `before` trigger).
+- `staff` (admin flag) + `desk_members` (recruiter ↔ desks).
+- **Siloed RLS**: recruiters see only their desk(s); admins see all; unrouted
+  candidates show to admins as the "to route" queue. Safe bootstrap: no `staff`
+  rows ⇒ everyone is admin (no lock-out on first apply).
+- The cockpit gains a desk filter + per-candidate desk assignment; the dashboard
+  (RLS-scoped per user) gains an "Unrouted" KPI. This is the **co-pilot** model:
+  each desk works its own slice with the agent doing the legwork.
+- Seeded desks: Theatres; Midwifery (+neonatal/paeds); Nursing North/South
+  (ward/A&E/ITU/HCA/RMN); Primary Care (ANP/ENP); AHP; Doctors; Complex Care;
+  Care Homes; Children's; Insurance (John Williams).
+
 ## 8. Open decisions (block specific legs, not the foundation)
 
 1. **Sourcing channels** — what the agent is allowed to *search*. This is the

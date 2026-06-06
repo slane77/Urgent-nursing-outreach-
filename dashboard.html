@@ -77,18 +77,19 @@ const cnt=async(b)=>{const {count}=await b;return count??0;};
 let loaded=false;
 async function load(){ if(loaded)return; loaded=true;
   // KPIs
-  const [total,qualified,ready,review,expiring,unassigned]=await Promise.all([
+  const [total,qualified,ready,review,expiring,unassigned,unrouted]=await Promise.all([
     cnt(sb.from('candidates').select('*',{count:'exact',head:true})),
     cnt(sb.from('candidates').select('*',{count:'exact',head:true}).eq('status','qualified')),
     cnt(sb.from('candidates').select('*',{count:'exact',head:true}).in('status',['ready','placed'])),
     cnt(sb.from('compliance_items').select('*',{count:'exact',head:true}).eq('needs_human',true)),
     cnt(sb.from('expiring_items').select('*',{count:'exact',head:true})),
     cnt(sb.from('candidates').select('*',{count:'exact',head:true}).is('discipline_id',null)),
+    cnt(sb.from('candidates').select('*',{count:'exact',head:true}).is('desk_id',null)),
   ]);
   $('kpis').innerHTML=[
     {n:total,l:'Total candidates'},{n:qualified,l:'Qualified'},{n:ready,l:'Ready / placed'},
     {n:review,l:'Needs review',c:review?'flag':''},{n:expiring,l:'Expiring ≤60d',c:expiring?'flag':''},
-    {n:unassigned,l:'No discipline',c:unassigned?'warn':''},
+    {n:unrouted,l:'Unrouted (no desk)',c:unrouted?'warn':''},{n:unassigned,l:'No discipline',c:unassigned?'warn':''},
   ].map(k=>`<div class="kpi ${k.c||''}"><div class="n">${k.n}</div><div class="l">${k.l}</div></div>`).join('');
 
   // Funnel

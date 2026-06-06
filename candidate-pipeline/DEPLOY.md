@@ -38,6 +38,7 @@ In the dev project's **SQL Editor**, run each file in order:
 ☐ `sql/15_inbound_email.sql`
 ☐ `sql/16_sourcing.sql`
 ☐ `sql/17_dashboard.sql`
+☐ `sql/18_desks.sql`
 
 ☐ **Expose the schema:** Settings → API → *Exposed schemas* → add `candidate`.
 ☐ **Storage:** create a **private** bucket named `candidate-docs`.
@@ -119,6 +120,38 @@ for the staff pages — though Storage/login work best over http).
 
 ---
 
+## 6a. Desks & roles (co-pilot)
+
+Visibility is **siloed by desk**. Until you populate `staff`, *everyone on an
+authorised domain is treated as admin and sees all* (safe bootstrap). To switch
+on siloing once people have logged in once (so they exist in `auth.users`):
+
+```sql
+-- 1. make yourself admin (see everything + the control tower)
+insert into candidate.staff (user_id, full_name, is_admin)
+select id, 'Scott Lane', true from auth.users where email = 'you@daywebster.com';
+
+-- 2. add a recruiter to one or more desks (they then see only those desks)
+insert into candidate.staff (user_id, is_admin)
+select id, false from auth.users where email = 'recruiter@daywebster.com';
+insert into candidate.desk_members (desk_id, user_id)
+select dk.id, u.id from candidate.desks dk, auth.users u
+where dk.code = 'theatres' and u.email = 'recruiter@daywebster.com';
+```
+
+Candidates **auto-route** to a desk on qualification (Theatres → Theatres desk,
+ward/A&E/ITU/HCA/RMN → Nursing North/South by region, neonatal/paeds →
+Midwifery, ANP/ENP → Primary Care, etc.). Anything that can't be matched stays
+**Unrouted** and shows in the dashboard + the cockpit's "Unassigned (to route)"
+filter for an admin to place. (North/South routing needs the candidate's
+`region` to read "North"/"South" — normalise region for full auto-split, or
+route those manually for now.)
+
+A desk-admin UI (manage staff, desk membership, coverage) is a later increment;
+for now use the SQL above.
+
+---
+
 ## 7. Smoke test (synthetic data only)
 
 Work through the loop and watch the **dashboard** populate:
@@ -140,7 +173,7 @@ Validate JSON-LD at search.google.com/test/rich-results before relying on Google
 
 When dev is proven and the §11 terms are signed off:
 
-1. ☐ Run `sql/10 → 17` on the **production** project (or merge the branch).
+1. ☐ Run `sql/10 → 18` on the **production** project (or merge the branch).
 2. ☐ Expose `candidate` schema; create the `candidate-docs` bucket.
 3. ☐ Set the same secrets with **production** values.
 4. ☐ Deploy the functions to production; schedule cron; point the inbound webhook.
