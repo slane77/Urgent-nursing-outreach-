@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Admin — Day Webster</title>
+<style>
+  :root{--green:#16a34a;--green-l:#f0fdf4;--grey-50:#f9fafb;--grey-200:#e5e7eb;--grey-500:#6b7280;--grey-700:#374151;--grey-900:#111827;--amber:#b45309;}
+  *{box-sizing:border-box;} body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--grey-50);color:var(--grey-700);}
+  header{background:#fff;border-bottom:1px solid var(--grey-200);padding:12px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
+  header h1{margin:0;font-size:17px;} nav{display:flex;gap:14px;margin-left:auto;flex-wrap:wrap;} nav a{color:var(--grey-500);text-decoration:none;font-size:14px;font-weight:500;} nav a.here{color:var(--green);}
+  main{max-width:1000px;margin:18px auto;padding:0 16px;}
+  .tabs{display:flex;gap:6px;margin-bottom:14px;} .tab{padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;color:var(--grey-500);} .tab.active{background:var(--green-l);color:var(--green);font-weight:600;}
+  .card{background:#fff;border:1px solid var(--grey-200);border-radius:8px;padding:16px;margin-bottom:14px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;} th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--grey-200);vertical-align:top;} th{color:var(--grey-500);}
+  input,select{padding:8px 10px;border:1px solid var(--grey-200);border-radius:6px;font-size:13px;font-family:inherit;}
+  .btn{background:var(--green);color:#fff;border:none;border-radius:6px;padding:8px 13px;font-size:13px;font-weight:600;cursor:pointer;} .btn.sm{padding:4px 9px;font-size:12px;} .btn.secondary{background:#fff;color:var(--grey-700);border:1px solid var(--grey-200);}
+  .muted{color:var(--grey-500);font-size:13px;} .hidden{display:none;} .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--green-l);color:var(--green);margin:2px;display:inline-block;}
+  .deskchips label{display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:2px 8px 2px 0;} .deskchips input{width:auto;}
+  .loginwrap{max-width:420px;margin:80px auto;}
+  .note{background:#fffbeb;border:1px solid #fde68a;color:var(--amber);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:14px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Admin</h1>
+  <nav><a href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a class="here">Admin</a></nav>
+</header>
+
+<div class="loginwrap card hidden" id="login">
+  <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email — a magic link will be sent.</p>
+  <div style="display:flex;gap:8px;"><input id="email" type="email" placeholder="you@daywebster.com" style="flex:1"/><button class="btn" id="loginBtn">Send link</button></div>
+  <p class="muted" id="loginMsg"></p>
+</div>
+
+<main id="app" class="hidden">
+  <div class="note">When you make the first person an admin, desk siloing switches on — so assign your recruiters to their desks in the same sitting, or they'll see nothing until you do.</div>
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-v="people">People &amp; desks</div>
+    <div class="tab" data-v="desks">Manage desks</div>
+    <div class="tab" data-v="coverage">Routing rules</div>
+  </div>
+
+  <div id="peopleView" class="card">
+    <h3 style="margin-top:0">People</h3>
+    <p class="muted">Everyone who has signed in. Tick <strong>Admin</strong> to give full access; tick desks to put a recruiter on them (they'll see only those).</p>
+    <table><thead><tr><th>Person</th><th>Admin</th><th>Desks</th></tr></thead><tbody id="peopleRows"></tbody></table>
+  </div>
+
+  <div id="desksView" class="card hidden">
+    <h3 style="margin-top:0">Desks</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px;">
+      <div><label class="muted">Code</label><br><input id="d_code" placeholder="e.g. nursing_east"/></div>
+      <div><label class="muted">Name</label><br><input id="d_name" placeholder="Nursing — East"/></div>
+      <div><label class="muted">Region (optional)</label><br><input id="d_region" placeholder="East"/></div>
+      <button class="btn" id="addDesk">Add desk</button>
+    </div>
+    <table><thead><tr><th>Name</th><th>Code</th><th>Region</th><th>Active</th></tr></thead><tbody id="deskRows"></tbody></table>
+  </div>
+
+  <div id="coverageView" class="card hidden">
+    <h3 style="margin-top:0">Routing rules</h3>
+    <p class="muted">A candidate auto-routes to the first matching desk (specialty &gt; region &gt; discipline).</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px;">
+      <div><label class="muted">Desk</label><br><select id="c_desk"></select></div>
+      <div><label class="muted">Discipline</label><br><select id="c_disc"><option value="">—</option></select></div>
+      <div><label class="muted">Specialty</label><br><select id="c_spec"><option value="">(any)</option></select></div>
+      <div><label class="muted">Region (optional)</label><br><input id="c_region" placeholder="North"/></div>
+      <button class="btn" id="addCov">Add rule</button>
+    </div>
+    <table><thead><tr><th>Desk</th><th>Discipline</th><th>Specialty</th><th>Region</th><th></th></tr></thead><tbody id="covRows"></tbody></table>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script>
+const sb = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY, { db:{ schema:'candidate' } });
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>(s??'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let desks=[], disciplines=[], specialties=[];
+
+async function refreshAuth(){const {data:{session}}=await sb.auth.getSession();
+  if(session){ sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{}); $('login').classList.add('hidden');$('app').classList.remove('hidden');load(); }
+  else { $('login').classList.remove('hidden');$('app').classList.add('hidden'); } }
+sb.auth.onAuthStateChange(refreshAuth);
+$('loginBtn').onclick=async()=>{const e=$('email').value.trim();if(!e)return;const {error}=await sb.auth.signInWithOtp({email:e,options:{emailRedirectTo:location.href}});$('loginMsg').textContent=error?error.message:'Check your email, then return here.';};
+
+$('tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{$('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');const v=t.dataset.v;$('peopleView').classList.toggle('hidden',v!=='people');$('desksView').classList.toggle('hidden',v!=='desks');$('coverageView').classList.toggle('hidden',v!=='coverage');});
+
+let loaded=false;
+async function load(){ if(loaded)return; loaded=true; await reload(); }
+async function reload(){
+  const [{data:dk},{data:dc},{data:sp}]=await Promise.all([
+    sb.from('desks').select('id,code,name,region,active').order('name'),
+    sb.from('disciplines').select('id,code,name').order('sort_order'),
+    sb.from('specialties').select('id,code,name,discipline_id').order('sort_order'),
+  ]);
+  desks=dk||[]; disciplines=dc||[]; specialties=sp||[];
+  renderPeople(); renderDesks(); renderCoverage();
+}
+
+async function renderPeople(){
+  const [{data:users},{data:staff},{data:members}]=await Promise.all([
+    sb.from('app_users').select('user_id,email,full_name').order('email'),
+    sb.from('staff').select('user_id,is_admin'),
+    sb.from('desk_members').select('user_id,desk_id'),
+  ]);
+  const adminSet=new Set((staff||[]).filter(s=>s.is_admin).map(s=>s.user_id));
+  const memMap={}; (members||[]).forEach(m=>{(memMap[m.user_id]=memMap[m.user_id]||new Set()).add(m.desk_id);});
+  $('peopleRows').innerHTML=(users||[]).map(u=>{
+    const chips=desks.map(d=>`<label><input type="checkbox" data-u="${u.user_id}" data-d="${d.id}" ${memMap[u.user_id]?.has(d.id)?'checked':''}/> ${esc(d.name)}</label>`).join('');
+    return `<tr><td><strong>${esc(u.full_name||u.email)}</strong><br><span class="muted">${esc(u.email)}</span></td>
+      <td><input type="checkbox" data-admin="${u.user_id}" ${adminSet.has(u.user_id)?'checked':''}/></td>
+      <td class="deskchips">${chips}</td></tr>`;
+  }).join('')||'<tr><td colspan="3" class="muted">No one has signed in yet. Ask staff to log into the dashboard once, then refresh.</td></tr>';
+  $('peopleRows').querySelectorAll('[data-admin]').forEach(c=>c.onchange=async()=>{ await sb.from('staff').upsert({user_id:c.dataset.admin,is_admin:c.checked}); });
+  $('peopleRows').querySelectorAll('[data-u]').forEach(c=>c.onchange=async()=>{
+    if(c.checked) await sb.from('desk_members').upsert({user_id:c.dataset.u,desk_id:c.dataset.d});
+    else await sb.from('desk_members').delete().eq('user_id',c.dataset.u).eq('desk_id',c.dataset.d);
+  });
+}
+
+function renderDesks(){
+  $('deskRows').innerHTML=desks.map(d=>`<tr><td>${esc(d.name)}</td><td class="muted">${esc(d.code)}</td><td>${esc(d.region)||'—'}</td>
+    <td><input type="checkbox" data-active="${d.id}" ${d.active?'checked':''}/></td></tr>`).join('');
+  $('deskRows').querySelectorAll('[data-active]').forEach(c=>c.onchange=async()=>{await sb.from('desks').update({active:c.checked}).eq('id',c.dataset.active);});
+}
+$('addDesk').onclick=async()=>{
+  const code=$('d_code').value.trim(), name=$('d_name').value.trim();
+  if(!code||!name)return;
+  const {error}=await sb.from('desks').insert({code,name,region:$('d_region').value.trim()||null});
+  if(error){alert(error.message);return;}
+  $('d_code').value=$('d_name').value=$('d_region').value=''; reload();
+};
+
+function renderCoverage(){
+  $('c_desk').innerHTML=desks.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  $('c_disc').innerHTML='<option value="">—</option>'+disciplines.map(d=>`<option value="${d.id}" data-code="${d.code}">${esc(d.name)}</option>`).join('');
+  $('c_disc').onchange=()=>{const id=$('c_disc').value;$('c_spec').innerHTML='<option value="">(any)</option>'+specialties.filter(s=>s.discipline_id===id).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');};
+  sb.from('desk_coverage').select('id,region,desks(name),disciplines(name),specialties(name)').then(({data})=>{
+    $('covRows').innerHTML=(data||[]).map(r=>`<tr><td>${esc(r.desks?.name)}</td><td>${esc(r.disciplines?.name)||'(any)'}</td><td>${esc(r.specialties?.name)||'(any)'}</td><td>${esc(r.region)||'—'}</td><td><button class="btn sm secondary" data-del="${r.id}">remove</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">No rules.</td></tr>';
+    $('covRows').querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{await sb.from('desk_coverage').delete().eq('id',b.dataset.del);renderCoverage();});
+  });
+}
+$('addCov').onclick=async()=>{
+  const desk_id=$('c_desk').value; if(!desk_id)return;
+  const {error}=await sb.from('desk_coverage').insert({desk_id,discipline_id:$('c_disc').value||null,specialty_id:$('c_spec').value||null,region:$('c_region').value.trim()||null});
+  if(error){alert(error.message);return;}
+  $('c_region').value=''; renderCoverage();
+};
+refreshAuth();
+</script>
+</body>
+</html>

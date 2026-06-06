@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Candidates — Day Webster</title>
+<style>
+  :root { --green:#16a34a; --green-light:#f0fdf4; --grey-50:#f9fafb; --grey-100:#f3f4f6; --grey-200:#e5e7eb; --grey-300:#d1d5db; --grey-500:#6b7280; --grey-700:#374151; --grey-800:#1f2937; --amber:#b45309; --amber-light:#fffbeb; }
+  * { box-sizing:border-box; }
+  body { font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin:0; background:var(--grey-50); color:var(--grey-700); }
+  header { background:#fff; border-bottom:1px solid var(--grey-200); padding:14px 22px; display:flex; align-items:center; gap:16px; }
+  header h1 { margin:0; font-size:17px; }
+  .tabs { display:flex; gap:4px; margin-left:auto; }
+  .tab { padding:8px 14px; border-radius:6px; font-size:13px; cursor:pointer; color:var(--grey-500); }
+  .tab.active { background:var(--green-light); color:var(--green); font-weight:600; }
+  main { max-width:1100px; margin:18px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid var(--grey-200); border-radius:8px; padding:16px; margin-bottom:14px; }
+  .subtabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+  .subtab { padding:6px 11px; border-radius:999px; font-size:12px; cursor:pointer; background:#fff; border:1px solid var(--grey-200); }
+  .subtab.active { background:var(--green); color:#fff; border-color:var(--green); }
+  .subtab .n { opacity:.75; margin-left:5px; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  input, select, textarea { padding:8px 11px; border:1px solid var(--grey-200); border-radius:6px; font-size:13px; font-family:inherit; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--grey-100); }
+  th { background:var(--grey-50); font-weight:600; color:var(--grey-700); }
+  tr.click:hover { background:var(--grey-50); cursor:pointer; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--grey-100); color:var(--grey-700); white-space:nowrap; }
+  .pill.flag { background:var(--amber-light); color:var(--amber); }
+  .btn { background:var(--green); color:#fff; border:none; border-radius:6px; padding:8px 14px; font-size:13px; font-weight:500; cursor:pointer; }
+  .btn.secondary { background:#fff; color:var(--grey-700); border:1px solid var(--grey-200); }
+  .btn.sm { padding:5px 9px; font-size:12px; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .muted { color:var(--grey-500); font-size:12px; }
+  .hidden { display:none; }
+  /* modal */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; justify-content:flex-end; z-index:50; }
+  .panel { width:min(680px,100%); height:100%; background:var(--grey-50); overflow-y:auto; box-shadow:-4px 0 24px rgba(0,0,0,.1); }
+  .panel header { position:sticky; top:0; }
+  .panel .body { padding:18px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  label { display:block; font-size:11px; font-weight:600; color:var(--grey-500); margin:8px 0 3px; text-transform:uppercase; letter-spacing:.03em; }
+  .msg { padding:9px 12px; border-radius:8px; margin-bottom:8px; font-size:13px; max-width:85%; }
+  .msg.inbound { background:#fff; border:1px solid var(--grey-200); }
+  .msg.outbound { background:var(--green-light); margin-left:auto; }
+  .msg .meta { font-size:10px; color:var(--grey-500); margin-top:4px; }
+  .timeline li { font-size:13px; margin-bottom:5px; }
+  h4 { margin:18px 0 6px; font-size:13px; color:var(--grey-800); }
+  .loginwrap { max-width:420px; margin:80px auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Candidates</h1>
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-view="pipeline">Pipeline</div>
+    <div class="tab" data-view="review">Review queue <span id="reviewCount"></span></div>
+  </div>
+</header>
+
+<!-- LOGIN -->
+<div class="loginwrap card hidden" id="login">
+  <h3 style="margin-top:0">Sign in</h3>
+  <p class="muted">Day Webster email — a magic link will be sent.</p>
+  <div style="display:flex; gap:8px;"><input type="email" id="email" placeholder="you@daywebster.com" style="flex:1" /><button class="btn" id="loginBtn">Send link</button></div>
+  <p class="muted" id="loginMsg"></p>
+</div>
+
+<main id="app" class="hidden">
+  <!-- PIPELINE VIEW -->
+  <div id="pipelineView">
+    <div class="card">
+      <div class="subtabs" id="statusTabs"></div>
+      <div class="controls">
+        <input id="search" placeholder="Search name or email…" style="flex:1; min-width:200px" />
+        <select id="deskFilter"><option value="">All desks</option><option value="unassigned">⚠ Unassigned (to route)</option></select>
+        <select id="discFilter"><option value="">All disciplines</option></select>
+        <button class="btn secondary" id="refresh">Refresh</button>
+      </div>
+      <table><thead><tr><th>Name</th><th>Discipline</th><th>Email</th><th>Status</th><th>Added</th></tr></thead><tbody id="rows"></tbody></table>
+      <div class="controls" style="margin-top:12px; justify-content:center;">
+        <button class="btn secondary sm" id="prev">Prev</button>
+        <span class="muted" id="pageInfo"></span>
+        <button class="btn secondary sm" id="next">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVIEW VIEW -->
+  <div id="reviewView" class="hidden">
+    <div class="card">
+      <h4 style="margin-top:0">Flagged for human review</h4>
+      <p class="muted">Items the agent routed to a person: adverse disclosures, mismatches, registration/right-to-work doubts, and any acceptance decision.</p>
+      <table><thead><tr><th>Candidate</th><th>Discipline</th><th>Requirement</th><th>Note</th><th>Updated</th></tr></thead><tbody id="reviewRows"></tbody></table>
+    </div>
+  </div>
+</main>
+
+<!-- DETAIL PANEL -->
+<div class="overlay hidden" id="overlay">
+  <div class="panel">
+    <header><h1 id="dName">—</h1><button class="btn secondary sm" id="closePanel" style="margin-left:auto">Close</button></header>
+    <div class="body" id="detail"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script>
+const sb = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY, { db: { schema: 'candidate' } });
+const AGENT_FN = window.CONFIG.SUPABASE_URL + '/functions/v1/candidate-agent';
+const STATUSES = ['sourced','contacted','engaged','qualified','compliance','ready','placed','rejected','dormant'];
+const RTW = ['','uk_citizen','settled','pre_settled','visa','unconfirmed','no'];
+const PAGE = 50;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+let state = { status:'sourced', disc:'', desk:'', search:'', page:0, disciplines:[], specialties:[], desks:[] };
+
+// ---- Auth ----
+async function refreshAuth() {
+  const { data:{ session } } = await sb.auth.getSession();
+  if (session) { sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{}); $('login').classList.add('hidden'); $('app').classList.remove('hidden'); init(); }
+  else { $('login').classList.remove('hidden'); $('app').classList.add('hidden'); }
+}
+sb.auth.onAuthStateChange(refreshAuth);
+$('loginBtn').onclick = async () => {
+  const email = $('email').value.trim(); if (!email) return;
+  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.href } });
+  $('loginMsg').textContent = error ? error.message : 'Check your email, then return here.';
+};
+
+// ---- Init ----
+let inited = false;
+async function init() {
+  if (inited) return; inited = true;
+  const [{ data:disc }, { data:spec }, { data:desks }] = await Promise.all([
+    sb.from('disciplines').select('id,code,name').order('sort_order'),
+    sb.from('specialties').select('id,code,name,discipline_id').order('sort_order'),
+    sb.from('desks').select('id,code,name').eq('active',true),
+  ]);
+  state.disciplines = disc ?? []; state.specialties = spec ?? []; state.desks = desks ?? [];
+  $('discFilter').innerHTML = '<option value="">All disciplines</option>' + state.disciplines.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  $('deskFilter').innerHTML = '<option value="">All desks</option><option value="unassigned">⚠ Unassigned (to route)</option>' + state.desks.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  $('deskFilter').onchange = () => { state.desk = $('deskFilter').value; state.page = 0; loadList(); };
+  await renderStatusTabs();
+  loadList();
+  loadReviewCount();
+}
+
+async function count(status) {
+  const { count } = await sb.from('candidates').select('*',{count:'exact',head:true}).eq('status',status);
+  return count ?? 0;
+}
+async function renderStatusTabs() {
+  const counts = await Promise.all(STATUSES.map(count));
+  $('statusTabs').innerHTML = STATUSES.map((s,i)=>`<div class="subtab ${s===state.status?'active':''}" data-s="${s}">${s}<span class="n">${counts[i]}</span></div>`).join('');
+  $('statusTabs').querySelectorAll('.subtab').forEach(el => el.onclick = () => { state.status = el.dataset.s; state.page = 0; renderStatusTabs(); loadList(); });
+}
+
+// ---- List ----
+async function loadList() {
+  let q = sb.from('candidates').select('id,first_name,last_name,email,status,created_at,discipline_id,disciplines(name)', { count:'exact' })
+    .eq('status', state.status).order('created_at',{ascending:false}).range(state.page*PAGE,(state.page+1)*PAGE-1);
+  if (state.disc) q = q.eq('discipline_id', state.disc);
+  if (state.desk === 'unassigned') q = q.is('desk_id', null);
+  else if (state.desk) q = q.eq('desk_id', state.desk);
+  if (state.search) q = q.or(`first_name.ilike.%${state.search}%,last_name.ilike.%${state.search}%,email.ilike.%${state.search}%`);
+  const { data, count } = await q;
+  $('rows').innerHTML = (data??[]).map(c=>`<tr class="click" data-id="${c.id}">
+    <td>${esc(c.first_name)} ${esc(c.last_name)}</td><td>${esc(c.disciplines?.name)||'<span class="muted">—</span>'}</td>
+    <td>${esc(c.email)}</td><td><span class="pill">${c.status}</span></td><td class="muted">${(c.created_at||'').slice(0,10)}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">No candidates in this stage.</td></tr>';
+  $('rows').querySelectorAll('tr.click').forEach(tr=>tr.onclick=()=>openCandidate(tr.dataset.id));
+  const total = count ?? 0;
+  $('pageInfo').textContent = `${total} total · page ${state.page+1}`;
+  $('prev').disabled = state.page===0; $('next').disabled = (state.page+1)*PAGE >= total;
+}
+$('search').oninput = () => { clearTimeout(window._t); window._t = setTimeout(()=>{state.page=0; loadList();},300); state.search=$('search').value.trim(); };
+$('discFilter').onchange = () => { state.disc=$('discFilter').value; state.page=0; loadList(); };
+$('refresh').onclick = () => { renderStatusTabs(); loadList(); };
+$('prev').onclick = () => { if(state.page>0){state.page--; loadList();} };
+$('next').onclick = () => { state.page++; loadList(); };
+
+// ---- Detail panel ----
+let current = null;
+async function openCandidate(id) {
+  const [{ data:c }, { data:emp }, { data:msgs }, { data:cons }, { data:items }] = await Promise.all([
+    sb.from('candidates').select('*').eq('id',id).maybeSingle(),
+    sb.from('employment').select('*').eq('candidate_id',id).order('start_date',{ascending:false}),
+    sb.from('messages').select('*').eq('candidate_id',id).order('created_at'),
+    sb.from('consent').select('*').eq('candidate_id',id).order('occurred_at',{ascending:false}),
+    sb.from('compliance_items').select('id,status,channel,needs_human,human_notes,expires_at,compliance_requirements(name)').eq('candidate_id',id).order('created_at'),
+  ]);
+  current = c;
+  $('dName').textContent = `${c.first_name||''} ${c.last_name||''}`.trim() || c.email || 'Candidate';
+  const specOpts = (dId) => '<option value="">—</option>' + state.specialties.filter(s=>s.discipline_id===dId).map(s=>`<option value="${s.id}" ${s.id===c.primary_specialty_id?'selected':''}>${esc(s.name)}</option>`).join('');
+  $('detail').innerHTML = `
+    <div class="card">
+      <div class="grid2">
+        <div><label>Status</label><select id="f_status">${STATUSES.map(s=>`<option ${s===c.status?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div><label>Right to work</label><select id="f_rtw">${RTW.map(r=>`<option value="${r}" ${r===(c.right_to_work_status||'')?'selected':''}>${r||'—'}</option>`).join('')}</select></div>
+        <div><label>Discipline</label><select id="f_disc"><option value="">—</option>${state.disciplines.map(d=>`<option value="${d.id}" ${d.id===c.discipline_id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
+        <div><label>Specialty</label><select id="f_spec">${specOpts(c.discipline_id)}</select></div>
+        <div><label>Desk</label><select id="f_desk"><option value="">— unassigned —</option>${state.desks.map(d=>`<option value="${d.id}" ${d.id===c.desk_id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></div>
+        <div><label>Registration body</label><input id="f_regb" value="${esc(c.registration_body)}" /></div>
+        <div><label>Registration no. (unverified)</label><input id="f_regn" value="${esc(c.registration_number)}" /></div>
+        <div><label>Phone</label><input id="f_phone" value="${esc(c.phone)}" /></div>
+        <div><label>Availability</label><input id="f_avail" value="${esc(c.availability)}" /></div>
+        <div><label>Town</label><input id="f_town" value="${esc(c.town)}" /></div>
+        <div><label>Postcode</label><input id="f_pc" value="${esc(c.postcode)}" /></div>
+      </div>
+      <label>Notes</label><textarea id="f_notes" rows="2" style="width:100%">${esc(c.notes)}</textarea>
+      <div style="margin-top:10px; display:flex; gap:8px;"><button class="btn sm" id="saveBtn">Save</button><span class="muted" id="saveMsg"></span></div>
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0">Run the agent</h4>
+      <p class="muted">The agent engages, qualifies and requests compliance — it never decides acceptance or marks work-ready (that's you). Its reply is saved as a draft.</p>
+      <textarea id="agentMsg" rows="2" style="width:100%" placeholder="Optional: paste the candidate's latest message to continue the conversation"></textarea>
+      <div style="margin-top:8px;"><button class="btn sm" id="runBtn">Run agent</button> <span class="muted" id="runMsg"></span></div>
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0">Conversation</h4>
+      <div id="transcript">${(msgs??[]).map(m=>`<div class="msg ${m.direction}">${esc(m.body)}<div class="meta">${m.author}${m.llm_generated?' · AI':''}${m.status?' · '+m.status:''} · ${(m.created_at||'').slice(0,16).replace('T',' ')}</div></div>`).join('') || '<span class="muted">No messages yet.</span>'}</div>
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0">Compliance items</h4>
+      ${(items??[]).map(it=>`<div style="border-bottom:1px solid var(--grey-100); padding:8px 0;">
+        <strong>${esc(it.compliance_requirements?.name)||'(unlabelled)'}</strong>
+        <span class="pill ${it.needs_human?'flag':''}">${it.needs_human?'needs review':it.status}</span>
+        ${it.human_notes?`<div class="muted">${esc(it.human_notes)}</div>`:''}
+        ${it.needs_human?`<div style="margin-top:6px; display:flex; gap:6px;"><button class="btn sm" data-resolve="${it.id}" data-st="verified">Mark verified</button><button class="btn sm secondary" data-resolve="${it.id}" data-st="unsuitable">Mark unsuitable</button></div>`:''}
+      </div>`).join('') || '<span class="muted">None requested yet.</span>'}
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0">Employment history</h4>
+      <ul class="timeline">${(emp??[]).map(e=>`<li><strong>${esc(e.employer)}</strong> ${esc(e.job_title)?'· '+esc(e.job_title):''} <span class="muted">(${e.start_date||'?'} → ${e.end_date||'current'})</span></li>`).join('')||'<span class="muted">None recorded.</span>'}</ul>
+      <h4>Consent</h4>
+      ${(cons??[]).map(c=>`<div class="muted">${c.granted?'✓':'✗'} ${c.purpose} (${c.basis}) — ${(c.occurred_at||'').slice(0,10)}</div>`).join('')||'<span class="muted">No consent recorded.</span>'}
+    </div>`;
+  $('overlay').classList.remove('hidden');
+
+  $('f_disc').onchange = () => { $('f_spec').innerHTML = specOpts($('f_disc').value); };
+  $('saveBtn').onclick = saveProfile;
+  $('runBtn').onclick = runAgent;
+  $('detail').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>resolveItem(b.dataset.resolve,b.dataset.st));
+}
+$('closePanel').onclick = () => { $('overlay').classList.add('hidden'); current=null; };
+
+async function saveProfile() {
+  const patch = {
+    status: $('f_status').value,
+    right_to_work_status: $('f_rtw').value || null,
+    discipline_id: $('f_disc').value || null,
+    primary_specialty_id: $('f_spec').value || null,
+    desk_id: $('f_desk').value || null,
+    registration_body: $('f_regb').value || null,
+    registration_number: $('f_regn').value || null,
+    phone: $('f_phone').value || null,
+    availability: $('f_avail').value || null,
+    town: $('f_town').value || null,
+    postcode: $('f_pc').value || null,
+    notes: $('f_notes').value || null,
+  };
+  const { error } = await sb.from('candidates').update(patch).eq('id', current.id);
+  $('saveMsg').textContent = error ? error.message : 'Saved ✓';
+  renderStatusTabs(); loadList();
+}
+
+async function runAgent() {
+  $('runBtn').disabled = true; $('runMsg').textContent = 'Thinking…';
+  const { data:{ session } } = await sb.auth.getSession();
+  try {
+    const res = await fetch(AGENT_FN, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'apikey':window.CONFIG.SUPABASE_ANON_KEY, 'Authorization':'Bearer '+(session?.access_token??'') },
+      body: JSON.stringify({ candidate_id: current.id, inbound_message: $('agentMsg').value.trim() || undefined, channel:'web' }),
+    });
+    const out = await res.json();
+    $('runMsg').textContent = out.error ? ('Error: '+out.error) : 'Done ✓';
+    if (!out.error) openCandidate(current.id); // refresh transcript + state
+  } catch (e) { $('runMsg').textContent = 'Error: '+e; }
+  $('runBtn').disabled = false;
+}
+
+async function resolveItem(id, status) {
+  await sb.from('compliance_items').update({ status, needs_human:false }).eq('id', id);
+  if (current) openCandidate(current.id);
+  loadReviewCount();
+  if (!$('reviewView').classList.contains('hidden')) loadReview();
+}
+
+// ---- Review queue ----
+async function loadReviewCount() {
+  const { count } = await sb.from('compliance_items').select('*',{count:'exact',head:true}).eq('needs_human',true);
+  $('reviewCount').textContent = count ? `(${count})` : '';
+}
+async function loadReview() {
+  const { data } = await sb.from('review_queue').select('*').limit(200);
+  $('reviewRows').innerHTML = (data??[]).map(r=>`<tr class="click" data-id="${r.candidate_id}">
+    <td>${esc(r.first_name)} ${esc(r.last_name)}</td><td>${esc(r.discipline)||'—'}</td><td>${esc(r.requirement)||'—'}</td>
+    <td>${esc(r.human_notes)||''}</td><td class="muted">${(r.updated_at||'').slice(0,16).replace('T',' ')}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">Nothing waiting for review. 🎉</td></tr>';
+  $('reviewRows').querySelectorAll('tr.click').forEach(tr=>tr.onclick=()=>openCandidate(tr.dataset.id));
+}
+
+// ---- View switching ----
+$('tabs').querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  $('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  const v = t.dataset.view;
+  $('pipelineView').classList.toggle('hidden', v==='review');
+  $('reviewView').classList.toggle('hidden', v!=='review');
+  if (v==='review') loadReview();
+});
+
+refreshAuth();
+</script>
+</body>
+</html>

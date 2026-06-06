@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Day Webster — AI Candidate Pipeline</title>
+<style>
+  :root{
+    --green:#16a34a; --green-d:#15803d; --green-l:#f0fdf4; --ink:#0f172a;
+    --grey:#64748b; --grey2:#94a3b8; --line:#e2e8f0; --amber:#b45309; --amber-l:#fffbeb;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink);
+    background:#0b1220; display:flex; align-items:center; justify-content:center; overflow:hidden;
+  }
+  #stage{
+    position:relative; width:100vw; height:56.25vw; max-height:100vh; max-width:177.78vh;
+    background:radial-gradient(1200px 600px at 70% -10%, #eafdf0 0%, #ffffff 45%, #f6f9fc 100%);
+    overflow:hidden;
+  }
+  /* ── Pure-CSS sequential slideshow: 7 scenes × 6s = 42s loop, no JS ── */
+  .scene{
+    position:absolute; inset:0; opacity:0; display:flex; align-items:center; justify-content:center; padding:6%;
+    animation:show 42s infinite both;
+  }
+  .scene:nth-of-type(1){animation-delay:0s}
+  .scene:nth-of-type(2){animation-delay:-6s}
+  .scene:nth-of-type(3){animation-delay:-12s}
+  .scene:nth-of-type(4){animation-delay:-18s}
+  .scene:nth-of-type(5){animation-delay:-24s}
+  .scene:nth-of-type(6){animation-delay:-30s}
+  .scene:nth-of-type(7){animation-delay:-36s}
+  @keyframes show{
+    0%{opacity:0; transform:translateY(16px) scale(.99);}
+    1.6%{opacity:1; transform:none;}
+    12.4%{opacity:1; transform:none;}
+    14.3%{opacity:0; transform:translateY(-10px);}
+    100%{opacity:0;}
+  }
+
+  .kicker{font-size:1.1vw; letter-spacing:.28em; text-transform:uppercase; color:var(--green); font-weight:700;}
+  h1{font-size:5vw; line-height:1.04; letter-spacing:-.02em; font-weight:800;}
+  h2{font-size:3.2vw; line-height:1.08; letter-spacing:-.02em; font-weight:800;}
+  .lead{font-size:1.6vw; color:var(--grey); max-width:48ch; line-height:1.4;}
+  .center{text-align:center; display:flex; flex-direction:column; align-items:center; gap:2.2vw;}
+  .row{display:flex; gap:2.4vw; align-items:center; width:100%; justify-content:center;}
+  .col{display:flex; flex-direction:column; gap:1.4vw;}
+
+  .device{background:#fff; border:1px solid var(--line); border-radius:1.1vw; box-shadow:0 2.4vw 6vw rgba(15,23,42,.14); overflow:hidden; width:38vw;}
+  .bar{display:flex; gap:.6vw; padding:1vw 1.2vw; background:#f8fafc; border-bottom:1px solid var(--line);}
+  .dot{width:.9vw; height:.9vw; border-radius:50%; background:#cbd5e1;}
+  .scr{padding:1.8vw;}
+  label{display:block; font-size:.85vw; letter-spacing:.05em; text-transform:uppercase; color:var(--grey2); font-weight:700; margin:.8vw 0 .35vw;}
+  .inp{border:1px solid var(--line); border-radius:.5vw; padding:.85vw 1vw; font-size:1.15vw; color:var(--ink);}
+  .btn{background:var(--green); color:#fff; border-radius:.6vw; padding:.95vw; text-align:center; font-weight:700; font-size:1.2vw;}
+
+  .pill{display:inline-flex; align-items:center; gap:.5vw; background:var(--green-l); color:var(--green-d); border:1px solid #bbf7d0; padding:.5vw 1vw; border-radius:999px; font-size:1.1vw; font-weight:600;}
+  .tag{background:#fff; border:1px solid var(--line); color:var(--grey); padding:.5vw 1vw; border-radius:999px; font-size:1.05vw; font-weight:600;}
+
+  .chat{display:flex; flex-direction:column; gap:1vw; width:40vw;}
+  .b{max-width:78%; padding:1vw 1.3vw; border-radius:1.1vw; font-size:1.25vw; line-height:1.35;}
+  .b.them{background:#fff; border:1px solid var(--line); border-bottom-left-radius:.3vw; align-self:flex-start;}
+  .b.me{background:var(--green); color:#fff; border-bottom-right-radius:.3vw; align-self:flex-end;}
+
+  .panel{background:#fff; border:1px solid var(--line); border-radius:1vw; padding:1.6vw; box-shadow:0 1.6vw 4vw rgba(15,23,42,.1); width:34vw;}
+  .field{display:flex; justify-content:space-between; padding:.7vw 0; border-bottom:1px solid #f1f5f9; font-size:1.15vw;}
+  .field b{color:var(--ink);} .field span{color:var(--grey);}
+  .chk{color:var(--green); font-weight:800;}
+
+  .flag{background:var(--amber-l); border:1px solid #fde68a; border-radius:.8vw; padding:1.2vw 1.4vw; font-size:1.2vw; color:var(--amber); width:40vw; display:flex; gap:1vw; align-items:flex-start;}
+
+  #brand{position:absolute; top:2.2vw; left:2.6vw; font-weight:800; font-size:1.3vw; color:var(--ink); z-index:4; display:flex; align-items:center; gap:.6vw;}
+  #brand .d{width:1.1vw; height:1.1vw; background:var(--green); border-radius:.3vw;}
+  .files{display:flex; gap:1vw; flex-wrap:wrap; max-width:34vw;}
+  .file{width:6vw; height:7.4vw; background:#fff; border:1px solid var(--line); border-radius:.6vw; box-shadow:0 .8vw 2vw rgba(15,23,42,.08); display:flex; align-items:flex-end; justify-content:center; padding-bottom:.6vw; font-size:.85vw; color:var(--grey); position:relative;}
+  .file::before{content:""; position:absolute; top:0; left:0; right:0; height:1vw; background:#e2e8f0; border-radius:.6vw .6vw 0 0;}
+
+  /* ── Portrait / phone: fill the screen, stack, scale type up ── */
+  @media (orientation:portrait){
+    #stage{width:100vw; height:100vh; max-height:none; max-width:none;}
+    .scene{padding:9vw 6vw;}
+    .row{flex-direction:column; gap:5vw;}
+    .device,.panel,.chat,.flag,.col,.files{width:86vw !important; max-width:86vw !important;}
+    .kicker{font-size:3.4vw;}
+    h1{font-size:11vw;} h2{font-size:8vw;}
+    .lead{font-size:4.4vw; max-width:90vw;}
+    .center{gap:5vw;}
+    .pill,.tag{font-size:3.6vw; padding:1.6vw 3vw;}
+    .b{font-size:4.4vw; padding:3vw 4vw; border-radius:4vw;}
+    label{font-size:2.8vw; margin:2.4vw 0 1vw;}
+    .inp{font-size:4vw; padding:2.8vw 3vw; border-radius:2vw;}
+    .btn{font-size:4.4vw; padding:3vw; border-radius:2vw;}
+    .field{font-size:4vw; padding:2.4vw 0;}
+    .files{gap:3vw; justify-content:center;}
+    .file{width:24vw; height:30vw; font-size:3vw; border-radius:2vw;}
+    .file::before{height:4vw;}
+    .device{border-radius:4vw;} .device .scr{padding:5vw;}
+    .panel{border-radius:4vw; padding:5vw;}
+    #brand{font-size:4vw; top:6vw; left:6vw;} #brand .d{width:3.4vw; height:3.4vw;}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="brand"><span class="d"></span> Day Webster</div>
+
+  <!-- 1 — TITLE -->
+  <section class="scene">
+    <div class="center">
+      <div class="kicker">AI Candidate Pipeline</div>
+      <h1>Prospect. Qualify.<br>Register.</h1>
+      <div class="lead">One intelligent pipeline that turns scattered leads into a work-ready bench — across every part of the business.</div>
+    </div>
+  </section>
+
+  <!-- 2 — THE PROBLEM -->
+  <section class="scene">
+    <div class="row">
+      <div class="col" style="width:34vw">
+        <h2>The talent is already there.</h2>
+        <div class="lead">Years of spreadsheets. Inbound CVs. Candidates who were never qualified or chased. Buried, not lost.</div>
+      </div>
+      <div class="files">
+        <div class="file">leads_2019.xlsx</div>
+        <div class="file">nurses_old.csv</div>
+        <div class="file">AHP_list.xls</div>
+        <div class="file">referrals.xlsx</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 — CAPTURE -->
+  <section class="scene">
+    <div class="row">
+      <div class="device">
+        <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i></div>
+        <div class="scr">
+          <div style="font-weight:800; font-size:1.5vw; margin-bottom:.4vw">Register your interest</div>
+          <label>Name</label><div class="inp">Sarah Okafor</div>
+          <label>Profession</label><div class="inp">Theatres Nurse (RGN)</div>
+          <label>Availability</label><div class="inp">Full time · days</div>
+          <div class="btn" style="margin-top:1.2vw">Register ✓</div>
+        </div>
+      </div>
+      <div class="col" style="width:30vw">
+        <div class="kicker">Capture</div>
+        <h2>Two ways in.</h2>
+        <div class="lead">A public form for inbound candidates — and a <b>smart importer</b> that reads any old spreadsheet, maps the columns for you, and de-duplicates on the way in.</div>
+        <div class="pill">📥 1,240 candidates imported · 0 duplicates</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 — QUALIFY -->
+  <section class="scene">
+    <div class="row">
+      <div class="chat">
+        <div class="b them">Hi! Thanks for registering with Day Webster. OK to ask a few quick questions to match you to work? 😊</div>
+        <div class="b me">Yes of course — I'm an RGN, theatres.</div>
+        <div class="b them">Brilliant. What's your availability, and do you have the right to work in the UK?</div>
+        <div class="b me">Full time, days. Yes — UK citizen. NMC PIN 12A3456E.</div>
+      </div>
+      <div class="col" style="width:30vw">
+        <div class="kicker">Qualify — automatically</div>
+        <h2>The agent does the legwork.</h2>
+        <div class="lead">It engages, qualifies and starts compliance — capturing consent, discipline, availability and registration as it goes.</div>
+        <div class="pill">Status: sourced → <b style="margin:0 .3vw">qualified</b> ✓</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 — HUMAN GATE -->
+  <section class="scene">
+    <div class="col center" style="gap:1.8vw">
+      <div class="kicker">The line it never crosses</div>
+      <h2 style="max-width:24ch; text-align:center">Judgement stays human.</h2>
+      <div class="flag">⚠️ <div><b>Flagged for review</b> — reference check &amp; fitness-to-practise answer need a person. The agent requested the documents; it will never <i>decide</i> they're acceptable.</div></div>
+      <div class="lead" style="text-align:center; max-width:46ch">Compliance acceptance, registration validity and work-ready sign-off are always a human call.</div>
+    </div>
+  </section>
+
+  <!-- 6 — COCKPIT -->
+  <section class="scene">
+    <div class="row">
+      <div class="panel">
+        <div style="font-weight:800; font-size:1.4vw; margin-bottom:.8vw">Sarah Okafor · Theatres Nurse</div>
+        <div class="field"><span>Right to work</span><b>UK citizen <span class="chk">✓</span></b></div>
+        <div class="field"><span>NMC PIN</span><b>12A3456E</b></div>
+        <div class="field"><span>Availability</span><b>Full time · days</b></div>
+        <div class="field"><span>Compliance</span><b>4 / 5 verified</b></div>
+        <div class="field" style="border:0"><span>Status</span><b style="color:var(--green-d)">READY ✓</b></div>
+      </div>
+      <div class="col" style="width:30vw">
+        <div class="kicker">The cockpit</div>
+        <h2>Your team, in control.</h2>
+        <div class="lead">A live funnel, full candidate view, a review queue, and one-click "run agent" — qualified candidates move to <b>ready</b> with a human's sign-off.</div>
+        <div class="row" style="justify-content:flex-start; gap:1vw">
+          <span class="tag">Sourced 1,240</span>
+          <span class="tag">Qualified 486</span>
+          <span class="pill">Ready 73</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 — CLOSE -->
+  <section class="scene">
+    <div class="center">
+      <div class="kicker">One pipeline · every discipline</div>
+      <h1 style="font-size:4.2vw">A bench that builds itself.</h1>
+      <div class="row" style="flex-wrap:wrap; gap:1vw; max-width:62vw">
+        <span class="tag">Nursing</span><span class="tag">Theatres</span><span class="tag">Midwifery</span>
+        <span class="tag">Primary Care</span><span class="tag">Doctors</span><span class="tag">Complex Care</span>
+        <span class="tag">AHP</span><span class="tag">Children's Services</span><span class="tag">Care Homes</span>
+        <span class="tag">Insurance · John Williams</span>
+      </div>
+      <div class="lead" style="text-align:center">Prospect. Qualify. Register. — autonomously, with a human where it matters.</div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

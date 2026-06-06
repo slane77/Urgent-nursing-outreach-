@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Candidate Import — Day Webster</title>
+<style>
+  :root { --green:#16a34a; --green-light:#f0fdf4; --grey-50:#f9fafb; --grey-200:#e5e7eb; --grey-500:#6b7280; --grey-700:#374151; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; background:var(--grey-50); color:var(--grey-700); }
+  header { background:#fff; border-bottom:1px solid var(--grey-200); padding:16px 24px; }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; font-size:13px; color:var(--grey-500); }
+  main { max-width:1000px; margin:24px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid var(--grey-200); border-radius:8px; padding:20px; margin-bottom:16px; }
+  .btn { background:var(--green); color:#fff; border:none; border-radius:6px; padding:10px 16px; font-size:14px; font-weight:500; cursor:pointer; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .btn.secondary { background:#fff; color:var(--grey-700); border:1px solid var(--grey-200); }
+  input[type=email], input[type=file] { padding:9px 12px; border:1px solid var(--grey-200); border-radius:6px; font-size:14px; width:100%; max-width:360px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:12px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--grey-200); }
+  select { padding:5px 8px; border:1px solid var(--grey-200); border-radius:6px; font-size:13px; }
+  .muted { color:var(--grey-500); font-size:13px; }
+  .sample { color:var(--grey-500); font-size:12px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ok { color:var(--green); font-weight:600; }
+  .hidden { display:none; }
+  .result { background:var(--green-light); border:1px solid var(--green); border-radius:6px; padding:14px; margin-top:12px; }
+  .bar { height:8px; background:var(--grey-200); border-radius:999px; overflow:hidden; margin-top:8px; }
+  .bar > div { height:100%; background:var(--green); width:0; transition:width .2s; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Candidate Import</h1>
+  <p>Bulk-load old spreadsheets into the candidate bench. Columns are mapped automatically; imported candidates land as <strong>sourced</strong> for the agent to qualify.</p>
+</header>
+<main>
+  <!-- LOGIN GATE -->
+  <div class="card" id="login">
+    <h3 style="margin-top:0">Sign in</h3>
+    <p class="muted">Use your Day Webster email — a magic link will be sent.</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input type="email" id="email" placeholder="you@daywebster.com" />
+      <button class="btn" id="loginBtn">Send magic link</button>
+    </div>
+    <p class="muted" id="loginMsg"></p>
+  </div>
+
+  <!-- UPLOAD -->
+  <div class="card hidden" id="uploader">
+    <h3 style="margin-top:0">1. Choose a spreadsheet</h3>
+    <p class="muted">Accepts .xlsx, .xls or .csv. Only the first sheet is read.</p>
+    <input type="file" id="file" accept=".csv,.xlsx,.xls" />
+    <p class="muted" id="fileInfo"></p>
+  </div>
+
+  <!-- MAPPING -->
+  <div class="card hidden" id="mapper">
+    <h3 style="margin-top:0">2. Review column mapping</h3>
+    <p class="muted" id="mapNotes"></p>
+    <table id="mapTable"></table>
+    <div style="margin-top:16px; display:flex; gap:8px;">
+      <button class="btn" id="commitBtn">Import candidates</button>
+      <button class="btn secondary" id="resetBtn">Start over</button>
+    </div>
+    <div class="bar hidden" id="progress"><div></div></div>
+  </div>
+
+  <!-- RESULT -->
+  <div class="card hidden" id="resultCard">
+    <h3 style="margin-top:0">Done</h3>
+    <div class="result" id="resultBody"></div>
+    <button class="btn secondary" id="againBtn" style="margin-top:12px;">Import another file</button>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="js/config.js"></script>
+<script>
+const sb = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY);
+const FN = window.CONFIG.SUPABASE_URL + '/functions/v1/csv-import';
+const TARGETS = ["ignore","first_name","last_name","full_name","title","email","phone","town","postcode","region","country","discipline","specialty","registration_body","registration_number","availability","employer","job_title","notes"];
+
+let rows = [];      // all parsed rows (array of objects)
+let headers = [];   // column headers
+let mapping = [];   // [{source_header, target_field}]
+
+const $ = (id) => document.getElementById(id);
+const show = (id) => $(id).classList.remove('hidden');
+const hide = (id) => $(id).classList.add('hidden');
+
+async function call(body) {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(FN, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': window.CONFIG.SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + (session?.access_token ?? ''),
+    },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+// ---- Auth ----
+async function refreshAuth() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) { hide('login'); show('uploader'); }
+  else { show('login'); hide('uploader'); }
+}
+sb.auth.onAuthStateChange(refreshAuth);
+$('loginBtn').onclick = async () => {
+  const email = $('email').value.trim();
+  if (!email) return;
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
+  $('loginMsg').textContent = error ? ('Error: ' + error.message) : 'Check your email for the magic link, then return here.';
+};
+
+// ---- File parse ----
+$('file').onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const buf = await f.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  if (!rows.length) { $('fileInfo').textContent = 'No rows found.'; return; }
+  headers = Object.keys(rows[0]);
+  $('fileInfo').textContent = `${rows.length} rows, ${headers.length} columns. Mapping columns…`;
+  const result = await call({ mode: 'map', headers, samples: rows.slice(0, 5) });
+  if (result.error) { $('fileInfo').textContent = 'Error: ' + result.error; return; }
+  mapping = result.mapping;
+  renderMapping(result.notes);
+};
+
+function renderMapping(notes) {
+  $('mapNotes').textContent = notes || '';
+  const sampleFor = (h) => (rows.slice(0,3).map(r => r[h]).filter(Boolean).join(', ') || '—');
+  let html = '<tr><th>Column</th><th>Sample values</th><th>Maps to</th></tr>';
+  mapping.forEach((m, i) => {
+    const opts = TARGETS.map(t => `<option value="${t}" ${t===m.target_field?'selected':''}>${t}</option>`).join('');
+    html += `<tr><td><strong>${m.source_header}</strong></td><td class="sample">${sampleFor(m.source_header)}</td><td><select data-i="${i}">${opts}</select></td></tr>`;
+  });
+  $('mapTable').innerHTML = html;
+  $('mapTable').querySelectorAll('select').forEach(sel => {
+    sel.onchange = (e) => { mapping[+e.target.dataset.i].target_field = e.target.value; };
+  });
+  hide('uploader'); show('mapper');
+}
+
+// ---- Commit (batched) ----
+$('commitBtn').onclick = async () => {
+  $('commitBtn').disabled = true;
+  show('progress');
+  const bar = $('progress').firstElementChild;
+  const totals = { inserted: 0, skipped_duplicates: 0, skipped_no_email: 0 };
+  const BATCH = 500;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const res = await call({ mode: 'commit', mapping, rows: rows.slice(i, i + BATCH) });
+    if (res.error) { $('resultBody').innerHTML = 'Error: ' + res.error; }
+    totals.inserted += res.inserted || 0;
+    totals.skipped_duplicates += res.skipped_duplicates || 0;
+    totals.skipped_no_email += res.skipped_no_email || 0;
+    bar.style.width = Math.min(100, Math.round((i + BATCH) / rows.length * 100)) + '%';
+  }
+  $('resultBody').innerHTML =
+    `<span class="ok">${totals.inserted}</span> candidates imported.<br>` +
+    `${totals.skipped_duplicates} skipped (already in the bench).<br>` +
+    `${totals.skipped_no_email} skipped (no email address).`;
+  hide('mapper'); show('resultCard');
+};
+
+const reset = () => { rows = []; headers = []; mapping = []; $('file').value = ''; $('fileInfo').textContent = ''; hide('mapper'); hide('resultCard'); show('uploader'); $('commitBtn').disabled = false; hide('progress'); $('progress').firstElementChild.style.width='0'; };
+$('resetBtn').onclick = reset;
+$('againBtn').onclick = reset;
+
+refreshAuth();
+</script>
+</body>
+</html>
