@@ -4,45 +4,20 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Control Tower — Day Webster</title>
-<style>
-  :root{--green:#16a34a;--green-l:#f0fdf4;--grey-50:#f9fafb;--grey-100:#f3f4f6;--grey-200:#e5e7eb;--grey-400:#9ca3af;--grey-500:#6b7280;--grey-700:#374151;--grey-900:#111827;--amber:#b45309;--amber-l:#fffbeb;--red:#dc2626;}
-  *{box-sizing:border-box;} body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--grey-50);color:var(--grey-700);}
-  header{background:#fff;border-bottom:1px solid var(--grey-200);padding:12px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
-  header h1{margin:0;font-size:17px;} nav{display:flex;gap:14px;margin-left:auto;flex-wrap:wrap;}
-  nav a{color:var(--grey-500);text-decoration:none;font-size:14px;font-weight:500;} nav a.here{color:var(--green);}
-  main{max-width:1100px;margin:18px auto;padding:0 16px;}
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;}
-  .kpi{background:#fff;border:1px solid var(--grey-200);border-radius:10px;padding:14px 16px;}
-  .kpi .n{font-size:28px;font-weight:800;color:var(--grey-900);letter-spacing:-.02em;}
-  .kpi .l{font-size:12px;color:var(--grey-500);margin-top:2px;}
-  .kpi.flag .n{color:var(--amber);} .kpi.warn .n{color:var(--red);}
-  .card{background:#fff;border:1px solid var(--grey-200);border-radius:10px;padding:16px;margin-bottom:16px;}
-  .card h3{margin:0 0 12px;font-size:14px;color:var(--grey-900);}
-  table{width:100%;border-collapse:collapse;font-size:13px;} th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--grey-100);} th{color:var(--grey-500);font-weight:600;}
-  td.r,th.r{text-align:right;}
-  .funnel{display:flex;flex-direction:column;gap:6px;}
-  .frow{display:flex;align-items:center;gap:10px;font-size:13px;}
-  .frow .lab{width:90px;color:var(--grey-700);} .frow .barwrap{flex:1;background:var(--grey-100);border-radius:6px;overflow:hidden;height:18px;}
-  .frow .bar{height:100%;background:var(--green);} .frow .v{width:46px;text-align:right;color:var(--grey-500);}
-  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--grey-100);}
-  .muted{color:var(--grey-500);font-size:13px;} .hidden{display:none;} a{color:var(--green);}
-  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;} @media(max-width:760px){.two{grid-template-columns:1fr;}}
-  .feed div{padding:7px 0;border-bottom:1px solid var(--grey-100);font-size:13px;} .feed .t{color:var(--grey-400);font-size:11px;}
-  .loginwrap{max-width:420px;margin:80px auto;}
-</style>
+<link rel="stylesheet" href="dw-theme.css" />
 </head>
 <body>
-<header>
-  <h1>Control Tower</h1>
-  <nav>
-    <a class="here">Dashboard</a><a href="candidates.html">Candidates</a>
+<header class="topbar">
+  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+  <nav class="topnav">
+    <a class="here" href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a>
     <a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="admin.html">Admin</a>
   </nav>
 </header>
 
 <div class="loginwrap card hidden" id="login">
   <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email &amp; password.</p>
-  <div style="display:flex;gap:8px;flex-direction:column;"><input id="email" type="email" placeholder="you@daywebster.com" style="padding:9px 11px;border:1px solid var(--grey-200);border-radius:6px;"/><input id="password" type="password" placeholder="Password" style="padding:9px 11px;border:1px solid var(--grey-200);border-radius:6px;"/><button id="loginBtn" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;cursor:pointer;">Sign in</button></div>
+  <div class="loginform"><input id="email" type="email" placeholder="you@daywebster.com"/><input id="password" type="password" placeholder="Password"/><button class="btn" id="loginBtn">Sign in</button></div>
   <p class="muted" id="loginMsg"></p>
 </div>
 
@@ -100,7 +75,7 @@ async function load(){ if(loaded)return; loaded=true;
 
   // Discipline integrity — unassigned candidates to classify
   const {data:un}=await sb.from('candidates').select('id,first_name,last_name,email,status,created_at').is('discipline_id',null).in('status',['sourced','contacted','engaged']).order('created_at',{ascending:false}).limit(12);
-  $('unassigned').innerHTML=(un||[]).map(c=>`<div style="padding:6px 0;border-bottom:1px solid var(--grey-100);font-size:13px;"><a href="candidates.html">${esc(c.first_name)} ${esc(c.last_name)}</a> <span class="pill">${c.status}</span> <span class="muted">${esc(c.email)||''}</span></div>`).join('')||'<p class="muted">All classified 🎉</p>';
+  $('unassigned').innerHTML=(un||[]).map(c=>`<div style="padding:6px 0;border-bottom:1px solid var(--hair);font-size:13px;"><a href="candidates.html">${esc(c.first_name)} ${esc(c.last_name)}</a> <span class="pill">${c.status}</span> <span class="muted">${esc(c.email)||''}</span></div>`).join('')||'<p class="muted">All classified 🎉</p>';
 
   // Intake by channel × discipline
   const {data:ibc}=await sb.from('intake_by_channel').select('*').limit(50);

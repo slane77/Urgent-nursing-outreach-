@@ -4,37 +4,22 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Admin — Day Webster</title>
-<style>
-  :root{--green:#16a34a;--green-l:#f0fdf4;--grey-50:#f9fafb;--grey-200:#e5e7eb;--grey-500:#6b7280;--grey-700:#374151;--grey-900:#111827;--amber:#b45309;}
-  *{box-sizing:border-box;} body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--grey-50);color:var(--grey-700);}
-  header{background:#fff;border-bottom:1px solid var(--grey-200);padding:12px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
-  header h1{margin:0;font-size:17px;} nav{display:flex;gap:14px;margin-left:auto;flex-wrap:wrap;} nav a{color:var(--grey-500);text-decoration:none;font-size:14px;font-weight:500;} nav a.here{color:var(--green);}
-  main{max-width:1000px;margin:18px auto;padding:0 16px;}
-  .tabs{display:flex;gap:6px;margin-bottom:14px;} .tab{padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;color:var(--grey-500);} .tab.active{background:var(--green-l);color:var(--green);font-weight:600;}
-  .card{background:#fff;border:1px solid var(--grey-200);border-radius:8px;padding:16px;margin-bottom:14px;}
-  table{width:100%;border-collapse:collapse;font-size:13px;} th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--grey-200);vertical-align:top;} th{color:var(--grey-500);}
-  input,select{padding:8px 10px;border:1px solid var(--grey-200);border-radius:6px;font-size:13px;font-family:inherit;}
-  .btn{background:var(--green);color:#fff;border:none;border-radius:6px;padding:8px 13px;font-size:13px;font-weight:600;cursor:pointer;} .btn.sm{padding:4px 9px;font-size:12px;} .btn.secondary{background:#fff;color:var(--grey-700);border:1px solid var(--grey-200);}
-  .muted{color:var(--grey-500);font-size:13px;} .hidden{display:none;} .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--green-l);color:var(--green);margin:2px;display:inline-block;}
-  .deskchips label{display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:2px 8px 2px 0;} .deskchips input{width:auto;}
-  .loginwrap{max-width:420px;margin:80px auto;}
-  .note{background:#fffbeb;border:1px solid #fde68a;color:var(--amber);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:14px;}
-</style>
+<link rel="stylesheet" href="dw-theme.css" />
 </head>
 <body>
-<header>
-  <h1>Admin</h1>
-  <nav><a href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a class="here">Admin</a></nav>
+<header class="topbar">
+  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a class="here" href="admin.html">Admin</a></nav>
 </header>
 
 <div class="loginwrap card hidden" id="login">
   <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email &amp; password.</p>
-  <div style="display:flex;gap:8px;flex-direction:column;"><input id="email" type="email" placeholder="you@daywebster.com"/><input id="password" type="password" placeholder="Password"/><button class="btn" id="loginBtn">Sign in</button></div>
+  <div class="loginform"><input id="email" type="email" placeholder="you@daywebster.com"/><input id="password" type="password" placeholder="Password"/><button class="btn" id="loginBtn">Sign in</button></div>
   <p class="muted" id="loginMsg"></p>
 </div>
 
 <main id="app" class="hidden">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><span class="muted" id="whoami" style="margin-right:auto;"></span><button class="btn sm secondary" id="changePw">Change my password</button><button class="btn sm secondary" id="logoutBtn">Sign out</button></div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;"><span class="muted" id="whoami" style="margin-right:auto;"></span><button class="btn sm secondary" id="changePw">Change my password</button><button class="btn sm secondary" id="logoutBtn">Sign out</button></div>
   <div class="note">When you make the first person an admin, desk siloing switches on — so assign your recruiters to their desks in the same sitting, or they'll see nothing until you do.</div>
   <div class="tabs" id="tabs">
     <div class="tab active" data-v="people">People &amp; desks</div>
@@ -42,31 +27,31 @@
     <div class="tab" data-v="coverage">Routing rules</div>
   </div>
 
-  <div id="peopleView" class="card">
+  <div id="peopleView" class="card" style="margin-top:14px;">
     <h3 style="margin-top:0">People</h3>
     <p class="muted">Everyone who has signed in. Tick <strong>Admin</strong> to give full access; tick desks to put a recruiter on them (they'll see only those).</p>
     <table><thead><tr><th>Person</th><th>Admin</th><th>Desks</th></tr></thead><tbody id="peopleRows"></tbody></table>
   </div>
 
-  <div id="desksView" class="card hidden">
+  <div id="desksView" class="card hidden" style="margin-top:14px;">
     <h3 style="margin-top:0">Desks</h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px;">
-      <div><label class="muted">Code</label><br><input id="d_code" placeholder="e.g. nursing_east"/></div>
-      <div><label class="muted">Name</label><br><input id="d_name" placeholder="Nursing — East"/></div>
-      <div><label class="muted">Region (optional)</label><br><input id="d_region" placeholder="East"/></div>
+      <div><label>Code</label><input id="d_code" placeholder="e.g. nursing_east"/></div>
+      <div><label>Name</label><input id="d_name" placeholder="Nursing — East"/></div>
+      <div><label>Region (optional)</label><input id="d_region" placeholder="East"/></div>
       <button class="btn" id="addDesk">Add desk</button>
     </div>
     <table><thead><tr><th>Name</th><th>Code</th><th>Region</th><th>Active</th></tr></thead><tbody id="deskRows"></tbody></table>
   </div>
 
-  <div id="coverageView" class="card hidden">
+  <div id="coverageView" class="card hidden" style="margin-top:14px;">
     <h3 style="margin-top:0">Routing rules</h3>
     <p class="muted">A candidate auto-routes to the first matching desk (specialty &gt; region &gt; discipline).</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px;">
-      <div><label class="muted">Desk</label><br><select id="c_desk"></select></div>
-      <div><label class="muted">Discipline</label><br><select id="c_disc"><option value="">—</option></select></div>
-      <div><label class="muted">Specialty</label><br><select id="c_spec"><option value="">(any)</option></select></div>
-      <div><label class="muted">Region (optional)</label><br><input id="c_region" placeholder="North"/></div>
+      <div><label>Desk</label><select id="c_desk"></select></div>
+      <div><label>Discipline</label><select id="c_disc"><option value="">—</option></select></div>
+      <div><label>Specialty</label><select id="c_spec"><option value="">(any)</option></select></div>
+      <div><label>Region (optional)</label><input id="c_region" placeholder="North"/></div>
       <button class="btn" id="addCov">Add rule</button>
     </div>
     <table><thead><tr><th>Desk</th><th>Discipline</th><th>Specialty</th><th>Region</th><th></th></tr></thead><tbody id="covRows"></tbody></table>

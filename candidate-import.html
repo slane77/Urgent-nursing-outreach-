@@ -4,42 +4,22 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Candidate Import — Day Webster</title>
-<style>
-  :root { --green:#16a34a; --green-light:#f0fdf4; --grey-50:#f9fafb; --grey-200:#e5e7eb; --grey-500:#6b7280; --grey-700:#374151; }
-  * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; background:var(--grey-50); color:var(--grey-700); }
-  header { background:#fff; border-bottom:1px solid var(--grey-200); padding:16px 24px; }
-  header h1 { margin:0; font-size:18px; }
-  header p { margin:4px 0 0; font-size:13px; color:var(--grey-500); }
-  main { max-width:1000px; margin:24px auto; padding:0 16px; }
-  .card { background:#fff; border:1px solid var(--grey-200); border-radius:8px; padding:20px; margin-bottom:16px; }
-  .btn { background:var(--green); color:#fff; border:none; border-radius:6px; padding:10px 16px; font-size:14px; font-weight:500; cursor:pointer; }
-  .btn:disabled { opacity:.5; cursor:not-allowed; }
-  .btn.secondary { background:#fff; color:var(--grey-700); border:1px solid var(--grey-200); }
-  input[type=email], input[type=file] { padding:9px 12px; border:1px solid var(--grey-200); border-radius:6px; font-size:14px; width:100%; max-width:360px; }
-  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:12px; }
-  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--grey-200); }
-  select { padding:5px 8px; border:1px solid var(--grey-200); border-radius:6px; font-size:13px; }
-  .muted { color:var(--grey-500); font-size:13px; }
-  .sample { color:var(--grey-500); font-size:12px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .ok { color:var(--green); font-weight:600; }
-  .hidden { display:none; }
-  .result { background:var(--green-light); border:1px solid var(--green); border-radius:6px; padding:14px; margin-top:12px; }
-  .bar { height:8px; background:var(--grey-200); border-radius:999px; overflow:hidden; margin-top:8px; }
-  .bar > div { height:100%; background:var(--green); width:0; transition:width .2s; }
-</style>
+<link rel="stylesheet" href="dw-theme.css" />
 </head>
 <body>
-<header>
-  <h1>Candidate Import</h1>
-  <p>Bulk-load old spreadsheets into the candidate bench. Columns are mapped automatically; imported candidates land as <strong>sourced</strong> for the agent to qualify.</p>
+<header class="topbar">
+  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a class="here" href="candidate-import.html">Import</a><a href="admin.html">Admin</a></nav>
 </header>
-<main>
+<main style="max-width:1000px;">
+  <h1 style="font-size:26px;margin:6px 0 4px;">Candidate Import</h1>
+  <p class="muted" style="margin-bottom:18px;">Bulk-load old spreadsheets into the candidate bench. Columns are mapped automatically; imported candidates land as <strong>sourced</strong> for the agent to qualify.</p>
+
   <!-- LOGIN GATE -->
-  <div class="card" id="login">
+  <div class="loginwrap card" id="login">
     <h3 style="margin-top:0">Sign in</h3>
     <p class="muted">Use your Day Webster email &amp; password.</p>
-    <div style="display:flex; gap:8px; flex-direction:column; max-width:320px;">
+    <div class="loginform">
       <input type="email" id="email" placeholder="you@daywebster.com" />
       <input type="password" id="password" placeholder="Password" />
       <button class="btn" id="loginBtn">Sign in</button>
