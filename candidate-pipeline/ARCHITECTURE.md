@@ -56,8 +56,10 @@ This is the Tier-B semi-auto model agreed earlier, applied end to end.
 5. **Compliance config** — `compliance_requirements` rows. *First per-discipline
    set seeded (`sql/13`) from the assessment; the agent reads it to request the
    right documents. Refine against the live compliance project.*
-6. **Human review surface** — the `review_queue` view + a Candidates tab in the
-   app. *App work not yet built.*
+6. **Human review surface + control tower** — `candidates.html` (cockpit +
+   review queue) and `dashboard.html` (KPIs, pipeline funnel, intake by
+   channel × discipline, campaign cost-per-candidate, discipline-integrity
+   list, agent/system activity feed). *Built.*
 
 ## 4. Data model map (what's in the draft schema)
 

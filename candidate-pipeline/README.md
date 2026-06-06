@@ -40,7 +40,7 @@ Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
 
 ## Next steps
 
-1. Review the schema + functions, then apply `sql/10 → 16` and deploy the edge
+1. Review the schema + functions, then apply `sql/10 → 17` and deploy the edge
    functions (ideally on a Supabase **dev branch** first):
    - `candidate-agent`, `csv-import`, `reference-request`, `job-advert`,
      `outreach-campaign` — verify_jwt (staff)
@@ -54,8 +54,10 @@ Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
    `ORG_URL`. Confirm the §11 data-protection terms before real PII.
 3. Expose the `candidate` schema to the API (Supabase → Settings → API →
    Exposed schemas) so `candidates.html` can read/write it under RLS.
-4. Use `candidate-import.html` to load the old spreadsheets; share
-   `intake.html` for inbound registration; work candidates in `candidates.html`.
-5. Build the **inbound-email pipeline** + search connectors for the chosen
-   sourcing channels (referrals, paid CV-DB APIs; social via official routes).
-6. Import the compliance requirement set from the compliance project.
+4. Staff pages (repo root): `dashboard.html` (control tower / home),
+   `candidates.html` (cockpit), `vacancies.html` (adverts), `candidate-import.html`
+   (spreadsheets). Public: `intake.html` (registration), `jobs` function (Google
+   for Jobs).
+5. **Wire the board connectors** (Indeed / Reed / CV-Library) once API
+   credentials arrive — see `ACQUISITION.md`.
+6. Refine the compliance requirement set against the live compliance project.

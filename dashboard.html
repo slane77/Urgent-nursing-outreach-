@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Control Tower — Day Webster</title>
+<style>
+  :root{--green:#16a34a;--green-l:#f0fdf4;--grey-50:#f9fafb;--grey-100:#f3f4f6;--grey-200:#e5e7eb;--grey-400:#9ca3af;--grey-500:#6b7280;--grey-700:#374151;--grey-900:#111827;--amber:#b45309;--amber-l:#fffbeb;--red:#dc2626;}
+  *{box-sizing:border-box;} body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--grey-50);color:var(--grey-700);}
+  header{background:#fff;border-bottom:1px solid var(--grey-200);padding:12px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
+  header h1{margin:0;font-size:17px;} nav{display:flex;gap:14px;margin-left:auto;flex-wrap:wrap;}
+  nav a{color:var(--grey-500);text-decoration:none;font-size:14px;font-weight:500;} nav a.here{color:var(--green);}
+  main{max-width:1100px;margin:18px auto;padding:0 16px;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:#fff;border:1px solid var(--grey-200);border-radius:10px;padding:14px 16px;}
+  .kpi .n{font-size:28px;font-weight:800;color:var(--grey-900);letter-spacing:-.02em;}
+  .kpi .l{font-size:12px;color:var(--grey-500);margin-top:2px;}
+  .kpi.flag .n{color:var(--amber);} .kpi.warn .n{color:var(--red);}
+  .card{background:#fff;border:1px solid var(--grey-200);border-radius:10px;padding:16px;margin-bottom:16px;}
+  .card h3{margin:0 0 12px;font-size:14px;color:var(--grey-900);}
+  table{width:100%;border-collapse:collapse;font-size:13px;} th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--grey-100);} th{color:var(--grey-500);font-weight:600;}
+  td.r,th.r{text-align:right;}
+  .funnel{display:flex;flex-direction:column;gap:6px;}
+  .frow{display:flex;align-items:center;gap:10px;font-size:13px;}
+  .frow .lab{width:90px;color:var(--grey-700);} .frow .barwrap{flex:1;background:var(--grey-100);border-radius:6px;overflow:hidden;height:18px;}
+  .frow .bar{height:100%;background:var(--green);} .frow .v{width:46px;text-align:right;color:var(--grey-500);}
+  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--grey-100);}
+  .muted{color:var(--grey-500);font-size:13px;} .hidden{display:none;} a{color:var(--green);}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;} @media(max-width:760px){.two{grid-template-columns:1fr;}}
+  .feed div{padding:7px 0;border-bottom:1px solid var(--grey-100);font-size:13px;} .feed .t{color:var(--grey-400);font-size:11px;}
+  .loginwrap{max-width:420px;margin:80px auto;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Control Tower</h1>
+  <nav>
+    <a class="here">Dashboard</a><a href="candidates.html">Candidates</a>
+    <a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a>
+  </nav>
+</header>
+
+<div class="loginwrap card hidden" id="login">
+  <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email — a magic link will be sent.</p>
+  <div style="display:flex;gap:8px;"><input id="email" type="email" placeholder="you@daywebster.com" style="flex:1;padding:9px 11px;border:1px solid var(--grey-200);border-radius:6px;"/><button id="loginBtn" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:10px 16px;font-weight:600;cursor:pointer;">Send link</button></div>
+  <p class="muted" id="loginMsg"></p>
+</div>
+
+<main id="app" class="hidden">
+  <div class="kpis" id="kpis"></div>
+
+  <div class="two">
+    <div class="card"><h3>Pipeline</h3><div class="funnel" id="funnel"></div></div>
+    <div class="card"><h3>Discipline integrity — needs classifying</h3><div id="unassigned"></div></div>
+  </div>
+
+  <div class="card"><h3>Intake by channel × discipline</h3><table><thead><tr><th>Channel</th><th>Discipline</th><th class="r">Candidates</th><th class="r">Qualified</th><th class="r">Ready/placed</th></tr></thead><tbody id="intake"></tbody></table></div>
+
+  <div class="card"><h3>Campaign performance — cost per candidate</h3><table><thead><tr><th>Campaign</th><th>Kind</th><th class="r">Spend</th><th class="r">Candidates</th><th class="r">£/candidate</th></tr></thead><tbody id="camp"></tbody></table></div>
+
+  <div class="card"><h3>Recent agent &amp; system activity</h3><div class="feed" id="feed"></div></div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script>
+const sb = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY, { db:{ schema:'candidate' } });
+const STATUSES=['sourced','contacted','engaged','qualified','compliance','ready','placed','rejected','dormant'];
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>(s??'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function refreshAuth(){const {data:{session}}=await sb.auth.getSession();if(session){$('login').classList.add('hidden');$('app').classList.remove('hidden');load();}else{$('login').classList.remove('hidden');$('app').classList.add('hidden');}}
+sb.auth.onAuthStateChange(refreshAuth);
+$('loginBtn').onclick=async()=>{const e=$('email').value.trim();if(!e)return;const {error}=await sb.auth.signInWithOtp({email:e,options:{emailRedirectTo:location.href}});$('loginMsg').textContent=error?error.message:'Check your email, then return here.';};
+
+const cnt=async(b)=>{const {count}=await b;return count??0;};
+let loaded=false;
+async function load(){ if(loaded)return; loaded=true;
+  // KPIs
+  const [total,qualified,ready,review,expiring,unassigned]=await Promise.all([
+    cnt(sb.from('candidates').select('*',{count:'exact',head:true})),
+    cnt(sb.from('candidates').select('*',{count:'exact',head:true}).eq('status','qualified')),
+    cnt(sb.from('candidates').select('*',{count:'exact',head:true}).in('status',['ready','placed'])),
+    cnt(sb.from('compliance_items').select('*',{count:'exact',head:true}).eq('needs_human',true)),
+    cnt(sb.from('expiring_items').select('*',{count:'exact',head:true})),
+    cnt(sb.from('candidates').select('*',{count:'exact',head:true}).is('discipline_id',null)),
+  ]);
+  $('kpis').innerHTML=[
+    {n:total,l:'Total candidates'},{n:qualified,l:'Qualified'},{n:ready,l:'Ready / placed'},
+    {n:review,l:'Needs review',c:review?'flag':''},{n:expiring,l:'Expiring ≤60d',c:expiring?'flag':''},
+    {n:unassigned,l:'No discipline',c:unassigned?'warn':''},
+  ].map(k=>`<div class="kpi ${k.c||''}"><div class="n">${k.n}</div><div class="l">${k.l}</div></div>`).join('');
+
+  // Funnel
+  const counts=await Promise.all(STATUSES.map(s=>cnt(sb.from('candidates').select('*',{count:'exact',head:true}).eq('status',s))));
+  const max=Math.max(1,...counts);
+  $('funnel').innerHTML=STATUSES.map((s,i)=>`<div class="frow"><span class="lab">${s}</span><span class="barwrap"><span class="bar" style="width:${counts[i]/max*100}%"></span></span><span class="v">${counts[i]}</span></div>`).join('');
+
+  // Discipline integrity — unassigned candidates to classify
+  const {data:un}=await sb.from('candidates').select('id,first_name,last_name,email,status,created_at').is('discipline_id',null).in('status',['sourced','contacted','engaged']).order('created_at',{ascending:false}).limit(12);
+  $('unassigned').innerHTML=(un||[]).map(c=>`<div style="padding:6px 0;border-bottom:1px solid var(--grey-100);font-size:13px;"><a href="candidates.html">${esc(c.first_name)} ${esc(c.last_name)}</a> <span class="pill">${c.status}</span> <span class="muted">${esc(c.email)||''}</span></div>`).join('')||'<p class="muted">All classified 🎉</p>';
+
+  // Intake by channel × discipline
+  const {data:ibc}=await sb.from('intake_by_channel').select('*').limit(50);
+  $('intake').innerHTML=(ibc||[]).map(r=>`<tr><td>${esc(r.channel)}</td><td>${esc(r.discipline)}</td><td class="r">${r.candidates}</td><td class="r">${r.qualified}</td><td class="r">${r.ready_or_placed}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No data yet.</td></tr>';
+
+  // Campaign performance
+  const {data:cp}=await sb.from('campaign_performance').select('*').limit(50);
+  $('camp').innerHTML=(cp||[]).map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.kind)}</td><td class="r">£${(r.spend||0)}</td><td class="r">${r.candidates}</td><td class="r">${r.cost_per_candidate!=null?'£'+r.cost_per_candidate:'—'}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No campaigns yet.</td></tr>';
+
+  // Activity feed
+  const {data:feed}=await sb.from('messages').select('created_at,direction,author,subject,body,candidates(first_name,last_name)').in('author',['agent','system']).order('created_at',{ascending:false}).limit(25);
+  $('feed').innerHTML=(feed||[]).map(m=>{const who=`${m.candidates?.first_name||''} ${m.candidates?.last_name||''}`.trim()||'—';return `<div><span class="t">${(m.created_at||'').slice(0,16).replace('T',' ')}</span> · <strong>${esc(m.author)}</strong> → ${esc(who)}: ${esc(m.subject||m.body||'').slice(0,90)}</div>`;}).join('')||'<p class="muted">No activity yet.</p>';
+}
+refreshAuth();
+</script>
+</body>
+</html>
