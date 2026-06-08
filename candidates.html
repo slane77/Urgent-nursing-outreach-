@@ -196,6 +196,7 @@ async function openCandidate(id) {
       </div>
       <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <button class="btn sm" id="signoffBtn">Sign off → Maintenance</button>
+        <button class="btn sm secondary" id="reqDocsBtn">Email document request</button>
         <button class="btn sm secondary" id="reqUpdateBtn">Requires update</button>
         <span class="muted" id="compMsg"></span>
       </div>
@@ -236,6 +237,7 @@ async function openCandidate(id) {
   $('saveBtn').onclick = saveProfile;
   $('runBtn').onclick = runAgent;
   $('signoffBtn').onclick = signOff;
+  $('reqDocsBtn').onclick = requestDocs;
   $('reqUpdateBtn').onclick = () => setComp('requires_update');
   $('detail').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>resolveItem(b.dataset.resolve,b.dataset.st));
 }
@@ -275,6 +277,20 @@ async function setComp(s) {
   const { error } = await sb.from('candidates').update({ compliance_status: s }).eq('id', current.id);
   $('compMsg').textContent = error ? error.message : 'Updated ✓';
   if (!error) openCandidate(current.id);
+}
+async function requestDocs() {
+  if (!current?.portal_token) { $('compMsg').textContent = 'No portal link for this candidate.'; return; }
+  $('compMsg').textContent = 'Sending…';
+  try {
+    const res = await fetch(window.CONFIG.SUPABASE_URL + '/functions/v1/request-documents', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'apikey':window.CONFIG.SUPABASE_ANON_KEY, 'Authorization':'Bearer '+window.CONFIG.SUPABASE_ANON_KEY },
+      body: JSON.stringify({ candidate_id: current.id, portal_token: current.portal_token }),
+    });
+    const out = await res.json();
+    $('compMsg').textContent = out.ok ? 'Document request emailed ✓' : ('Error: ' + (out.error || 'failed'));
+    if (out.ok) openCandidate(current.id);
+  } catch (e) { $('compMsg').textContent = 'Error: ' + e; }
 }
 
 async function loadAudit() {
