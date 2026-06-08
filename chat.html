@@ -49,7 +49,11 @@ let busy = false;
 function bubble(text, who) {
   const d = document.createElement('div');
   d.className = 'b ' + (who === 'me' ? 'me' : 'bot');
-  d.textContent = text;
+  if (who === 'me') { d.textContent = text; }
+  else {
+    const esc = text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    d.innerHTML = esc.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color:#0b7;font-weight:600">$1</a>');
+  }
   $('stream').appendChild(d);
   $('stream').scrollTop = $('stream').scrollHeight;
 }
