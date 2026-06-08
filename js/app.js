@@ -687,12 +687,13 @@ function applyComposeSourceFilter(q, source) {
 }
 
 async function buildComposeQueueFromDb() {
-  let query = sb.from('contacts').select('*').eq('status', state.composeListFilter);
+  let query = sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*').eq('status', state.composeListFilter);
   query = applyComposeSourceFilter(query, state.composeSourceFilter);
   if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
   if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
+    if (state.composeUncontactedOnly) query = query.is('last_emailed_at', null);
 
   // Sort and limit to batch size + small buffer for invalid emails
   query = query.order('updated_at', { ascending: true }).limit(state.composeBatchSize * 2);
@@ -708,13 +709,14 @@ async function buildComposeQueueFromDb() {
 
 async function previewComposeCounts() {
   // Count matching the current filters
-  let q = sb.from('contacts').select('*', { count: 'exact', head: true })
+  let q = sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*', { count: 'exact', head: true })
     .eq('status', state.composeListFilter);
   q = applyComposeSourceFilter(q, state.composeSourceFilter);
   if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') q = q.eq('department', state.composeSpecialtyFilter);
   if (state.composeRegionFilter) q = q.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) q = q.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) q = q.ilike('town', `%${state.composeTownFilter}%`);
+  if (state.composeUncontactedOnly) q = q.is('last_emailed_at', null);
   const { count } = await q;
   return { matching: count || 0 };
 }
@@ -1106,12 +1108,13 @@ async function buildAllComposeContactsFromDb() {
   const PAGE = 1000;
   const out = [];
   for (let from = 0; ; from += PAGE) {
-    let query = sb.from('contacts').select('*').eq('status', state.composeListFilter);
+    let query = sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*').eq('status', state.composeListFilter);
     query = applyComposeSourceFilter(query, state.composeSourceFilter);
     if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
     if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
     if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
     if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
+    if (state.composeUncontactedOnly) query = query.is('last_emailed_at', null);
     query = query.order('updated_at', { ascending: true }).range(from, from + PAGE - 1);
     const { data, error } = await query;
     if (error) { toast('Failed to load contacts for compose: ' + error.message, 'error'); break; }
@@ -1230,6 +1233,13 @@ function renderCompose() {
             <option value="lead" ${state.composeListFilter==='lead'?'selected':''}>Leads (${state.counts.lead})</option>
             <option value="live" ${state.composeListFilter==='live'?'selected':''}>Live (${state.counts.live})</option>
           </select>
+        </div>
+        <div class="field">
+          <label>Not contacted</label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;cursor:pointer;white-space:nowrap;height:38px;">
+            <input type="checkbox" id="compose-uncontacted" ${state.composeUncontactedOnly ? 'checked' : ''} />
+            Only not emailed before
+          </label>
         </div>
         <div class="field">
           <label>Region (optional)</label>
@@ -3265,6 +3275,8 @@ function bindEvents() {
   const composeSpecialty = $('#compose-specialty');
   if (composeSpecialty) composeSpecialty.onchange = (e) => { state.composeSpecialtyFilter = e.target.value; state.composePreviewCounts = null; render(); };
   if (composeList) composeList.onchange = (e) => { state.composeListFilter = e.target.value; state.composePreviewCounts = null; render(); };
+  const composeUncontactedCb = $('#compose-uncontacted');
+  if (composeUncontactedCb) composeUncontactedCb.onchange = (e) => { state.composeUncontactedOnly = e.target.checked; state.composePreviewCounts = null; render(); };
   const composeRegion = $('#compose-region');
   if (composeRegion) composeRegion.onchange = (e) => { state.composeRegionFilter = e.target.value; state.composePreviewCounts = null; render(); };
   const composeCountry = $('#compose-country');
