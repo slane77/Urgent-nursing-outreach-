@@ -181,6 +181,8 @@ async function openCandidate(id) {
         <div><label>Availability</label><input id="f_avail" value="${esc(c.availability)}" /></div>
         <div><label>Town</label><input id="f_town" value="${esc(c.town)}" /></div>
         <div><label>Postcode</label><input id="f_pc" value="${esc(c.postcode)}" /></div>
+        <div><label>Address</label><input id="f_address" value="${esc(c.address)}" /></div>
+        <div><label>NI number</label><input id="f_ni" value="${esc(c.ni_number)}" /></div>
       </div>
       <label>Notes</label><textarea id="f_notes" rows="2" style="width:100%">${esc(c.notes)}</textarea>
       <div style="margin-top:10px; display:flex; gap:8px;"><button class="btn sm" id="saveBtn">Save</button><span class="muted" id="saveMsg"></span></div>
@@ -252,6 +254,8 @@ async function saveProfile() {
     availability: $('f_avail').value || null,
     town: $('f_town').value || null,
     postcode: $('f_pc').value || null,
+    address: $('f_address').value || null,
+    ni_number: $('f_ni').value || null,
     notes: $('f_notes').value || null,
     compliance_status: $('f_compstatus').value,
   };
