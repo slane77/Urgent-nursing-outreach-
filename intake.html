@@ -240,9 +240,9 @@ pcEl?.addEventListener('blur', async () => {
 const niEl = document.getElementById('ni'), niMsg = document.getElementById('niMsg');
 niEl?.addEventListener('blur', () => {
   const v = niEl.value.trim().toUpperCase().replace(/\s+/g, ''); if (!v) { niMsg.textContent = ''; return; }
-  const ok = /^[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z][0-9]{6}[A-D]$/.test(v);
-  niMsg.style.color = ok ? 'var(--green)' : '#dc2626';
-  niMsg.textContent = ok ? '✓ Looks right' : 'That doesn’t look like a UK NI number (e.g. QQ123456C) — please double-check.';
+  const ok = /^[A-Z]{2}[0-9]{6}[A-Z]$/.test(v);
+  niMsg.style.color = ok ? 'var(--green)' : '#b45309';
+  niMsg.textContent = ok ? '✓ Looks right' : 'Just check that’s right (usually 2 letters, 6 digits, 1 letter — e.g. QQ123456C). You can still continue.';
 });
 
 // Attribution: ?vacancy=<slug>&campaign=<id> (set on adverts / landing links)
