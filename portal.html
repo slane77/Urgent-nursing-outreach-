@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Your documents — Day Webster</title>
+<link rel="stylesheet" href="dw-theme.css" />
+<style>
+  .wrap { max-width:620px; margin:0 auto; padding:0 16px 50px; }
+  .item { border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:10px; }
+  .item .top { display:flex; align-items:center; gap:10px; }
+  .item .nm { font-weight:600; flex:1; }
+  .badge { font-size:11px; font-weight:700; padding:3px 10px; border-radius:980px; white-space:nowrap; }
+  .b-need { background:var(--amber-l); color:var(--amber); }
+  .b-have { background:#e8f0fe; color:#1a56db; }
+  .b-ok   { background:var(--green-l); color:var(--green); }
+  .up { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .up input[type=file] { font-size:13px; }
+  .note { background:var(--field); border-radius:14px; padding:12px 14px; font-size:13px; color:var(--ink-soft); margin:14px 0; }
+</style>
+</head>
+<body>
+<div class="topbar"><a class="brand" href="#"><img src="dw-logo.svg" alt="Day Webster Group" /></a></div>
+<div class="wrap" style="padding-top:24px;">
+  <h1 id="hello" style="font-size:28px;margin:6px 0 4px;">Your documents</h1>
+  <p class="muted" id="sub">Loading…</p>
+  <div class="note">Upload clear photos or scans (PDF, JPG or PNG, up to ~5MB each). Your documents are stored securely and checked by our compliance team — nothing is shared until then.</div>
+  <div id="list"></div>
+  <p class="muted" id="msg" style="text-align:center;margin-top:14px;"></p>
+</div>
+
+<script src="js/config.js"></script>
+<script>
+const FN = window.CONFIG.SUPABASE_URL + '/functions/v1/candidate-portal';
+const token = new URLSearchParams(location.search).get('t') || '';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function api(body) {
+  const res = await fetch(FN, { method:'POST', headers:{ 'Content-Type':'application/json', 'apikey':window.CONFIG.SUPABASE_ANON_KEY, 'Authorization':'Bearer '+window.CONFIG.SUPABASE_ANON_KEY }, body: JSON.stringify({ token, ...body }) });
+  return res.json();
+}
+function badge(status) {
+  if (status === 'verified') return '<span class="badge b-ok">Verified</span>';
+  if (status === 'received' || status === 'verifying') return '<span class="badge b-have">Received — being checked</span>';
+  if (status === 'expired') return '<span class="badge b-need">Needs updating</span>';
+  return '<span class="badge b-need">Needed</span>';
+}
+function canUpload(status){ return status !== 'verified' && status !== 'received' && status !== 'verifying'; }
+
+function render(items) {
+  if (!items.length) { $('list').innerHTML = '<p class="muted">No documents are outstanding right now. 🎉</p>'; return; }
+  $('list').innerHTML = items.map(it => `
+    <div class="item" data-item="${it.id}" data-req="${it.requirement_id||''}">
+      <div class="top"><span class="nm">${esc(it.name)}</span>${badge(it.status)}</div>
+      ${canUpload(it.status) ? `<div class="up"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" /><button class="btn sm">Upload</button><span class="muted s"></span></div>` : ''}
+    </div>`).join('');
+  $('list').querySelectorAll('.item').forEach(row => {
+    const btn = row.querySelector('button'); if (!btn) return;
+    btn.onclick = () => uploadFor(row);
+  });
+}
+async function uploadFor(row) {
+  const file = row.querySelector('input[type=file]').files[0];
+  const s = row.querySelector('.s'); const btn = row.querySelector('button');
+  if (!file) { s.textContent = 'Choose a file first.'; return; }
+  if (file.size > 5.2 * 1024 * 1024) { s.textContent = 'Too big (max ~5MB).'; return; }
+  btn.disabled = true; s.textContent = 'Uploading…';
+  const b64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.toString().split(',')[1]); r.readAsDataURL(file); });
+  const out = await api({ action:'upload', item_id: row.dataset.item || null, requirement_id: row.dataset.req || null, filename: file.name, content_type: file.type, content_base64: b64 });
+  if (out.ok) { $('msg').textContent = 'Thank you — that’s with our team. ✓'; render(out.items); }
+  else { s.textContent = out.message || 'Upload failed — please try again.'; btn.disabled = false; }
+}
+
+async function start() {
+  if (!token) { $('sub').textContent = 'Please use the secure link we sent you by email.'; $('list').innerHTML = '<p class="muted">No personal link found. <a href="intake.html">Register here</a> and we’ll send you one.</p>'; return; }
+  const out = await api({ action:'get' });
+  if (out.error) { $('sub').textContent = 'That link doesn’t look right — please use the latest one we emailed you.'; return; }
+  $('hello').textContent = `Hi ${out.candidate.first_name || 'there'} 👋`;
+  $('sub').textContent = out.candidate.discipline ? `${out.candidate.discipline} — here’s what we need to get you work-ready.` : 'Here’s what we need to get you work-ready.';
+  render(out.items);
+}
+start();
+</script>
+</body>
+</html>

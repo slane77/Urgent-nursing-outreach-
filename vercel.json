@@ -4,6 +4,8 @@
     { "source": "/register", "destination": "/intake.html" },
     { "source": "/join", "destination": "/intake.html" },
     { "source": "/chat", "destination": "/chat.html" },
+    { "source": "/portal", "destination": "/portal.html" },
+    { "source": "/documents", "destination": "/portal.html" },
     { "source": "/poster", "destination": "/register-poster.html" },
     { "source": "/qr", "destination": "/qr.html" }
   ]
