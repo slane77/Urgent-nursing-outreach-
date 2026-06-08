@@ -246,9 +246,10 @@ document.getElementById('form').addEventListener('submit', async (e) => {
       friendsWrap.innerHTML = ''; addFriendRow();
       document.getElementById('referrerWrap').classList.add('hidden');
       msg.className = 'msg ok';
-      msg.textContent = out.referred > 0
-        ? 'Thank you — you are registered, and we’ll reach out to the ' + out.referred + (out.referred === 1 ? ' friend' : ' friends') + ' you referred.'
-        : 'Thank you — you are registered. The right consultant will be in touch.';
+      const base = 'Thank you — you are registered.' + (out.referred > 0 ? (' We’ll reach out to the ' + out.referred + (out.referred === 1 ? ' friend' : ' friends') + ' you referred.') : ' The right consultant will be in touch.');
+      if (out.portal_token) {
+        msg.innerHTML = base + '<br><br><a href="portal.html?t=' + out.portal_token + '" style="display:inline-block;background:var(--green);color:#fff;border-radius:980px;padding:12px 24px;font-weight:600;text-decoration:none;">Upload your documents →</a><br><span style="color:var(--ink-soft);font-size:13px;display:block;margin-top:8px;">Save this link — it’s your private page to send us documents any time.</span>';
+      } else { msg.textContent = base; }
     } else { msg.className = 'msg err'; msg.textContent = out.error || 'Something went wrong. Please try again.'; btn.disabled = false; }
   } catch (err) { msg.className = 'msg err'; msg.textContent = 'Network error. Please try again.'; btn.disabled = false; }
 });
