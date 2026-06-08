@@ -1636,6 +1636,48 @@ async function runTheatreScrape() {
   state.theatreRunning = false; render();
 }
 
+async function runScotlandScrape() {
+  state.scotRunning = true; state.scotResult = null; render();
+  try {
+    const spec = (document.getElementById('scot-specialty') || {}).value || state.scotSpecialty || 'physiotherapy';
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-scotland-scraper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      body: JSON.stringify({ specialty: spec, offset: 0, limit: 50 }),
+    });
+    const data = await res.json();
+    state.scotResult = { inserted: data.inserted || 0, specialty: data.specialty || spec, error: data.error };
+    if (data && data.inserted > 0) { await Promise.all([loadStatusCounts(), loadSourceCounts()]); }
+  } catch (err) { state.scotResult = { error: err.message }; }
+  state.scotRunning = false; render();
+}
+
+async function runScotlandScrapeAll() {
+  if (state.scotSweepRunning || state.scotRunning) return;
+  state.scotSweepRunning = true; state.scotResult = null;
+  const specs = ['physiotherapy','occupational_therapy','radiography','speech_language','dietetics','podiatry','orthoptics','art_therapy','paramedic','prosthetics','pharmacy','biomedical_science','sterile_services','operating_theatres','audiology'];
+  let totalInserted = 0, i = 0;
+  for (const spec of specs) {
+    i++;
+    state.scotSweepMsg = 'Scanning ' + spec.replace(/_/g, ' ') + ' (' + i + '/' + specs.length + ')\u2026';
+    render();
+    try {
+      const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-scotland-scraper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+        body: JSON.stringify({ specialty: spec, offset: 0, limit: 60 }),
+      });
+      const data = await res.json();
+      if (data && data.inserted) totalInserted += data.inserted;
+    } catch (e) { }
+  }
+  state.scotResult = { swept: true, inserted: totalInserted };
+  state.scotSweepMsg = '';
+  state.scotSweepRunning = false;
+  await Promise.all([loadStatusCounts(), loadSourceCounts()]);
+  render();
+}
+
 async function runNHSScrape() {
   state.importRunning = true;
   state.importResult = null;
@@ -1933,6 +1975,45 @@ function renderImport() {
             <p style="color:#DC2626;font-size:13px;">&#10005; ${esc(r.error || 'Unknown error')}</p>
             ${(r.error||'').includes('ANTHROPIC_API_KEY') ? '<p class="muted" style="margin-top:6px;font-size:12px;">Add key: Supabase Dashboard &rarr; Project Settings &rarr; Edge Functions &rarr; Secrets &rarr; ANTHROPIC_API_KEY</p>' : ''}
           `}
+        </div>` : ''}
+      </div>
+
+      <!-- NHS Scotland scraper -->
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">&#127988;</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">NHS Scotland - AHP Contacts</div>
+            <div class="import-card-sub">Scrapes apply.jobs.scot.nhs.uk (JobTrain) for AHP vacancies and pulls the named hiring contact, role, band and town across all Scottish health boards.</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+        <div class="import-form">
+          <div class="import-form-row">
+            <div class="field">
+              <label>AHP Specialty</label>
+              <select class="select" id="scot-specialty">
+                ${SPECIALTIES.filter(sp => !['gp_surgery','advanced_nurse_practitioner','emergency_nurse_practitioner'].includes(sp.value)).map(sp => `<option value="${sp.value}" ${(state.scotSpecialty || 'physiotherapy') === sp.value ? 'selected' : ''}>${sp.label}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="import-form-actions">
+            <button class="btn primary" id="run-scot-btn" ${state.scotRunning || state.scotSweepRunning ? 'disabled' : ''}>
+              ${state.scotRunning ? '<span class="spinner-inline"></span> Scraping NHS Scotland&hellip;' : '&#9654; Run Scraper'}
+            </button>
+            <button class="btn" id="run-scot-all-btn" ${state.scotRunning || state.scotSweepRunning ? 'disabled' : ''}>
+              ${state.scotSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : '&#9851; Scrape ALL Specialties'}
+            </button>
+            <span class="import-hint">Run Scraper grabs the selected specialty. Scrape ALL Specialties sweeps every AHP specialty across all Scottish health boards (can take a couple of minutes).</span>
+          </div>
+        </div>
+        ${state.scotSweepRunning ? `
+          <div class="import-progress">
+            <div class="progress-bar"><div class="fill import-pulse"></div></div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">${esc(state.scotSweepMsg || 'Sweeping all specialties\u2026')}</p>
+          </div>` : ''}
+        ${state.scotResult ? `<div class="import-result ${state.scotResult.error ? 'err' : 'ok'}">
+          ${state.scotResult.error ? `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.scotResult.error)}</p>` : `<p class="muted" style="font-size:12px;">&#10003; ${state.scotResult.inserted || 0} new contact(s) added${state.scotResult.swept ? ' across all specialties' : (state.scotResult.specialty ? ' for ' + String(state.scotResult.specialty).replace(/_/g,' ') : '')} &mdash; view under Database &rarr; NHS Scotland.</p>`}
         </div>` : ''}
       </div>
 
@@ -3041,6 +3122,12 @@ function bindEvents() {
   if (runScrapeAllBtn) runScrapeAllBtn.onclick = () => { if (!state.importRunning && !state.importSweepRunning) runNHSScrapeAll(); };
   const runScrapeEveryBtn = $('#run-scrape-every-btn');
   if (runScrapeEveryBtn) runScrapeEveryBtn.onclick = () => { if (!state.importRunning && !state.importSweepRunning) runNHSScrapeEverything(); };
+  const runScotBtn = $('#run-scot-btn');
+  if (runScotBtn) runScotBtn.onclick = () => { if (!state.scotRunning && !state.scotSweepRunning) runScotlandScrape(); };
+  const runScotAllBtn = $('#run-scot-all-btn');
+  if (runScotAllBtn) runScotAllBtn.onclick = () => { if (!state.scotRunning && !state.scotSweepRunning) runScotlandScrapeAll(); };
+  const scotSpecialtySel = $('#scot-specialty');
+  if (scotSpecialtySel) scotSpecialtySel.onchange = (e) => { state.scotSpecialty = e.target.value; };
   // Agency CSV upload
   const runEnrichBtn = $('#run-enrich-btn');
   if (runEnrichBtn) runEnrichBtn.onclick = () => { if (!state.enrichRunning) runEnrichment(); };
