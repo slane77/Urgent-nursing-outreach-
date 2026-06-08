@@ -109,10 +109,11 @@
       </select>
       <label>Home address</label><input name="address" placeholder="House/flat & street" />
       <div class="row">
-        <div><label>Town</label><input name="town" /></div>
-        <div><label>Postcode</label><input name="postcode" /></div>
+        <div><label>Town</label><input name="town" id="town" /></div>
+        <div><label>Postcode</label><input name="postcode" id="postcode" /><small id="pcMsg" style="font-size:12px;color:var(--ink-soft);"></small></div>
       </div>
-      <label>National Insurance number (optional)</label><input name="ni_number" placeholder="e.g. QQ123456C — helps us identify you" />
+      <label>National Insurance number (optional)</label><input name="ni_number" id="ni" placeholder="e.g. QQ123456C — helps us identify you" /><small id="niMsg" style="font-size:12px;color:var(--ink-soft);"></small>
+      <input type="hidden" name="latitude" /><input type="hidden" name="longitude" />
       <label>Availability (optional)</label><input name="availability" placeholder="e.g. immediate, days/nights, from June" />
 
       <label>How did you hear about us?</label>
@@ -215,6 +216,34 @@ function addFriendRow() {
 function renumber(){ [...friendsWrap.children].forEach((r,i)=>{ r.querySelector('.fhead span').textContent = 'Friend ' + (i+1); }); }
 document.getElementById('addFriend').onclick = addFriendRow;
 addFriendRow(); // start with one (optional) row
+
+// Postcode lookup (postcodes.io — free, no key): validate, autofill town, geocode.
+const pcEl = document.getElementById('postcode'), pcMsg = document.getElementById('pcMsg');
+pcEl?.addEventListener('blur', async () => {
+  const v = pcEl.value.trim(); if (!v) { pcMsg.textContent = ''; return; }
+  pcMsg.style.color = 'var(--ink-soft)'; pcMsg.textContent = 'Checking…';
+  try {
+    const r = await fetch('https://api.postcodes.io/postcodes/' + encodeURIComponent(v));
+    const j = await r.json();
+    if (j.status === 200 && j.result) {
+      const res = j.result;
+      document.querySelector('[name=latitude]').value = res.latitude ?? '';
+      document.querySelector('[name=longitude]').value = res.longitude ?? '';
+      const town = document.getElementById('town');
+      if (town && !town.value) town.value = res.admin_district || res.parish || res.region || '';
+      pcEl.value = res.postcode;
+      pcMsg.style.color = 'var(--green)'; pcMsg.textContent = '✓ ' + (res.admin_district || res.region || 'Found');
+    } else { pcMsg.style.color = '#dc2626'; pcMsg.textContent = 'We couldn’t find that postcode — please check it.'; }
+  } catch { pcMsg.textContent = ''; }
+});
+// NI light format check (format only — not a real-world verification).
+const niEl = document.getElementById('ni'), niMsg = document.getElementById('niMsg');
+niEl?.addEventListener('blur', () => {
+  const v = niEl.value.trim().toUpperCase().replace(/\s+/g, ''); if (!v) { niMsg.textContent = ''; return; }
+  const ok = /^[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z][0-9]{6}[A-D]$/.test(v);
+  niMsg.style.color = ok ? 'var(--green)' : '#dc2626';
+  niMsg.textContent = ok ? '✓ Looks right' : 'That doesn’t look like a UK NI number (e.g. QQ123456C) — please double-check.';
+});
 
 // Attribution: ?vacancy=<slug>&campaign=<id> (set on adverts / landing links)
 const qp = new URLSearchParams(location.search);
