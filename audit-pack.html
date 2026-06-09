@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Compliance Audit Pack — Day Webster</title>
+<link rel="stylesheet" href="dw-theme.css" />
+<style>
+  .sheet { max-width:880px; margin:0 auto; padding:0 20px 60px; }
+  .head { display:flex; align-items:center; gap:16px; border-bottom:2px solid var(--hair); padding:22px 0 16px; }
+  .head img { height:40px; }
+  .head h1 { font-size:24px; margin:0; }
+  .meta { margin-left:auto; text-align:right; font-size:12px; color:var(--ink-soft); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 24px; margin:16px 0; font-size:14px; }
+  .grid div b { color:var(--ink-soft); font-weight:600; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--green); margin:26px 0 8px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th,td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--hair); vertical-align:top; }
+  th { color:var(--ink-soft); font-size:11px; }
+  .st { font-weight:600; }
+  .ok { color:var(--green); } .warn { color:#b45309; } .red { color:#dc2626; }
+  .banner { padding:12px 14px; border-radius:12px; font-weight:600; margin:14px 0; }
+  .banner.ok { background:var(--green-l); color:var(--green); }
+  .banner.warn { background:#fff8eb; color:#b45309; }
+  .foot { margin-top:30px; border-top:1px solid var(--hair); padding-top:14px; font-size:11px; color:var(--ink-soft); }
+  .printbar { text-align:center; padding:14px; }
+  @media print { .topbar,.printbar { display:none; } body{ background:#fff; } h2{ break-after:avoid; } tr{ break-inside:avoid; } }
+</style>
+</head>
+<body>
+<div class="topbar"><a class="brand" href="candidates.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+  <nav class="topnav"><a href="candidates.html">← Back to cockpit</a></nav>
+</div>
+<div class="printbar"><button class="btn" onclick="window.print()">Print / Save as PDF</button></div>
+<div class="sheet" id="sheet"><p class="muted">Loading…</p></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script>
+const sb = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY, { db:{ schema:'candidate' } });
+const $ = (id)=>document.getElementById(id);
+const esc = (s)=>(s??'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const d = (x)=> x ? (x+'').slice(0,10) : '—';
+const id = new URLSearchParams(location.search).get('id');
+
+(async () => {
+  const { data:{ session } } = await sb.auth.getSession();
+  if (!session) { $('sheet').innerHTML = '<p class="muted">Please sign in via the <a href="candidates.html">cockpit</a> first, then reopen this audit pack.</p>'; return; }
+  if (!id) { $('sheet').innerHTML = '<p class="muted">No candidate specified.</p>'; return; }
+
+  const [{ data:c }, { data:items }, { data:emp }, { data:cons }, { data:cov }, { data:users }] = await Promise.all([
+    sb.from('candidates').select('*, disciplines(name), specialties:primary_specialty_id(name), desks(name)').eq('id', id).maybeSingle(),
+    sb.from('compliance_items').select('status,received_at,expires_at,source_confidence,needs_human,human_notes,artefact_path,decided_by,ai_review,compliance_requirements(name,sort_order)').eq('candidate_id', id),
+    sb.from('employment').select('*').eq('candidate_id', id).order('start_date',{ascending:false}),
+    sb.from('consent').select('*').eq('candidate_id', id).order('occurred_at',{ascending:false}),
+    sb.rpc('reference_coverage', { p_candidate:id, p_years:3 }),
+    sb.from('app_users').select('user_id,email'),
+  ]);
+  if (!c) { $('sheet').innerHTML = '<p class="muted">Candidate not found (or outside your desks).</p>'; return; }
+  const umap = {}; (users||[]).forEach(u=>umap[u.user_id]=u.email);
+
+  const it = (items||[]).slice().sort((a,b)=>(a.compliance_requirements?.sort_order??999)-(b.compliance_requirements?.sort_order??999));
+  const statusClass = (s,nh)=> nh?'warn':(s==='verified'?'ok':(s==='unsuitable'||s==='expired'?'red':''));
+  const compOk = c.compliance_status==='maintenance';
+
+  $('sheet').innerHTML = `
+    <div class="head">
+      <img src="dw-logo.svg" alt="Day Webster Group" />
+      <h1>Compliance Audit Pack</h1>
+      <div class="meta">Generated ${new Date().toLocaleString('en-GB')}<br>by ${esc(session.user.email)}</div>
+    </div>
+
+    <div class="banner ${compOk?'ok':'warn'}">Compliance status: ${esc((c.compliance_status||'').replace(/_/g,' ')).toUpperCase()}${c.audited_at?` · signed off ${d(c.audited_at)}${c.audited_by&&umap[c.audited_by]?(' by '+esc(umap[c.audited_by])):''}`:' · not yet audited'}</div>
+
+    <h2>Candidate</h2>
+    <div class="grid">
+      <div><b>Name:</b> ${esc(c.first_name)} ${esc(c.last_name)}</div>
+      <div><b>Date of birth:</b> ${d(c.dob)}</div>
+      <div><b>Profession:</b> ${esc(c.disciplines?.name)||'—'}${c.specialties?.name?(' · '+esc(c.specialties.name)):''}</div>
+      <div><b>Desk:</b> ${esc(c.desks?.name)||'—'}</div>
+      <div><b>Registration:</b> ${esc(c.registration_body)||'—'} ${esc(c.registration_number)||''}</div>
+      <div><b>Right to work:</b> ${esc(c.right_to_work_status)||'—'}</div>
+      <div><b>NI number:</b> ${esc(c.ni_number)||'—'}</div>
+      <div><b>Email / phone:</b> ${esc(c.email)||'—'} · ${esc(c.phone)||'—'}</div>
+      <div><b>Address:</b> ${esc(c.address)||'—'}, ${esc(c.town)||''} ${esc(c.postcode)||''}</div>
+      <div><b>Registered:</b> ${d(c.created_at)}</div>
+    </div>
+
+    <h2>Compliance requirements</h2>
+    <table><thead><tr><th>Requirement</th><th>Status</th><th>Received</th><th>Expires</th><th>Evidence</th><th>Checker / notes</th></tr></thead><tbody>
+    ${it.map(x=>`<tr>
+      <td>${esc(x.compliance_requirements?.name)||'—'}</td>
+      <td class="st ${statusClass(x.status,x.needs_human)}">${x.needs_human?'needs review':esc(x.status)}</td>
+      <td>${d(x.received_at)}</td>
+      <td>${d(x.expires_at)}</td>
+      <td>${x.artefact_path?'On file (secure)':'—'}</td>
+      <td>${x.decided_by&&umap[x.decided_by]?esc(umap[x.decided_by])+'<br>':''}${esc(x.human_notes)||''}</td>
+    </tr>`).join('')||'<tr><td colspan="6" class="muted">No requirements.</td></tr>'}
+    </tbody></table>
+
+    <h2>3-year reference coverage</h2>
+    ${cov?(cov.covered?'<p class="ok st">✓ Continuous employment covered for the last 3 years.</p>':(cov.entries===0?'<p class="warn st">⚠ No employment history recorded.</p>':`<p class="warn st">⚠ ${cov.gaps.length} gap(s):</p><ul>${cov.gaps.map(g=>`<li>${g.from} → ${g.to} (${g.days} days)</li>`).join('')}</ul>`)):'<p class="muted">—</p>'}
+
+    <h2>Employment history</h2>
+    <table><thead><tr><th>Employer</th><th>Role</th><th>From</th><th>To</th><th>Source</th></tr></thead><tbody>
+    ${(emp||[]).map(e=>`<tr><td>${esc(e.employer)}</td><td>${esc(e.job_title)||'—'}</td><td>${d(e.start_date)}</td><td>${e.end_date?d(e.end_date):'current'}</td><td>${esc(e.source)||''}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">None recorded.</td></tr>'}
+    </tbody></table>
+
+    <h2>Consent</h2>
+    ${(cons||[]).map(x=>`<div>${x.granted?'✓':'✗'} ${esc(x.purpose)} (${esc(x.basis)}) — ${d(x.occurred_at)} · ${esc(x.evidence)||''}</div>`).join('')||'<p class="muted">None recorded.</p>'}
+
+    <div class="foot">This pack is generated from Day Webster's candidate compliance system. Documents are held securely; collected items are recorded as unverified until checked and signed off by a Day Webster compliance auditor. AI pre-checks assist review and are not a substitute for human verification.</div>
+  `;
+})();
+</script>
+</body>
+</html>
