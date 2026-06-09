@@ -60,16 +60,34 @@ function render(items) {
     btn.onclick = () => uploadFor(row);
   });
 }
+async function prepareFile(file) {
+  // Downscale large images in-browser so uploads are reliable.
+  if (file.type && file.type.startsWith('image/')) {
+    try {
+      const img = await createImageBitmap(file);
+      const max = 1800, scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = cv.toDataURL('image/jpeg', 0.82);
+      return { b64: dataUrl.split(',')[1], type: 'image/jpeg', name: file.name.replace(/\.[^.]+$/, '') + '.jpg' };
+    } catch (_) { /* fall through to raw */ }
+  }
+  const b64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.toString().split(',')[1]); r.readAsDataURL(file); });
+  return { b64, type: file.type || 'application/octet-stream', name: file.name };
+}
 async function uploadFor(row) {
   const file = row.querySelector('input[type=file]').files[0];
   const s = row.querySelector('.s'); const btn = row.querySelector('button');
   if (!file) { s.textContent = 'Choose a file first.'; return; }
-  if (file.size > 5.2 * 1024 * 1024) { s.textContent = 'Too big (max ~5MB).'; return; }
   btn.disabled = true; s.textContent = 'Uploading…';
-  const b64 = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.toString().split(',')[1]); r.readAsDataURL(file); });
-  const out = await api({ action:'upload', item_id: row.dataset.item || null, requirement_id: row.dataset.req || null, filename: file.name, content_type: file.type, content_base64: b64 });
-  if (out.ok) { $('msg').textContent = 'Thank you — that’s with our team. ✓'; render(out.items); }
-  else { s.textContent = out.message || 'Upload failed — please try again.'; btn.disabled = false; }
+  try {
+    const { b64, type, name } = await prepareFile(file);
+    if (b64.length > 13000000) { s.textContent = 'That file’s too big — please upload a smaller scan, or email it to compliance@daywebster.com.'; btn.disabled = false; return; }
+    const out = await api({ action: 'upload', item_id: row.dataset.item || null, requirement_id: row.dataset.req || null, filename: name, content_type: type, content_base64: b64 });
+    if (out.ok) { $('msg').textContent = 'Thank you — that’s with our team. ✓'; render(out.items); }
+    else { s.textContent = out.message || 'Upload failed — please try again.'; btn.disabled = false; }
+  } catch (e) { s.textContent = 'Upload failed — please try again.'; btn.disabled = false; }
 }
 
 async function start() {
