@@ -162,7 +162,7 @@ async function openCandidate(id) {
     sb.from('employment').select('*').eq('candidate_id',id).order('start_date',{ascending:false}),
     sb.from('messages').select('*').eq('candidate_id',id).order('created_at'),
     sb.from('consent').select('*').eq('candidate_id',id).order('occurred_at',{ascending:false}),
-    sb.from('compliance_items').select('id,status,channel,needs_human,human_notes,expires_at,artefact_path,compliance_requirements(name)').eq('candidate_id',id).order('created_at'),
+    sb.from('compliance_items').select('id,status,channel,needs_human,human_notes,expires_at,artefact_path,ai_review,compliance_requirements(name)').eq('candidate_id',id).order('created_at'),
   ]);
   current = c;
   $('dName').textContent = `${c.first_name||''} ${c.last_name||''}`.trim() || c.email || 'Candidate';
@@ -222,8 +222,15 @@ async function openCandidate(id) {
         <strong>${esc(it.compliance_requirements?.name)||'(unlabelled)'}</strong>
         <span class="pill ${it.needs_human?'flag':''}">${it.needs_human?'needs review':it.status}</span>
         ${it.human_notes?`<div class="muted">${esc(it.human_notes)}</div>`:''}
+        ${it.ai_review?`<div style="margin-top:6px; padding:8px 10px; background:var(--field); border-radius:10px; font-size:12.5px;">
+          <strong>AI pre-check${it.ai_review.confidence?` · ${esc(it.ai_review.confidence)} confidence`:''}</strong>
+          ${(it.ai_review.issues&&it.ai_review.issues.length)?`<ul style="margin:6px 0 0; padding-left:18px;">${it.ai_review.issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<div class="muted" style="margin-top:4px;">No issues spotted — for audit.</div>'}
+          ${it.ai_review.candidate_feedback?`<div style="margin-top:6px;"><em>Suggested message:</em> ${esc(it.ai_review.candidate_feedback)}</div>`:''}
+          ${it.ai_review.note?`<div class="muted" style="margin-top:4px;">${esc(it.ai_review.note)}</div>`:''}
+        </div>`:''}
         ${(it.artefact_path || it.needs_human)?`<div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
           ${it.artefact_path?`<button class="btn sm secondary" data-view="${esc(it.artefact_path)}">View document</button>`:''}
+          ${it.artefact_path?`<button class="btn sm secondary" data-airev="${it.id}">${it.ai_review?'Re-run AI review':'Run AI review'}</button>`:''}
           ${it.needs_human?`<button class="btn sm" data-resolve="${it.id}" data-st="verified">Mark verified</button><button class="btn sm secondary" data-resolve="${it.id}" data-st="unsuitable">Mark unsuitable</button>`:''}
         </div>`:''}
       </div>`).join('') || '<span class="muted">None requested yet.</span>'}
@@ -246,6 +253,7 @@ async function openCandidate(id) {
   $('reqUpdateBtn').onclick = () => setComp('requires_update');
   $('detail').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>resolveItem(b.dataset.resolve,b.dataset.st));
   $('detail').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>viewDoc(b.dataset.view));
+  $('detail').querySelectorAll('[data-airev]').forEach(b=>b.onclick=()=>aiReview(b.dataset.airev,b));
 }
 $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); current=null; };
 
@@ -283,6 +291,20 @@ async function setComp(s) {
   const { error } = await sb.from('candidates').update({ compliance_status: s }).eq('id', current.id);
   $('compMsg').textContent = error ? error.message : 'Updated ✓';
   if (!error) openCandidate(current.id);
+}
+async function aiReview(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Reviewing…'; }
+  const { data:{ session } } = await sb.auth.getSession();
+  try {
+    const res = await fetch(window.CONFIG.SUPABASE_URL + '/functions/v1/review-document', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'apikey':window.CONFIG.SUPABASE_ANON_KEY, 'Authorization':'Bearer '+(session?.access_token??'') },
+      body: JSON.stringify({ item_id: id }),
+    });
+    const out = await res.json();
+    if (out.error) alert('AI review: ' + out.error);
+    if (current) openCandidate(current.id);
+  } catch (e) { alert('AI review failed: ' + e); if (btn) { btn.disabled = false; btn.textContent = 'Run AI review'; } }
 }
 async function viewDoc(path) {
   const { data, error } = await sb.storage.from('candidate-docs').createSignedUrl(path, 300);
