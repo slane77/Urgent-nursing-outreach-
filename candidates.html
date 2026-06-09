@@ -162,7 +162,7 @@ async function openCandidate(id) {
     sb.from('employment').select('*').eq('candidate_id',id).order('start_date',{ascending:false}),
     sb.from('messages').select('*').eq('candidate_id',id).order('created_at'),
     sb.from('consent').select('*').eq('candidate_id',id).order('occurred_at',{ascending:false}),
-    sb.from('compliance_items').select('id,status,channel,needs_human,human_notes,expires_at,compliance_requirements(name)').eq('candidate_id',id).order('created_at'),
+    sb.from('compliance_items').select('id,status,channel,needs_human,human_notes,expires_at,artefact_path,compliance_requirements(name)').eq('candidate_id',id).order('created_at'),
   ]);
   current = c;
   $('dName').textContent = `${c.first_name||''} ${c.last_name||''}`.trim() || c.email || 'Candidate';
@@ -222,7 +222,10 @@ async function openCandidate(id) {
         <strong>${esc(it.compliance_requirements?.name)||'(unlabelled)'}</strong>
         <span class="pill ${it.needs_human?'flag':''}">${it.needs_human?'needs review':it.status}</span>
         ${it.human_notes?`<div class="muted">${esc(it.human_notes)}</div>`:''}
-        ${it.needs_human?`<div style="margin-top:6px; display:flex; gap:6px;"><button class="btn sm" data-resolve="${it.id}" data-st="verified">Mark verified</button><button class="btn sm secondary" data-resolve="${it.id}" data-st="unsuitable">Mark unsuitable</button></div>`:''}
+        ${(it.artefact_path || it.needs_human)?`<div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+          ${it.artefact_path?`<button class="btn sm secondary" data-view="${esc(it.artefact_path)}">View document</button>`:''}
+          ${it.needs_human?`<button class="btn sm" data-resolve="${it.id}" data-st="verified">Mark verified</button><button class="btn sm secondary" data-resolve="${it.id}" data-st="unsuitable">Mark unsuitable</button>`:''}
+        </div>`:''}
       </div>`).join('') || '<span class="muted">None requested yet.</span>'}
     </div>
 
@@ -242,6 +245,7 @@ async function openCandidate(id) {
   $('copyLinkBtn').onclick = copyPortalLink;
   $('reqUpdateBtn').onclick = () => setComp('requires_update');
   $('detail').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>resolveItem(b.dataset.resolve,b.dataset.st));
+  $('detail').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>viewDoc(b.dataset.view));
 }
 $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); current=null; };
 
@@ -279,6 +283,11 @@ async function setComp(s) {
   const { error } = await sb.from('candidates').update({ compliance_status: s }).eq('id', current.id);
   $('compMsg').textContent = error ? error.message : 'Updated ✓';
   if (!error) openCandidate(current.id);
+}
+async function viewDoc(path) {
+  const { data, error } = await sb.storage.from('candidate-docs').createSignedUrl(path, 300);
+  if (error || !data?.signedUrl) { alert('Could not open document: ' + (error?.message || 'unknown error')); return; }
+  window.open(data.signedUrl, '_blank');
 }
 async function copyPortalLink() {
   if (!current?.portal_token) { $('compMsg').textContent = 'No portal link for this candidate.'; return; }
