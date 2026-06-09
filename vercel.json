@@ -5,6 +5,7 @@
     { "source": "/join", "destination": "/intake.html" },
     { "source": "/chat", "destination": "/chat.html" },
     { "source": "/portal", "destination": "/portal.html" },
+    { "source": "/audit-pack", "destination": "/audit-pack.html" },
     { "source": "/documents", "destination": "/portal.html" },
     { "source": "/poster", "destination": "/register-poster.html" },
     { "source": "/qr", "destination": "/qr.html" }

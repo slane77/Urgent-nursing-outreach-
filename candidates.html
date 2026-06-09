@@ -70,7 +70,7 @@
 <!-- DETAIL PANEL -->
 <div class="overlay hidden" id="overlay">
   <div class="panel">
-    <header><h1 id="dName">—</h1><button class="btn secondary sm" id="closePanel" style="margin-left:auto">Close</button></header>
+    <header><h1 id="dName">—</h1><button class="btn secondary sm" id="auditPackBtn" style="margin-left:auto">Audit pack</button><button class="btn secondary sm" id="closePanel">Close</button></header>
     <div class="body" id="detail"></div>
   </div>
 </div>
@@ -157,12 +157,13 @@ $('next').onclick = () => { state.page++; loadList(); };
 // ---- Detail panel ----
 let current = null;
 async function openCandidate(id) {
-  const [{ data:c }, { data:emp }, { data:msgs }, { data:cons }, { data:items }] = await Promise.all([
+  const [{ data:c }, { data:emp }, { data:msgs }, { data:cons }, { data:items }, { data:cov }] = await Promise.all([
     sb.from('candidates').select('*').eq('id',id).maybeSingle(),
     sb.from('employment').select('*').eq('candidate_id',id).order('start_date',{ascending:false}),
     sb.from('messages').select('*').eq('candidate_id',id).order('created_at'),
     sb.from('consent').select('*').eq('candidate_id',id).order('occurred_at',{ascending:false}),
     sb.from('compliance_items').select('id,status,channel,needs_human,human_notes,expires_at,artefact_path,ai_review,compliance_requirements(name)').eq('candidate_id',id).order('created_at'),
+    sb.rpc('reference_coverage', { p_candidate:id, p_years:3 }),
   ]);
   current = c;
   $('dName').textContent = `${c.first_name||''} ${c.last_name||''}`.trim() || c.email || 'Candidate';
@@ -238,6 +239,7 @@ async function openCandidate(id) {
 
     <div class="card">
       <h4 style="margin-top:0">Employment history</h4>
+      ${cov?`<div class="muted" style="margin-bottom:8px;">3-year reference coverage: ${cov.covered?'<span style="color:var(--green);font-weight:600;">✓ complete</span>':(cov.entries===0?'<span style="color:#b45309;font-weight:600;">⚠ no history recorded</span>':`<span style="color:#b45309;font-weight:600;">⚠ ${cov.gaps.length} gap(s)</span> — ${cov.gaps.map(g=>g.from+'→'+g.to+' ('+g.days+'d)').join(', ')}`)}</div>`:''}
       <ul class="timeline">${(emp??[]).map(e=>`<li><strong>${esc(e.employer)}</strong> ${esc(e.job_title)?'· '+esc(e.job_title):''} <span class="muted">(${e.start_date||'?'} → ${e.end_date||'current'})</span></li>`).join('')||'<span class="muted">None recorded.</span>'}</ul>
       <h4>Consent</h4>
       ${(cons??[]).map(c=>`<div class="muted">${c.granted?'✓':'✗'} ${c.purpose} (${c.basis}) — ${(c.occurred_at||'').slice(0,10)}</div>`).join('')||'<span class="muted">No consent recorded.</span>'}
@@ -256,6 +258,7 @@ async function openCandidate(id) {
   $('detail').querySelectorAll('[data-airev]').forEach(b=>b.onclick=()=>aiReview(b.dataset.airev,b));
 }
 $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); current=null; };
+$('auditPackBtn').onclick = () => { if (current) window.open('audit-pack.html?id=' + current.id, '_blank'); };
 
 async function saveProfile() {
   const patch = {
