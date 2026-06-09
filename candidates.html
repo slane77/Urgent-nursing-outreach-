@@ -197,6 +197,7 @@ async function openCandidate(id) {
       <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <button class="btn sm" id="signoffBtn">Sign off → Maintenance</button>
         <button class="btn sm secondary" id="reqDocsBtn">Email document request</button>
+        <button class="btn sm secondary" id="copyLinkBtn">Copy portal link</button>
         <button class="btn sm secondary" id="reqUpdateBtn">Requires update</button>
         <span class="muted" id="compMsg"></span>
       </div>
@@ -238,6 +239,7 @@ async function openCandidate(id) {
   $('runBtn').onclick = runAgent;
   $('signoffBtn').onclick = signOff;
   $('reqDocsBtn').onclick = requestDocs;
+  $('copyLinkBtn').onclick = copyPortalLink;
   $('reqUpdateBtn').onclick = () => setComp('requires_update');
   $('detail').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>resolveItem(b.dataset.resolve,b.dataset.st));
 }
@@ -277,6 +279,12 @@ async function setComp(s) {
   const { error } = await sb.from('candidates').update({ compliance_status: s }).eq('id', current.id);
   $('compMsg').textContent = error ? error.message : 'Updated ✓';
   if (!error) openCandidate(current.id);
+}
+async function copyPortalLink() {
+  if (!current?.portal_token) { $('compMsg').textContent = 'No portal link for this candidate.'; return; }
+  const link = window.location.origin + '/portal?t=' + current.portal_token;
+  try { await navigator.clipboard.writeText(link); $('compMsg').textContent = 'Portal link copied ✓'; }
+  catch { prompt('Copy this candidate’s portal link:', link); }
 }
 async function requestDocs() {
   if (!current?.portal_token) { $('compMsg').textContent = 'No portal link for this candidate.'; return; }
