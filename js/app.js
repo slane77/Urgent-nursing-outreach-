@@ -2769,6 +2769,48 @@ function renderSpecKeywordsSection() {
     + '</div>';
 }
 
+async function loadAutoUnsubOrgs() {
+  try {
+    var res = await sb.from('auto_unsub_orgs').select('*').order('label', { ascending: true });
+    state.autoUnsubOrgs = res.data || [];
+  } catch (e) { state.autoUnsubOrgs = []; }
+  render();
+}
+
+async function addAutoUnsubOrg() {
+  var nameEl = document.getElementById('unsub-org-input');
+  var name = ((nameEl ? nameEl.value : (state.unsubOrgInput || '')) || '').trim();
+  if (!name) { state.unsubOrgMsg = 'Enter an organisation name first.'; render(); return; }
+  state.unsubOrgAdding = true; state.unsubOrgMsg = ''; render();
+  try {
+    var pattern = '%' + name + '%';
+    var ins = await sb.from('auto_unsub_orgs').insert({ pattern: pattern, label: name });
+    if (ins.error && ins.error.code !== '23505') throw ins.error;
+    var upd = await sb.from('contacts').update({ status: 'unsubscribed', updated_at: new Date().toISOString() }).ilike('org', pattern).neq('status', 'unsubscribed').select('id');
+    var n = (upd.data || []).length;
+    state.unsubOrgInput = '';
+    state.unsubOrgMsg = 'Added. ' + n + ' existing contact(s) moved to Unsubscribed.';
+    await loadAutoUnsubOrgs();
+    if (typeof loadStatusCounts === 'function') await loadStatusCounts();
+    if (typeof loadSourceCounts === 'function') await loadSourceCounts();
+  } catch (e) {
+    state.unsubOrgMsg = 'Error: ' + (e.message || e);
+  }
+  state.unsubOrgAdding = false; render();
+}
+
+async function removeAutoUnsubOrg(pattern) {
+  if (!window.confirm('Remove this organisation from the Do Not Email list? Existing contacts stay Unsubscribed; only future scrapes will be allowed through.')) return;
+  try {
+    var del = await sb.from('auto_unsub_orgs').delete().eq('pattern', pattern);
+    if (del.error) throw del.error;
+    await loadAutoUnsubOrgs();
+  } catch (e) {
+    state.unsubOrgMsg = 'Error removing: ' + (e.message || e);
+    render();
+  }
+}
+
 function renderSettings() {
   var isAdmin = !state.userProfile || state.userProfile.role === 'admin';
 
@@ -2862,10 +2904,32 @@ function renderSettings() {
   }
 
   var kwSection = renderSpecKeywordsSection();
+    var blockRows = (state.autoUnsubOrgs || []).map(function(o){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);">'
+      + '<span style="font-size:13px;">' + esc(o.label || o.pattern) + '</span>'
+      + '<button class="btn" data-unsub-del="' + esc(o.pattern) + '" style="padding:3px 12px;font-size:12px;">Remove</button>'
+      + '</div>';
+  }).join('');
+  var blockSection = '<div class="settings-section">'
+    + '<h3 class="settings-section-title">&#x1F6AB; Do Not Email (Auto-Unsubscribe)</h3>'
+    + '<p class="muted" style="font-size:12px;margin-bottom:10px;">These organisations are still scraped, but every contact at them is automatically set to Unsubscribed so they are never emailed. Add an organisation when a client asks not to be contacted; remove it to allow emailing again. Matching is by partial name, so &ldquo;Barts Health&rdquo; also covers &ldquo;Barts Health NHS Trust&rdquo;.</p>'
+    + '<div class="import-form-row" style="max-width:580px;align-items:flex-end;">'
+    + '<div class="field" style="flex:1;"><label>Organisation name</label>'
+    + '<input class="search" id="unsub-org-input" placeholder="e.g. Barts Health NHS Trust" value="' + esc(state.unsubOrgInput || '') + '" /></div>'
+    + '<button class="btn primary" id="unsub-org-add"' + (state.unsubOrgAdding ? ' disabled' : '') + '>'
+    + (state.unsubOrgAdding ? '<span class="spinner-inline"></span> Adding&hellip;' : '&#x2B; Add to list')
+    + '</button>'
+    + '</div>'
+    + (state.unsubOrgMsg ? '<p class="muted" style="font-size:12px;margin-top:8px;">' + esc(state.unsubOrgMsg) + '</p>' : '')
+    + '<div style="margin-top:14px;max-width:580px;">'
+    + (blockRows || '<p class="muted" style="font-size:12px;">No organisations on the list yet.</p>')
+    + '</div>'
+    + '</div>';
   return '<div class="settings-wrap">'
     + senderSection
     + teamSection
     + kwSection
+    + blockSection
     + '<div class="settings-section">'
     + '<h3 class="settings-section-title">&#x1F4E4; Export Data</h3>'
     + '<p class="muted" style="font-size:12px;margin-bottom:10px;">Download all contacts as CSV for backup or analysis.</p>'
@@ -2993,7 +3057,7 @@ function bindEvents() {
       if (state.view === 'compose') { state.composePreviewCounts = null; state.composeBrevoResult = null; }
       if (state.view === 'import') state.importResult = null;
       if (state.view === 'responses') { loadResponsesData(); return; }
-      if (state.view === 'settings') { loadTeamUsers(); }
+      if (state.view === 'settings') { loadTeamUsers(); loadAutoUnsubOrgs(); }
       render();
     };
   });
@@ -3340,6 +3404,11 @@ function bindEvents() {
   var snd_name = $('#sender-name-input'); if (snd_name) snd_name.oninput = function(e) { state.senderName = e.target.value; };
   var snd_email = $('#sender-email-input'); if (snd_email) snd_email.oninput = function(e) { state.senderEmail = e.target.value; };
   var snd_save = $('#save-sender-btn'); if (snd_save) snd_save.onclick = function() { if (!state.senderSaving) saveSenderDetails(); };
+    var unsubAddBtn = document.getElementById('unsub-org-add');
+  if (unsubAddBtn) unsubAddBtn.onclick = function(){ if (!state.unsubOrgAdding) addAutoUnsubOrg(); };
+  var unsubOrgInputEl = document.getElementById('unsub-org-input');
+  if (unsubOrgInputEl) unsubOrgInputEl.oninput = function(e){ state.unsubOrgInput = e.target.value; };
+  document.querySelectorAll('[data-unsub-del]').forEach(function(b){ b.onclick = function(){ removeAutoUnsubOrg(b.getAttribute('data-unsub-del')); }; });
   document.querySelectorAll('[data-kw-del]').forEach(function(btn){
     btn.onclick = async function(){
       try { await sb.from('specialty_title_keywords').delete().eq('id', parseInt(btn.dataset.kwDel, 10)); }
