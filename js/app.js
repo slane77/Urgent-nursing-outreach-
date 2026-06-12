@@ -1307,7 +1307,7 @@ function renderCompose() {
 
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
         <button class="btn primary" id="brevo-filter-send-btn" ${!template || !previewMatch ? 'disabled' : ''}>
-          ${state.composeBrevoSending ? '<span class="spinner-inline"></span> Sending&hellip;' : '&#9654;&nbsp;Send all ' + previewMatch + ' Emails via Brevo' + (previewMatch > 250 ? ' (' + Math.ceil(previewMatch/250) + ' batches)' : '')}
+          ${state.composeBrevoSending ? '<span class="spinner-inline"></span> Sending&hellip;' : icon('mail') + '&nbsp;Send all ' + previewMatch + ' Emails via Brevo' + (previewMatch > 250 ? ' (' + Math.ceil(previewMatch/250) + ' batches)' : '')}
         </button>
         ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
         ${!previewMatch ? '<span class="muted" style="font-size:12px;">No contacts match — adjust filters</span>' : ''}
@@ -1368,7 +1368,7 @@ function renderBrevoSend() {
         <button class="btn primary" id="brevo-send-btn" ${!template || state.composeBrevoSending ? 'disabled' : ''}>
           ${state.composeBrevoSending
             ? '<span class="spinner-inline"></span> Sending via Brevo&hellip;'
-            : '&#9654;&nbsp;Send ' + ids.length + ' Emails via Brevo'}
+            : icon('mail') + '&nbsp;Send ' + ids.length + ' Emails via Brevo'}
         </button>
         ${!template ? '<span class="muted" style="font-size:12px;">Select a template above first</span>' : ''}
       </div>
@@ -1668,6 +1668,29 @@ async function runTheatreScrape() {
   state.theatreRunning = false; render();
 }
 
+function icon(name, size) {
+  var s = size || 18;
+  var P = {
+    activity: '<path d="M22 12h-4l-3 8L9 4l-3 8H2"/>',
+    flag: '<path d="M4 22V4"/><path d="M4 4c4-2 8 2 12 0v9c-4 2-8-2-12 0"/>',
+    folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
+    building: '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2"/>',
+    mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+    download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
+    user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    ban: '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+    upload: '<path d="M12 17V5"/><path d="m7 10 5-5 5 5"/><path d="M5 21h14"/>',
+    play: '<path d="M7 4.5v15l12-7.5z"/>',
+    refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>',
+  };
+  return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (P[name] || '') + '</svg>';
+}
+
 async function runScotlandScrape() {
   state.scotRunning = true; state.scotResult = null; render();
   try {
@@ -1932,7 +1955,7 @@ function renderImport() {
 
       <div class="import-card">
         <div class="import-card-header">
-          <div class="import-card-icon">🏥</div>
+          <div class="import-card-icon">${icon('activity',22)}</div>
           <div class="import-card-meta">
             <div class="import-card-title">NHS Jobs — AHP Contacts</div>
             <div class="import-card-sub">Claude agent searches NHS Jobs and extracts hiring manager contacts from job postings</div>
@@ -1970,13 +1993,13 @@ function renderImport() {
           </div>
           <div class="import-form-actions">
             <button class="btn primary" id="run-scrape-btn" ${state.importRunning || state.importSweepRunning ? 'disabled' : ''}>
-              ${state.importRunning ? '<span class="spinner-inline"></span> Scraping NHS Jobs&hellip;' : '&#9654; Run Scraper'}
+              ${state.importRunning ? '<span class="spinner-inline"></span> Scraping NHS Jobs&hellip;' : icon('play') + ' Run Scraper'}
             </button>
             <button class="btn" id="run-scrape-all-btn" ${state.importRunning || state.importSweepRunning ? 'disabled' : ''}>
-              ${state.importSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : '&#9851; Scrape ALL'}
+              ${state.importSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : icon('refresh') + ' Scrape ALL'}
             </button>
             <button class="btn" id="run-scrape-every-btn" ${state.importRunning || state.importSweepRunning ? 'disabled' : ''}>
-              ${state.importSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : '&#9851; Scrape ALL Specialties'}
+              ${state.importSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : icon('refresh') + ' Scrape ALL Specialties'}
             </button>
             <span class="import-hint">Run Scraper grabs up to 50. Scrape ALL sweeps this specialty; Scrape ALL Specialties sweeps every specialty (can take several minutes).</span>
           </div>
@@ -2013,7 +2036,7 @@ function renderImport() {
       <!-- NHS Scotland scraper -->
       <div class="import-card">
         <div class="import-card-header">
-          <div class="import-card-icon">&#127988;</div>
+          <div class="import-card-icon">${icon('flag',22)}</div>
           <div class="import-card-meta">
             <div class="import-card-title">NHS Scotland - AHP Contacts</div>
             <div class="import-card-sub">Scrapes apply.jobs.scot.nhs.uk (JobTrain) for AHP vacancies and pulls the named hiring contact, role, band and town across all Scottish health boards.</div>
@@ -2031,10 +2054,10 @@ function renderImport() {
           </div>
           <div class="import-form-actions">
             <button class="btn primary" id="run-scot-btn" ${state.scotRunning || state.scotSweepRunning ? 'disabled' : ''}>
-              ${state.scotRunning ? '<span class="spinner-inline"></span> Scraping NHS Scotland&hellip;' : '&#9654; Run Scraper'}
+              ${state.scotRunning ? '<span class="spinner-inline"></span> Scraping NHS Scotland&hellip;' : icon('play') + ' Run Scraper'}
             </button>
             <button class="btn" id="run-scot-all-btn" ${state.scotRunning || state.scotSweepRunning ? 'disabled' : ''}>
-              ${state.scotSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : '&#9851; Scrape ALL Specialties'}
+              ${state.scotSweepRunning ? '<span class="spinner-inline"></span> Sweeping&hellip;' : icon('refresh') + ' Scrape ALL Specialties'}
             </button>
             <span class="import-hint">Run Scraper grabs the selected specialty. Scrape ALL Specialties sweeps every AHP specialty across all Scottish health boards (can take a couple of minutes).</span>
           </div>
@@ -2052,7 +2075,7 @@ function renderImport() {
             <!-- Agency Outreach CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
-          <div class="import-card-icon">📂</div>
+          <div class="import-card-icon">${icon('folder',22)}</div>
           <div class="import-card-meta">
             <div class="import-card-title">Contact List — CSV Upload</div>
             <div class="import-card-sub">Upload any contact CSV. Supports GP Surgeries, Agency Outreach and all other sources. Auto-maps columns: name, email, org, job title, phone, region/geographic area, town etc.</div>
@@ -2127,7 +2150,7 @@ function renderImport() {
             <!-- Care Homes CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
-          <div class="import-card-icon">&#x1F3E1;</div>
+          <div class="import-card-icon">${icon('home',22)}</div>
           <div class="import-card-meta">
             <div class="import-card-title">Care Homes — CSV Upload</div>
             <div class="import-card-sub">Upload a CSV of care home contacts. Auto-detects name, email, phone, home name, town and region. Tag your contacts as Care Home in the source dropdown.</div>
@@ -2146,7 +2169,7 @@ function renderImport() {
             <!-- Theatres CSV Upload -->
       <div class="import-card">
         <div class="import-card-header">
-          <div class="import-card-icon">&#x1F3E8;</div>
+          <div class="import-card-icon">${icon('building',22)}</div>
           <div class="import-card-meta">
             <div class="import-card-title">Private Hospitals — Theatre Managers CSV</div>
             <div class="import-card-sub">Upload a CSV of private hospital theatre manager contacts. Auto-detects name, email, phone, hospital name, town and region.</div>
@@ -2297,10 +2320,10 @@ function renderDashboard() {
           <div class="dash-card">
             <div class="dash-card-title">Quick actions</div>
             <div class="dash-actions">
-              <button class="btn primary dash-action-btn" data-dash-action="compose">✉ Send outreach batch</button>
-              <button class="btn dash-action-btn" data-dash-action="import">⬇ Import AHP contacts</button>
-              <button class="btn dash-action-btn" data-dash-action="database">📋 View all contacts</button>
-              <button class="btn dash-action-btn" data-dash-action="followup">🔔 Follow-ups due (${t.followUpsDue || 0})</button>
+              <button class="btn primary dash-action-btn" data-dash-action="compose">${icon('mail')} Send outreach batch</button>
+              <button class="btn dash-action-btn" data-dash-action="import">${icon('download')} Import AHP contacts</button>
+              <button class="btn dash-action-btn" data-dash-action="database">${icon('list')} View all contacts</button>
+              <button class="btn dash-action-btn" data-dash-action="followup">${icon('bell')} Follow-ups due (${t.followUpsDue || 0})</button>
             </div>
           </div>
 
@@ -2754,7 +2777,7 @@ async function loadSpecKeywords() {
 function renderSpecKeywordsSection() {
   if (!specKw.loaded) {
     if (!specKw.loading) loadSpecKeywords();
-    return '<div class="settings-section"><h3 class="settings-section-title">&#x1F50D; Vacancy Title Keywords</h3><p class="muted" style="font-size:12px;">Loading keywords&hellip;</p></div>';
+    return '<div class="settings-section"><h3 class="settings-section-title">' + icon('search') + ' Vacancy Title Keywords</h3><p class="muted" style="font-size:12px;">Loading keywords&hellip;</p></div>';
   }
   var byspec = {};
   specKw.rows.forEach(function(r){ (byspec[r.specialty] = byspec[r.specialty] || []).push(r); });
@@ -2776,7 +2799,7 @@ function renderSpecKeywordsSection() {
       + '</div>';
   }).join('');
   return '<div class="settings-section">'
-    + '<h3 class="settings-section-title">&#x1F50D; Vacancy Title Keywords</h3>'
+    + '<h3 class="settings-section-title">' + icon('search') + ' Vacancy Title Keywords</h3>'
     + '<p class="muted" style="font-size:12px;margin-bottom:14px;">A job is scraped into a source only if its <strong>vacancy title</strong> contains one of these terms. Add spelling variants (e.g. &ldquo;medicine management&rdquo; vs &ldquo;medicines management&rdquo;) to catch more roles, or remove terms that pull in the wrong jobs. Matching is case-insensitive partial match. Changes take effect on the next scrape.</p>'
     + blocks
     + '</div>';
@@ -2841,7 +2864,7 @@ function renderSettings() {
 
   // Build sender section
   var senderSection = '<div class="settings-section">'
-    + '<h3 class="settings-section-title">&#x2709; My Sender Details</h3>'
+    + '<h3 class="settings-section-title">' + icon('mail') + ' My Sender Details</h3>'
     + '<p class="muted" style="font-size:12px;margin-bottom:12px;">Emails you send will come from this name and address. Must be verified in Brevo (Senders &amp; IPs &rarr; Add sender).</p>'
     + '<div class="import-form-row" style="max-width:520px;">'
     + '<div class="field"><label>Your Name</label>'
@@ -2891,7 +2914,7 @@ function renderSettings() {
     }
 
     teamSection = '<div class="settings-section">'
-      + '<h3 class="settings-section-title">&#x1F465; Team Management</h3>'
+      + '<h3 class="settings-section-title">' + icon('users') + ' Team Management</h3>'
       + '<p class="muted" style="font-size:12px;margin-bottom:12px;">Invite team members and control which data sources they can access. Each user only sees their assigned sources.</p>'
       + '<div class="team-invite-form">'
       + '<div class="import-form-row">'
@@ -2924,7 +2947,7 @@ function renderSettings() {
       + '</div>';
   }).join('');
   var blockSection = '<div class="settings-section">'
-    + '<h3 class="settings-section-title">&#x1F6AB; Do Not Email (Auto-Unsubscribe)</h3>'
+    + '<h3 class="settings-section-title">' + icon('ban') + ' Do Not Email (Auto-Unsubscribe)</h3>'
     + '<p class="muted" style="font-size:12px;margin-bottom:10px;">These organisations are still scraped, but every contact at them is automatically set to Unsubscribed so they are never emailed. Add an organisation when a client asks not to be contacted; remove it to allow emailing again. Matching is by partial name, so &ldquo;Barts Health&rdquo; also covers &ldquo;Barts Health NHS Trust&rdquo;.</p>'
     + '<div class="import-form-row" style="max-width:580px;align-items:flex-end;">'
     + '<div class="field" style="flex:1;"><label>Organisation name</label>'
@@ -2944,12 +2967,12 @@ function renderSettings() {
     + kwSection
     + blockSection
     + '<div class="settings-section">'
-    + '<h3 class="settings-section-title">&#x1F4E4; Export Data</h3>'
+    + '<h3 class="settings-section-title">' + icon('upload') + ' Export Data</h3>'
     + '<p class="muted" style="font-size:12px;margin-bottom:10px;">Download all contacts as CSV for backup or analysis.</p>'
     + '<button class="btn primary" id="export-csv-all">&#x2B07; Export All Contacts as CSV</button>'
     + '</div>'
     + '<div class="settings-section">'
-    + '<h3 class="settings-section-title">&#x1F464; Account</h3>'
+    + '<h3 class="settings-section-title">' + icon('user') + ' Account</h3>'
     + '<p class="muted" style="font-size:12px;margin-bottom:10px;">Signed in as <strong>' + esc(state.user.email) + '</strong></p>'
     + '<button class="btn danger" id="sign-out-btn-settings">Sign Out</button>'
     + '</div>'
