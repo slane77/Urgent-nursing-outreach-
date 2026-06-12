@@ -456,7 +456,8 @@ async function loadSourceCounts() {
       .not('notes', 'ilike', '%Source: Care Home%')
       .not('notes', 'ilike', '%Source: CAMHS%')
       .not('notes', 'ilike', '%Source: ANP%')
-      .not('notes', 'ilike', '%Source: ENP%'),
+      .not('notes', 'ilike', '%Source: ENP%')
+      .not('notes', 'ilike', '%Source: NHS Scotland%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Source: ANP%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
@@ -476,6 +477,26 @@ async function loadSourceCounts() {
     enp:             enpRes.count     || 0,
     nhs_scotland:    scotRes.count    || 0,
   };
+  try {
+    var dayStart = new Date(); dayStart.setHours(0,0,0,0);
+    var tRes = await sb.from('contacts').select('notes').gte('created_at', dayStart.toISOString()).limit(3000);
+    var todayRows = tRes.data || [];
+    var tc = { all: todayRows.length, gp_surgery: 0, children_homes: 0, ahp: 0, agency: 0, private_theatre: 0, care_home: 0, anp: 0, enp: 0, nhs_scotland: 0 };
+    todayRows.forEach(function(r){
+      var n = (r.notes || '').toLowerCase();
+      if (n.indexOf('ofsted register') >= 0) { tc.children_homes++; }
+      else if (n.indexOf('source: nhs jobs ahp') >= 0) { tc.ahp++; }
+      else if (n.indexOf('source: nhs scotland') >= 0) { tc.nhs_scotland++; }
+      else if (n.indexOf('source: agency outreach') >= 0) { tc.agency++; }
+      else if (n.indexOf('source: theatres') >= 0) { tc.private_theatre++; }
+      else if (n.indexOf('source: care home') >= 0) { tc.care_home++; }
+      else if (n.indexOf('source: anp') >= 0) { tc.anp++; }
+      else if (n.indexOf('source: enp') >= 0) { tc.enp++; }
+      else if (n.indexOf('source: pharmacy') >= 0 || n.indexOf('source: bms') >= 0 || n.indexOf('source: sterile') >= 0 || n.indexOf('source: nhs staff bank') >= 0 || n.indexOf('source: camhs') >= 0) { }
+      else { tc.gp_surgery++; }
+    });
+    state.newTodayCounts = tc;
+  } catch (e) { state.newTodayCounts = null; }
 }
 
 async function loadContactsPage() {
@@ -821,6 +842,7 @@ function renderDatabase() {
         return `<button class="source-tab${isActive ? ' active' : ''}${isEmpty ? ' source-empty' : ''}" data-source="${s.key}">
           ${esc(s.label)}
           ${cnt != null ? `<span class="source-count${isEmpty ? ' zero' : ''}">${Number(cnt).toLocaleString()}</span>` : ''}
+          ${state.newTodayCounts && state.newTodayCounts[s.key] > 0 ? `<span class="source-new" style="background:#16A34A;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px;">+${state.newTodayCounts[s.key]} today</span>` : ''}
           ${s.key === 'children_homes' && cnt > 0 ? '<span class="source-warn" title="Most have placeholder emails — run enrichment from Import tab">⚠</span>' : ''}
         </button>`;
       }).join('')}
