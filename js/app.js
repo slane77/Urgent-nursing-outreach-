@@ -290,7 +290,7 @@ function renderAuthScreen(errorMsg, infoMsg, savedEmail) {
   return `
     <div class="auth-container">
       <div class="auth-card">
-        <img src="/dw-logo.jpg" alt="Day Webster Group" />
+        <img src="/dw-logo.svg" alt="Day Webster Group" />
         <h1>Day Webster Group Outreach</h1>
         <div class="subtitle">Sign in to continue</div>
         <div class="field">
@@ -774,7 +774,7 @@ function renderAppShell() {
   const totalCount = state.counts.lead + state.counts.live + state.counts.unsubscribed;
   return `
     <div class="header">
-      <img src="/dw-logo.jpg" alt="Day Webster Group" />
+      <img src="/dw-logo.svg" alt="Day Webster Group" />
       <h1>Day Webster Group Outreach</h1>
       <span class="badge">${state.counts.lead} Leads · ${state.counts.live} Live · ${state.counts.unsubscribed} Unsubs</span>
       <span class="user-pill">${esc(state.user.email)} <button id="sign-out-btn" title="Sign out">Sign out</button></span>
@@ -2240,12 +2240,12 @@ function renderDashboard() {
         <div class="dash-stat">
           <div class="dash-stat-val">${(t.sentThisWeek || 0).toLocaleString()}</div>
           <div class="dash-stat-lbl">Sent this week</div>
-          <div class="dash-stat-sub">${(t.sentThisMonth || 0).toLocaleString()} this month</div>
+          <div class="dash-stat-sub">${(t.sentToday || 0).toLocaleString()} today &middot; ${(t.sentThisMonth || 0).toLocaleString()} this month</div>
         </div>
         <div class="dash-stat">
-          <div class="dash-stat-val">${(p.live || 0).toLocaleString()}</div>
-          <div class="dash-stat-lbl">Live clients</div>
-          <div class="dash-stat-sub"><a class="dash-link" data-dash-action="compose">Send outreach →</a></div>
+          <div class="dash-stat-val">${(t.newToday || 0).toLocaleString()}</div>
+          <div class="dash-stat-lbl">New leads today</div>
+          <div class="dash-stat-sub">from scrapers &amp; uploads</div>
         </div>
       </div>
 
@@ -2270,33 +2270,24 @@ function renderDashboard() {
             </div>
           </div>
 
-          <!-- Source health -->
+          <!-- Emails sent by source -->
           <div class="dash-card">
-            <div class="dash-card-title">Data Sources</div>
-            <div class="dash-sources">
-              ${[
-                { key: 'gp_surgery', label: 'GP Surgeries', count: s.gp_surgery || 0, emailable: s.gp_surgery || 0, icon: '🏥' },
-                { key: 'children_homes', label: "Children's Homes", count: s.children_homes || 0, emailable: 0, icon: '🏠', warn: true },
-                { key: 'ahp', label: 'AHP (NHS Jobs)', count: s.ahp || 0, emailable: s.ahp || 0, icon: '⚕️' },
-              ].map(src => {
-                const pct = src.count ? Math.round((src.emailable / src.count) * 100) : 0;
-                const health = pct === 0 ? 'warn' : pct < 50 ? 'amber' : 'ok';
-                return `
-                  <div class="dash-source-row">
-                    <span class="dash-source-icon">${src.icon}</span>
-                    <span class="dash-source-name">${src.label}</span>
-                    <span class="dash-source-count">${src.count.toLocaleString()}</span>
-                    <span class="dash-source-health dash-health-${health}">${
-                      pct === 0 && src.count > 0 ? '⚠ No emails' : pct + '% emailable'
-                    }</span>
-                  </div>`;
-              }).join('')}
-            </div>
-            ${(s.children_homes || 0) > 0 ? `
-              <div class="dash-warn-banner">
-                ⚠ <strong>${(s.children_homes||0).toLocaleString()} Children's Homes</strong> have placeholder emails.
-                Add <code>ANTHROPIC_API_KEY</code> in Supabase Secrets then trigger the enrichment agent to find real emails.
-              </div>` : ''}
+            <div class="dash-card-title">Emails sent by source</div>
+            <div class="dash-sends-head"><span class="dash-sends-name"></span><span class="dash-sends-num">Today</span><span class="dash-sends-num">7 days</span><span class="dash-sends-num">30 days</span></div>
+            ${[
+              { key: 'ahp', label: 'AHP (NHS Jobs + Scotland)' },
+              { key: 'gp_surgery', label: 'GP Surgeries' },
+              { key: 'anp', label: 'ANP' },
+              { key: 'enp', label: 'ENP' },
+            ].map(row => {
+              const v = (d.sendsBySource || {})[row.key] || {};
+              return `<div class="dash-sends-row">
+                <span class="dash-sends-name">${row.label}</span>
+                <span class="dash-sends-num">${(v.today||0).toLocaleString()}</span>
+                <span class="dash-sends-num">${(v.week||0).toLocaleString()}</span>
+                <span class="dash-sends-num">${(v.month||0).toLocaleString()}</span>
+              </div>`;
+            }).join('')}
           </div>
         </div>
 
@@ -2317,7 +2308,7 @@ function renderDashboard() {
           <div class="dash-card">
             <div class="dash-card-title">Recent sends</div>
             ${recent.length === 0
-              ? `<p class="muted" style="font-size:12px;padding:8px 0;">No emails sent yet.<br>Set up Brevo API key and send your first batch.</p>`
+              ? `<p class="muted" style="font-size:12px;padding:8px 0;">No emails sent yet.</p>`
               : `<div class="dash-recent">
                   ${recent.map(r => {
                     const c = r.contacts || {};
