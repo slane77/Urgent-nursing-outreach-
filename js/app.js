@@ -1665,7 +1665,7 @@ async function runScotlandScrape() {
 async function runScotlandScrapeAll() {
   if (state.scotSweepRunning || state.scotRunning) return;
   state.scotSweepRunning = true; state.scotResult = null;
-  const specs = ['physiotherapy','occupational_therapy','radiography','speech_language','dietetics','podiatry','orthoptics','art_therapy','paramedic','prosthetics','pharmacy','biomedical_science','sterile_services','operating_theatres','audiology'];
+  const specs = ['all'];
   let totalInserted = 0, i = 0;
   for (const spec of specs) {
     i++;
@@ -1675,7 +1675,7 @@ async function runScotlandScrapeAll() {
       const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-scotland-scraper', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
-        body: JSON.stringify({ specialty: spec, offset: 0, limit: 60 }),
+        body: JSON.stringify({ specialty: spec, offset: 0, limit: 150 }),
       });
       const data = await res.json();
       if (data && data.inserted) totalInserted += data.inserted;
