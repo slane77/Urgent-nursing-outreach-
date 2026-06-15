@@ -1067,8 +1067,9 @@ async function sendFilteredViaBrevo() {
   const numBatches = Math.ceil(totalToSend / CHUNK_SIZE);
 
   if (totalToSend > CHUNK_SIZE) {
+    const estMins = (numBatches - 1) * 5;
     const ok = confirm('This will email ' + totalToSend + ' contacts in ' + numBatches +
-      ' batches of up to ' + CHUNK_SIZE + ', sent one after another. Continue?');
+      ' batches of up to ' + CHUNK_SIZE + ', with a 5-minute gap between each batch to protect deliverability.\n\nTotal time: about ' + estMins + ' minutes. Please keep this tab open until it finishes. Continue?');
     if (!ok) return;
   }
 
@@ -1088,7 +1089,11 @@ async function sendFilteredViaBrevo() {
       const chunk = ids.slice(i, i + CHUNK_SIZE);
       const batchNo = Math.floor(i / CHUNK_SIZE) + 1;
       state.composeBrevoProgress.batch = batchNo;
+      state.composeBrevoProgress.waitSeconds = 0;
       render();
+
+      const sess = await sb.auth.getSession();
+      const token = sess.data.session?.access_token;
 
       let d = {};
       try {
@@ -1111,7 +1116,15 @@ async function sendFilteredViaBrevo() {
       state.composeBrevoProgress.done = Math.min(i + CHUNK_SIZE, totalToSend);
       render();
 
-      if (i + CHUNK_SIZE < ids.length) await new Promise(r => setTimeout(r, 1500));
+      if (i + CHUNK_SIZE < ids.length) {
+        for (let secs = 300; secs > 0; secs--) {
+          state.composeBrevoProgress.waitSeconds = secs;
+          render();
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        state.composeBrevoProgress.waitSeconds = 0;
+        render();
+      }
     }
 
     state.composeBrevoResult = { sent, failed, total };
@@ -1316,7 +1329,7 @@ function renderCompose() {
       ${state.composeBrevoSending ? `
         <div class="import-progress" style="margin-top:12px;">
           <div class="progress-bar"><div class="fill import-pulse"></div></div>
-          <p class="muted" style="margin-top:6px;font-size:12px;">${state.composeBrevoProgress ? ('Batch ' + state.composeBrevoProgress.batch + ' of ' + state.composeBrevoProgress.batches + ' &mdash; ' + state.composeBrevoProgress.done + ' of ' + state.composeBrevoProgress.total + ' processed') : 'Sending personalised emails via Brevo&hellip;'}</p>
+          <p class="muted" style="margin-top:6px;font-size:12px;">${state.composeBrevoProgress ? ((state.composeBrevoProgress.waitSeconds ? 'Batch ' + state.composeBrevoProgress.batch + ' of ' + state.composeBrevoProgress.batches + ' sent &mdash; next batch in ' + Math.floor(state.composeBrevoProgress.waitSeconds/60) + ':' + String(state.composeBrevoProgress.waitSeconds%60).padStart(2,'0') + ' (spacing sends to protect deliverability)' : 'Batch ' + state.composeBrevoProgress.batch + ' of ' + state.composeBrevoProgress.batches + ' &mdash; ' + state.composeBrevoProgress.done + ' of ' + state.composeBrevoProgress.total + ' processed')) : 'Sending personalised emails via Brevo&hellip;'}</p>
         </div>` : ''}
 
       ${state.composeBrevoResult && !state.composeBrevoSending && !state.composeSelectedIds ? `
