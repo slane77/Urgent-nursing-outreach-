@@ -694,6 +694,7 @@ function applyComposeSourceFilter(q, source) {
     ahp:             'Source: NHS Jobs AHP',
     nhs_scotland:    'Source: NHS Scotland',
     private_theatre: 'Source: Theatres',
+    care_home:       'Source: Care Home',
     bms:             'Source: BMS Outreach',
     sterile:         'Source: Sterile Services',
     nhs_staffbank:   'Source: NHS Staff Bank',
