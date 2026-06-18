@@ -424,10 +424,10 @@ async function loadSourceStatusCounts() {
 
 async function loadFilterOptions() {
   // Get distinct regions and countries (small, cacheable)
-  const { data: rData } = await sb.from('contacts').select('region').not('region', 'is', null).neq('region', '');
-  const { data: cData } = await sb.from('contacts').select('country').not('country', 'is', null).neq('country', '');
-  state.regions = Array.from(new Set((rData || []).map(r => r.region))).filter(r => r && !/^\d+$/.test(String(r).trim())).sort();
-  state.countries = Array.from(new Set((cData || []).map(r => r.country))).sort();
+  const { data, error } = await sb.rpc('contact_filter_options');
+  if (error) { console.error('filter options', error); return; }
+  state.regions = ((data && data.regions) || []).filter(r => r && !/^\d+$/.test(String(r).trim()));
+  state.countries = (data && data.countries) || [];
 }
 
 
@@ -944,14 +944,14 @@ function renderDatabase() {
             <th style="width:36px;text-align:center">
               <input type="checkbox" id="select-all-cb" ${allPageSel ? 'checked' : ''} />
             </th>
-            ${!['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="first_name">Contact</th><th data-sort="job_title">Role</th><th data-sort="email">Email</th><th data-sort="town">Town</th><th data-sort="region">Region</th>` : ''}
+            ${!['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">Group</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
             ${['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `
               <th>Contact Name</th>
-              <th>Job Title</th><th>Vacancy</th>
+              <th>Job Title</th><th class="hide-sm">Vacancy</th>
               <th>Email</th>
-              <th>Phone</th>
-              <th>NHS Trust</th>
-              <th>Specialty</th>
+              <th class="hide-sm">Phone</th>
+              <th class="hide-sm">NHS Trust</th>
+              <th class="hide-sm">Specialty</th>
               <th>Last Emailed</th>
               <th>Band</th>
               <th>Date Added</th>
@@ -968,19 +968,20 @@ function renderDatabase() {
                 <input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />
               </td>
               ${!['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `
-              <td class="ellipsis" title="${esc(c.org)}${c.care_group ? ' — ' + esc(c.care_group) : ''}">${esc(c.org)}${c.care_group ? `<div class="muted" style="font-size:11px;font-weight:400;margin-top:2px;">${esc(c.care_group)}</div>` : ''}</td>
-              <td>${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' '))}</td>
-              <td>${esc(c.job_title)}</td>
+              <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
+              <td>${esc(c.care_group) || '<span class="muted">—</span>'}</td>
+              <td class="hide-sm">${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' ')) || '<span class="muted">—</span>'}</td>
+              <td>${esc(c.phone) || '<span class="muted">—</span>'}</td>
               <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
-              <td>${esc(c.town)}</td>
-              <td>${esc(c.region)}</td>` : ''}
+              <td class="hide-sm">${esc(c.town || c.add1) || '<span class="muted">—</span>'}</td>
+              <td>${esc(c.region) || '<span class="muted">—</span>'}</td>` : ''}
               ${['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter)
                 ? `<td>${esc(([c.first_name,c.last_name].filter(Boolean).join(' ')) || '—')}</td>
-                   <td>${esc(c.job_title || '—')}</td><td>${esc(c.vacancy_title || '—')}</td>
+                   <td>${esc(c.job_title || '—')}</td><td class="hide-sm">${esc(c.vacancy_title || '—')}</td>
                    <td class="ellipsis" title="${esc(c.email)}">${esc(c.email || '—')}</td>
-                   <td>${esc(c.phone || '—')}</td>
-                   <td class="ellipsis" title="${esc(c.org)}">${esc(c.org || '—')}</td>
-                   <td>${esc(extractSpecialty(c.notes))}</td>
+                   <td class="hide-sm">${esc(c.phone || '—')}</td>
+                   <td class="ellipsis hide-sm" title="${esc(c.org)}">${esc(c.org || '—')}</td>
+                   <td class="hide-sm">${esc(extractSpecialty(c.notes))}</td>
                    <td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
                    <td>${esc(c.band_requested || '—')}</td>
                    <td>${c.created_at ? esc(c.created_at.slice(0,10)) : '—'}</td>
