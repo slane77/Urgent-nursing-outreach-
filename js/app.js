@@ -968,7 +968,7 @@ function renderDatabase() {
                 <input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />
               </td>
               ${!['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `
-              <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
+              <td class="ellipsis" title="${esc(c.org)}${c.care_group ? ' — ' + esc(c.care_group) : ''}">${esc(c.org)}${c.care_group ? `<div class="muted" style="font-size:11px;font-weight:400;margin-top:2px;">${esc(c.care_group)}</div>` : ''}</td>
               <td>${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' '))}</td>
               <td>${esc(c.job_title)}</td>
               <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
@@ -3022,6 +3022,7 @@ function renderModal() {
         <div class="field"><label>Last Name</label><input id="m-lastName" value="${esc(c.last_name)}" /></div>
       </div>
       <div class="field"><label>Surgery / Org *</label><input id="m-org" value="${esc(c.org)}" /></div>
+      <div class="field"><label>Group</label><input id="m-careGroup" value="${esc(c.care_group)}" /></div>
       <div class="field"><label>Email *</label><input id="m-email" value="${esc(c.email)}" /></div>
       <div class="field"><label>Phone</label><input id="m-phone" value="${esc(c.phone)}" /></div>
       <div class="field-row">
@@ -3579,6 +3580,7 @@ function bindModalEvents() {
         last_name: overlay.querySelector('#m-lastName').value.trim() || null,
         job_title: overlay.querySelector('#m-jobTitle').value.trim() || null,
         org: overlay.querySelector('#m-org').value.trim(),
+        care_group: overlay.querySelector('#m-careGroup').value.trim() || null,
         email: overlay.querySelector('#m-email').value.trim().toLowerCase(),
         phone: overlay.querySelector('#m-phone').value.trim() || null,
         town: overlay.querySelector('#m-town').value.trim() || null,
