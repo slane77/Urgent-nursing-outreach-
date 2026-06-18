@@ -202,26 +202,36 @@ function toast(msg, type) {
 
 function personalize(text, contact) {
   if (!text) return '';
-  const org = contact.org || 'your organisation';
-  const group = contact.care_group || '';
-  return text
-    .replace(/\{\{FirstName\}\}/g, contact.first_name || '')
-    .replace(/«FirstName»/g, contact.first_name || '')
-    .replace(/\{\{LastName\}\}/g, contact.last_name || '')
-    .replace(/«LastName»/g, contact.last_name || '')
-    .replace(/\{\{Title\}\}/g, contact.title || '')
-    .replace(/«Title»/g, contact.title || '')
-    .replace(/\{\{Org\}\}/g, org)
-    .replace(/«Org»/g, org)
-    .replace(/\{\{Surgery\}\}/g, contact.org || 'your surgery')
-    .replace(/\{\{Group\}\}/g, group)
-    .replace(/«Group»/g, group)
-    .replace(/\{\{Town\}\}/g, contact.town || 'your area')
-    .replace(/«Town»/g, contact.town || 'your area')
-    .replace(/\{\{Region\}\}/g, contact.region || '')
-    .replace(/«Region»/g, contact.region || '')
-    .replace(/\{\{JobTitle\}\}/g, contact.job_title || '')
-    .replace(/«JobTitle»/g, contact.job_title || '');
+  const vals = {
+    FirstName: contact.first_name || '',
+    LastName:  contact.last_name || '',
+    Title:     contact.title || '',
+    Org:       contact.org || '',
+    Group:     contact.care_group || '',
+    Town:      contact.town || '',
+    Region:    contact.region || '',
+    JobTitle:  contact.job_title || '',
+  };
+  // Optional [[ ... ]] segments: drop the whole segment if any token inside is blank
+  let out = String(text).replace(/\[\[([\s\S]*?)\]\]/g, (m, inner) => {
+    const names = [];
+    inner.replace(/\{\{(\w+)\}\}|«(\w+)»/g, (mm, a, b) => { names.push(a || b); return mm; });
+    return names.some(n => !String(vals[n] || '').trim()) ? '' : inner;
+  });
+  // Friendly fallbacks only where a default reads better than a blank
+  const org = vals.Org || 'your organisation';
+  const surgery = vals.Org || 'your surgery';
+  const town = vals.Town || 'your area';
+  return out
+    .replace(/\{\{FirstName\}\}/g, vals.FirstName).replace(/«FirstName»/g, vals.FirstName)
+    .replace(/\{\{LastName\}\}/g, vals.LastName).replace(/«LastName»/g, vals.LastName)
+    .replace(/\{\{Title\}\}/g, vals.Title).replace(/«Title»/g, vals.Title)
+    .replace(/\{\{Org\}\}/g, org).replace(/«Org»/g, org)
+    .replace(/\{\{Surgery\}\}/g, surgery)
+    .replace(/\{\{Group\}\}/g, vals.Group).replace(/«Group»/g, vals.Group)
+    .replace(/\{\{Town\}\}/g, town).replace(/«Town»/g, town)
+    .replace(/\{\{Region\}\}/g, vals.Region).replace(/«Region»/g, vals.Region)
+    .replace(/\{\{JobTitle\}\}/g, vals.JobTitle).replace(/«JobTitle»/g, vals.JobTitle);
 }
 
 function convertTokensToMergeFields(text) {
@@ -235,7 +245,8 @@ function convertTokensToMergeFields(text) {
     .replace(/\{\{Town\}\}/g, '«Town»')
     .replace(/\{\{Region\}\}/g, '«Region»')
     .replace(/\{\{Group\}\}/g, '«Group»')
-    .replace(/\{\{JobTitle\}\}/g, '«JobTitle»');
+    .replace(/\{\{JobTitle\}\}/g, '«JobTitle»')
+    .replace(/\[\[|\]\]/g, '');
 }
 
 function copyToClipboard(text, msg) {
