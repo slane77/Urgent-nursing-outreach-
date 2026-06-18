@@ -202,15 +202,26 @@ function toast(msg, type) {
 
 function personalize(text, contact) {
   if (!text) return '';
+  const org = contact.org || 'your organisation';
+  const group = contact.care_group || '';
   return text
     .replace(/\{\{FirstName\}\}/g, contact.first_name || '')
+    .replace(/«FirstName»/g, contact.first_name || '')
     .replace(/\{\{LastName\}\}/g, contact.last_name || '')
+    .replace(/«LastName»/g, contact.last_name || '')
     .replace(/\{\{Title\}\}/g, contact.title || '')
-    .replace(/\{\{Org\}\}/g, contact.org || 'your surgery')
+    .replace(/«Title»/g, contact.title || '')
+    .replace(/\{\{Org\}\}/g, org)
+    .replace(/«Org»/g, org)
     .replace(/\{\{Surgery\}\}/g, contact.org || 'your surgery')
+    .replace(/\{\{Group\}\}/g, group)
+    .replace(/«Group»/g, group)
     .replace(/\{\{Town\}\}/g, contact.town || 'your area')
+    .replace(/«Town»/g, contact.town || 'your area')
     .replace(/\{\{Region\}\}/g, contact.region || '')
-    .replace(/\{\{JobTitle\}\}/g, contact.job_title || '');
+    .replace(/«Region»/g, contact.region || '')
+    .replace(/\{\{JobTitle\}\}/g, contact.job_title || '')
+    .replace(/«JobTitle»/g, contact.job_title || '');
 }
 
 function convertTokensToMergeFields(text) {
@@ -223,6 +234,7 @@ function convertTokensToMergeFields(text) {
     .replace(/\{\{Surgery\}\}/g, '«Org»')
     .replace(/\{\{Town\}\}/g, '«Town»')
     .replace(/\{\{Region\}\}/g, '«Region»')
+    .replace(/\{\{Group\}\}/g, '«Group»')
     .replace(/\{\{JobTitle\}\}/g, '«JobTitle»');
 }
 
@@ -1023,10 +1035,10 @@ function renderTemplates() {
     <div class="token-helper">
       <strong>Available personalisation tokens</strong> — paste these into any template:
       <code>{{FirstName}}</code> <code>{{LastName}}</code> <code>{{Name}}</code>
-      <code>{{VacancyTitle}}</code> <code>{{Org}}</code> <code>{{Band}}</code> <code>{{Specialty}}</code>
+      <code>{{VacancyTitle}}</code> <code>{{Org}}</code> <code>{{Group}}</code> <code>{{Band}}</code> <code>{{Specialty}}</code>
       <code>{{Town}}</code> <code>{{Region}}</code> <code>{{Title}}</code> <code>{{SenderName}}</code>
       <div class="muted" style="margin-top:8px;font-size:12px;line-height:1.55;">
-        <strong>{{VacancyTitle}}</strong> = the exact role from their advert (e.g. &ldquo;Band 6 Physiotherapist&rdquo;) &mdash; the key token for NHS Jobs &amp; GP leads. <code>{{Vacancy}}</code> and <code>{{Role}}</code> are the same thing. <code>{{Band}}</code> and <code>{{Specialty}}</code> also come from the advert. Everything degrades gracefully if a field is blank (e.g. {{FirstName}} &rarr; &ldquo;there&rdquo;, {{Org}} &rarr; &ldquo;your organisation&rdquo;). Heads-up: {{Town}} and {{Region}} are usually empty on NHS Jobs leads, so don&rsquo;t build the message around them there.
+        <strong>{{VacancyTitle}}</strong> = the exact role from their advert (e.g. &ldquo;Band 6 Physiotherapist&rdquo;) &mdash; the key token for NHS Jobs &amp; GP leads. <code>{{Vacancy}}</code> and <code>{{Role}}</code> are the same thing. <code>{{Band}}</code> and <code>{{Specialty}}</code> also come from the advert. Everything degrades gracefully if a field is blank (e.g. {{FirstName}} &rarr; &ldquo;there&rdquo;, {{Org}} &rarr; &ldquo;your organisation&rdquo;). <code>{{Group}}</code> is the wider care group the home belongs to (the home itself is <code>{{Org}}</code>); it&rsquo;s blank for independent homes, so word any sentence so it still reads if empty. Heads-up: {{Town}} and {{Region}} are usually empty on NHS Jobs leads, so don&rsquo;t build the message around them there.
       </div>
     </div>
     <div class="template-list">
@@ -3810,8 +3822,8 @@ async function handleAction(action, id) {
 // ============================================================================
 
 function downloadCsvForMerge() {
-  const headers = ['Title', 'FirstName', 'LastName', 'JobTitle', 'Org', 'Email', 'Phone', 'Town', 'Postcode', 'Region', 'Country'];
-  const rows = state.composeQueue.map(c => [c.title, c.first_name, c.last_name, c.job_title, c.org, c.email, c.phone, c.town, c.postcode, c.region, c.country]);
+  const headers = ['Title', 'FirstName', 'LastName', 'JobTitle', 'Org', 'Group', 'Email', 'Phone', 'Town', 'Postcode', 'Region', 'Country'];
+  const rows = state.composeQueue.map(c => [c.title, c.first_name, c.last_name, c.job_title, c.org, c.care_group, c.email, c.phone, c.town, c.postcode, c.region, c.country]);
   const csv = [headers.map(csvEscape).join(',')].concat(rows.map(r => r.map(csvEscape).join(','))).join('\n');
   downloadFile(csv, `mailshot_${todayStr()}.csv`, 'text/csv');
   toast('CSV downloaded - ready for Word Mail Merge');
@@ -3833,8 +3845,8 @@ async function exportAllAsCsv() {
     from += chunkSize;
   }
 
-  const headers = ['Status', 'Title', 'First Name', 'Last Name', 'Job Title', 'Org', 'Email', 'Phone', 'Town', 'Postcode', 'Region', 'Country', 'Notes', 'Last Emailed'];
-  const rows = all.map(c => [c.status, c.title, c.first_name, c.last_name, c.job_title, c.org, c.email, c.phone, c.town, c.postcode, c.region, c.country, c.notes, c.last_emailed_at ? c.last_emailed_at.slice(0,10) : '']);
+  const headers = ['Status', 'Title', 'First Name', 'Last Name', 'Job Title', 'Org', 'Group', 'Email', 'Phone', 'Town', 'Postcode', 'Region', 'Country', 'Notes', 'Last Emailed'];
+  const rows = all.map(c => [c.status, c.title, c.first_name, c.last_name, c.job_title, c.org, c.care_group, c.email, c.phone, c.town, c.postcode, c.region, c.country, c.notes, c.last_emailed_at ? c.last_emailed_at.slice(0,10) : '']);
   const csv = [headers.map(csvEscape).join(',')].concat(rows.map(r => r.map(csvEscape).join(','))).join('\n');
   downloadFile(csv, `urgent_nursing_contacts_${todayStr()}.csv`, 'text/csv');
   toast(`Exported ${all.length} contacts`);
