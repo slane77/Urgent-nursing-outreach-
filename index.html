@@ -280,16 +280,8 @@ body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--
   .table { min-width: 420px; }  /* prevents excessive squashing */
   .table th, .table td { padding: 8px 8px; font-size: 12px; }
 
-  /* Hide: Role (4th), Town (6th), Region (7th), Last Emailed (8th)  */
-  /* Checkbox=1, Org=2, Contact=3, Role=4, Email=5, Town=6, Region=7, LastEmailed=8, Actions=9 */
-  .table thead tr th:nth-child(4),
-  .table thead tr th:nth-child(6),
-  .table thead tr th:nth-child(7),
-  .table thead tr th:nth-child(8),
-  .table tbody tr td:nth-child(4),
-  .table tbody tr td:nth-child(6),
-  .table tbody tr td:nth-child(7),
-  .table tbody tr td:nth-child(8) { display: none; }
+  /* Mobile: hide secondary columns flagged .hide-sm in JS-rendered tables */
+  .table .hide-sm { display: none; }
 
   /* Tighten ellipsis columns */
   .table .ellipsis { max-width: 130px; }
