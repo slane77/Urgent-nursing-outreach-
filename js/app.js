@@ -126,6 +126,7 @@ const STATUS_LABEL = { lead: 'Leads', live: 'Live', unsubscribed: 'Unsubscribes'
 // (no tag) — it's identified by exclusion. All other sources have a known tag.
 const MODAL_SOURCE_TAGS = {
   gp_surgery:      null,
+  hse:             'Source: HSE',
   children_homes:  'Ofsted Register',
   agency:          'Source: Agency Outreach',
   ahp:             'Source: NHS Jobs AHP',
@@ -141,6 +142,7 @@ const MODAL_SOURCE_TAGS = {
 };
 const MODAL_SOURCE_OPTIONS = [
   { k: 'gp_surgery',      l: 'GP Surgery' },
+  { k: 'hse',             l: 'HSE (Ireland)' },
   { k: 'children_homes',  l: "Children's Home" },
   { k: 'agency',          l: 'Agency Outreach' },
   { k: 'ahp',             l: 'AHP (NHS Jobs)' },
@@ -399,6 +401,7 @@ async function loadSourceStatusCounts() {
 
   const SOURCE_TAGS = {
     gp_surgery:      null,
+    hse:             'Source: HSE',
     children_homes:  'Ofsted Register',
     agency:          'Source: Agency Outreach',
     ahp:             'Source: NHS Jobs AHP',
@@ -425,7 +428,8 @@ async function loadSourceStatusCounts() {
         .not('notes', 'ilike', '%Source: NHS Staff Bank%')
         .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
         .not('notes', 'ilike', '%Source: Care Home%')
-        .not('notes', 'ilike', '%Source: CAMHS%');
+        .not('notes', 'ilike', '%Source: CAMHS%')
+        .not('notes', 'ilike', '%Source: HSE%');
     }
     const tag = SOURCE_TAGS[sf];
     if (tag) return q.ilike('notes', `%${tag}%`);
@@ -455,7 +459,7 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, ahpRes, agencyRes, theatreRes, careRes, gpRes, anpRes, enpRes, scotRes] = await Promise.all([
+  const [allRes, chRes, ahpRes, agencyRes, theatreRes, careRes, gpRes, anpRes, enpRes, scotRes, hseRes] = await Promise.all([
     sb.from('contacts').select('id', { count: 'exact', head: true }),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Ofsted Register%'),
@@ -480,6 +484,7 @@ async function loadSourceCounts() {
       .not('notes', 'ilike', '%Source: CAMHS%')
       .not('notes', 'ilike', '%Source: ANP%')
       .not('notes', 'ilike', '%Source: ENP%')
+      .not('notes', 'ilike', '%Source: HSE%')
       .not('notes', 'ilike', '%Source: NHS Scotland%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Source: ANP%'),
@@ -487,6 +492,8 @@ async function loadSourceCounts() {
       .ilike('notes', '%Source: ENP%'),
     sb.from('contacts').select('id', { count: 'exact', head: true })
       .ilike('notes', '%Source: NHS Scotland%'),
+    sb.from('contacts').select('id', { count: 'exact', head: true })
+      .ilike('notes', '%Source: HSE%'),
   ]);
   state.sourceCounts = {
     all:             allRes.count     || 0,
@@ -499,12 +506,13 @@ async function loadSourceCounts() {
     anp:             anpRes.count     || 0,
     enp:             enpRes.count     || 0,
     nhs_scotland:    scotRes.count    || 0,
+    hse:             hseRes.count    || 0,
   };
   try {
     var dayStart = new Date(); dayStart.setHours(0,0,0,0);
     var tRes = await sb.from('contacts').select('notes').gte('created_at', dayStart.toISOString()).limit(3000);
     var todayRows = tRes.data || [];
-    var tc = { all: todayRows.length, gp_surgery: 0, children_homes: 0, ahp: 0, agency: 0, private_theatre: 0, care_home: 0, anp: 0, enp: 0, nhs_scotland: 0 };
+    var tc = { all: todayRows.length, gp_surgery: 0, children_homes: 0, ahp: 0, agency: 0, private_theatre: 0, care_home: 0, anp: 0, enp: 0, nhs_scotland: 0, hse: 0 };
     todayRows.forEach(function(r){
       var n = (r.notes || '').toLowerCase();
       if (n.indexOf('ofsted register') >= 0) { tc.children_homes++; }
@@ -515,6 +523,7 @@ async function loadSourceCounts() {
       else if (n.indexOf('source: care home') >= 0) { tc.care_home++; }
       else if (n.indexOf('source: anp') >= 0) { tc.anp++; }
       else if (n.indexOf('source: enp') >= 0) { tc.enp++; }
+      else if (n.indexOf('source: hse') >= 0) { tc.hse++; }
       else if (n.indexOf('source: pharmacy') >= 0 || n.indexOf('source: bms') >= 0 || n.indexOf('source: sterile') >= 0 || n.indexOf('source: nhs staff bank') >= 0 || n.indexOf('source: camhs') >= 0) { }
       else { tc.gp_surgery++; }
     });
@@ -559,6 +568,7 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: CAMHS%')
       .not('notes', 'ilike', '%Source: ANP%')
       .not('notes', 'ilike', '%Source: ENP%')
+      .not('notes', 'ilike', '%Source: HSE%')
       .not('notes', 'ilike', '%Source: NHS Scotland%');
   } else if (sf === 'ahp') {
     query = query.ilike('notes', '%Source: NHS Jobs AHP%');
@@ -588,6 +598,8 @@ async function loadContactsPage() {
     query = query.ilike('notes', '%Source: ANP%');
   } else if (sf === 'enp') {
     query = query.ilike('notes', '%Source: ENP%');
+  } else if (sf === 'hse') {
+    query = query.ilike('notes', '%Source: HSE%');
   }
   // sf === 'all' — no filter applied
   // ──────────────────────────────────────────────────────────────────────────
@@ -709,10 +721,12 @@ function applyComposeSourceFilter(q, source) {
       .not('notes', 'ilike', '%Source: Care Home%')
       .not('notes', 'ilike', '%Source: ANP%')
       .not('notes', 'ilike', '%Source: ENP%')
+      .not('notes', 'ilike', '%Source: HSE%')
       .not('notes', 'ilike', '%Source: NHS Scotland%');
   }
   const SOURCE_TAGS = {
     children_homes:  'Ofsted Register',
+    hse:             'Source: HSE',
     agency:          'Source: Agency Outreach',
     ahp:             'Source: NHS Jobs AHP',
     nhs_scotland:    'Source: NHS Scotland',
@@ -844,6 +858,7 @@ function renderDatabase() {
     { key: 'agency',          label: 'Agency Outreach'   },
     { key: 'ahp',             label: 'NHS Jobs AHP'      },
     { key: 'nhs_scotland',    label: 'NHS Scotland'     },
+    { key: 'hse',             label: 'HSE (Ireland)'    },
     { key: 'anp',             label: 'ANP'               },
     { key: 'enp',             label: 'ENP'               },
     { key: 'care_home',       label: 'Care Homes'        },
@@ -1268,6 +1283,7 @@ function renderCompose() {
               {k:'private_theatre',l:'Theatres'},
               {k:'ahp',            l:'AHP (NHS Jobs)'},
               {k:'nhs_scotland',   l:'NHS Scotland (AHP)'},
+              {k:'hse',            l:'HSE (Ireland)'},
               {k:'care_home',     l:'Care Homes'},
               {k:'bms',            l:'BMS'},
               {k:'sterile',        l:'Sterile Services'},
