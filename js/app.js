@@ -983,8 +983,8 @@ function renderDatabase() {
             <th style="width:36px;text-align:center">
               <input type="checkbox" id="select-all-cb" ${allPageSel ? 'checked' : ''} />
             </th>
-            ${!['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">Group</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
-            ${['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `
+            ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">Group</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
+            ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
               <th>Contact Name</th>
               <th>Job Title</th><th class="hide-sm">Vacancy</th>
               <th>Email</th>
@@ -1006,7 +1006,7 @@ function renderDatabase() {
               <td style="width:36px;text-align:center">
                 <input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />
               </td>
-              ${!['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter) ? `
+              ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
               <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
               <td>${esc(c.care_group) || '<span class="muted">—</span>'}</td>
               <td class="hide-sm">${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' ')) || '<span class="muted">—</span>'}</td>
@@ -1014,7 +1014,7 @@ function renderDatabase() {
               <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
               <td class="hide-sm">${esc(c.town || c.add1) || '<span class="muted">—</span>'}</td>
               <td>${esc(c.region) || '<span class="muted">—</span>'}</td>` : ''}
-              ${['ahp','anp','enp','nhs_scotland'].includes(state.sourceFilter)
+              ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter)
                 ? `<td>${esc(([c.first_name,c.last_name].filter(Boolean).join(' ')) || '—')}</td>
                    <td>${esc(c.job_title || '—')}</td><td class="hide-sm">${esc(c.vacancy_title || '—')}</td>
                    <td class="ellipsis" title="${esc(c.email)}">${esc(c.email || '—')}</td>
@@ -1024,7 +1024,7 @@ function renderDatabase() {
                    <td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
                    <td>${esc(c.band_requested || '—')}</td>
                    <td>${c.created_at ? esc(c.created_at.slice(0,10)) : '—'}</td>
-                   <td>${c.source_url ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener" class="nhs-jobs-link" title="View on NHS Jobs">🔗 NHS Jobs</a>` : '<span class="muted">—</span>'}</td>`
+                   <td>${c.source_url ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener" class="nhs-jobs-link" title="View advert">${state.sourceFilter === 'hse' ? '🔗 HSE' : '🔗 NHS Jobs'}</a>` : '<span class="muted">—</span>'}</td>`
                 : `<td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
                 <td>${renderFollowUpDate(c.follow_up_date)}</td>`}
               <td class="actions">
@@ -1787,6 +1787,21 @@ async function runScotlandScrapeAll() {
   render();
 }
 
+async function runHseScrape() {
+  state.hseRunning = true; state.hseResult = null; render();
+  try {
+    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/hse-scraper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      body: JSON.stringify({ dryRun: false, limit: 120, maxPages: 50 }),
+    });
+    const data = await res.json();
+    state.hseResult = { inserted: data.inserted || 0, scanned: data.scanned || 0, error: data.error };
+    if (data && data.inserted > 0) { await Promise.all([loadStatusCounts(), loadSourceCounts()]); }
+  } catch (err) { state.hseResult = { error: err.message }; }
+  state.hseRunning = false; render();
+}
+
 async function runNHSScrape() {
   state.importRunning = true;
   state.importResult = null;
@@ -2123,6 +2138,34 @@ function renderImport() {
           </div>` : ''}
         ${state.scotResult ? `<div class="import-result ${state.scotResult.error ? 'err' : 'ok'}">
           ${state.scotResult.error ? `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.scotResult.error)}</p>` : `<p class="muted" style="font-size:12px;">&#10003; ${state.scotResult.inserted || 0} new contact(s) added${state.scotResult.swept ? ' across all specialties' : (state.scotResult.specialty ? ' for ' + String(state.scotResult.specialty).replace(/_/g,' ') : '')} &mdash; view under Database &rarr; NHS Scotland.</p>`}
+        </div>` : ''}
+      </div>
+
+      <!-- HSE Ireland scraper -->
+      <div class="import-card">
+        <div class="import-card-header">
+          <div class="import-card-icon">${icon('flag',22)}</div>
+          <div class="import-card-meta">
+            <div class="import-card-title">HSE Ireland - HSCP Contacts</div>
+            <div class="import-card-sub">Scrapes about.hse.ie for Health &amp; Social Care Professional vacancies and pulls the named informal-enquiries contact, grade, recruiter and county across the Republic of Ireland.</div>
+          </div>
+          <span class="import-badge live">Live</span>
+        </div>
+        <div class="import-form">
+          <div class="import-form-actions">
+            <button class="btn primary" id="run-hse-btn" ${state.hseRunning ? 'disabled' : ''}>
+              ${state.hseRunning ? '<span class="spinner-inline"></span> Scraping HSE Ireland&hellip;' : icon('refresh') + ' Run HSE Scraper'}
+            </button>
+            <span class="import-hint">Sweeps every HSCP advert across all HSE listing pages and adds new named contacts. Runs automatically each weekday morning; use this to refresh on demand.</span>
+          </div>
+        </div>
+        ${state.hseRunning ? `
+          <div class="import-progress">
+            <div class="progress-bar"><div class="fill import-pulse"></div></div>
+            <p class="muted" style="margin-top:8px;font-size:12px;">Reading HSE adverts&hellip; please wait</p>
+          </div>` : ''}
+        ${state.hseResult ? `<div class="import-result ${state.hseResult.error ? 'err' : 'ok'}">
+          ${state.hseResult.error ? `<p style="color:#DC2626;font-size:13px;">&#10005; ${esc(state.hseResult.error)}</p>` : `<p class="muted" style="font-size:12px;">&#10003; ${state.hseResult.inserted || 0} new contact(s) added &mdash; view under Database &rarr; HSE (Ireland).</p>`}
         </div>` : ''}
       </div>
 
@@ -3293,6 +3336,8 @@ function bindEvents() {
   if (runScotAllBtn) runScotAllBtn.onclick = () => { if (!state.scotRunning && !state.scotSweepRunning) runScotlandScrapeAll(); };
   const scotSpecialtySel = $('#scot-specialty');
   if (scotSpecialtySel) scotSpecialtySel.onchange = (e) => { state.scotSpecialty = e.target.value; };
+  const runHseBtn = $('#run-hse-btn');
+  if (runHseBtn) runHseBtn.onclick = () => { if (!state.hseRunning) runHseScrape(); };
   // Agency CSV upload
   const runEnrichBtn = $('#run-enrich-btn');
   if (runEnrichBtn) runEnrichBtn.onclick = () => { if (!state.enrichRunning) runEnrichment(); };
