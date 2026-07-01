@@ -929,6 +929,7 @@ function renderDatabase() {
         {k:'biomedical_science', l:'BMS'},
         {k:'sterile_services', l:'Sterile Services'},
         {k:'mental_health', l:'Mental Health'},
+        {k:'camhs', l:'CAMHS'},
         {k:'operating_theatres', l:'Theatres'},
         {k:'audiology', l:'Audiology'},
         {k:'gp_surgery',      l:'GP Surgeries'},
@@ -1311,7 +1312,7 @@ function renderCompose() {
           <label>Specialty</label>
           <select class="select" id="compose-specialty">
             <option value="all" ${(!state.composeSpecialtyFilter||state.composeSpecialtyFilter==='all')?'selected':''}>All AHP specialties</option>
-            ${[['physiotherapy','Physiotherapy'],['occupational_therapy','Occupational Therapy'],['radiography','Radiography'],['speech_language','Speech &amp; Language'],['dietetics','Dietetics'],['podiatry','Podiatry'],['orthoptics','Orthoptics'],['art_therapy','Art Therapy'],['paramedic','Paramedic'],['prosthetics','Prosthetics'],['pharmacy','Pharmacy'],['audiology','Audiology'],['biomedical_science','Biomedical Science (BMS)'],['sterile_services','Sterile Services'],['mental_health','Mental Health'],['operating_theatres','Operating Theatres']].map(o => `<option value="${o[0]}" ${state.composeSpecialtyFilter===o[0]?'selected':''}>${o[1]}</option>`).join('')}
+            ${[['physiotherapy','Physiotherapy'],['occupational_therapy','Occupational Therapy'],['radiography','Radiography'],['speech_language','Speech &amp; Language'],['dietetics','Dietetics'],['podiatry','Podiatry'],['orthoptics','Orthoptics'],['art_therapy','Art Therapy'],['paramedic','Paramedic'],['prosthetics','Prosthetics'],['pharmacy','Pharmacy'],['audiology','Audiology'],['biomedical_science','Biomedical Science (BMS)'],['sterile_services','Sterile Services'],['mental_health','Mental Health'],['camhs','CAMHS'],['operating_theatres','Operating Theatres']].map(o => `<option value="${o[0]}" ${state.composeSpecialtyFilter===o[0]?'selected':''}>${o[1]}</option>`).join('')}
           </select>
         </div>
         ` : ''}
@@ -2005,6 +2006,7 @@ function renderImport() {
     { value: 'biomedical_science', label: 'Biomedical Science (BMS)' },
     { value: 'sterile_services', label: 'Sterile Services' },
     { value: 'mental_health', label: 'Mental Health' },
+    { value: 'camhs', label: 'CAMHS' },
     { value: 'operating_theatres', label: 'Operating Theatres' },
     { value: 'audiology', label: 'Audiology' },
     { value: 'advanced_nurse_practitioner', label: 'Advanced Nurse Practitioner (ANP)' },
@@ -2861,6 +2863,7 @@ var KW_SPECS = [
   ['biomedical_science','Biomedical Science'],
   ['sterile_services','Sterile Services'],
   ['mental_health','Mental Health'],
+  ['camhs','CAMHS'],
   ['operating_theatres','Operating Theatres'],
   ['dietetics','Dietetics'],
   ['podiatry','Podiatry'],
