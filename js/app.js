@@ -1087,6 +1087,17 @@ function renderTemplates() {
 
 
 
+const COMPOSE_SRC_LABELS = { all:'ALL SOURCES \u26a0', gp_surgery:'GP Surgeries', children_homes:"Children's Homes", agency:'Agency Outreach', private_theatre:'Theatres', ahp:'NHS Jobs AHP', nhs_scotland:'NHS Scotland (AHP)', hse:'HSE (Ireland)', care_home:'Care Homes', bms:'BMS', sterile:'Sterile Services', nhs_staffbank:'NHS Staff Banks', camhs:'CAMHS', anp:'ANP', enp:'ENP' };
+function composeSourceLabel() { return COMPOSE_SRC_LABELS[state.composeSourceFilter] || state.composeSourceFilter || 'ALL SOURCES \u26a0'; }
+function composeSenderFields() {
+  const s = state.composeSourceFilter;
+  if (s === 'ahp' || s === 'nhs_scotland') {
+    const sub = (state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') ? state.composeSpecialtyFilter : null;
+    return sub ? { source: s, subSource: sub } : { source: s };
+  }
+  return { fromEmail: 'scott.lane@daywebster.com', fromName: 'Day Webster Group' };
+}
+
 async function sendFilteredViaBrevo() {
   const template = state.templates.find(t => t.id === state.composeTemplateId);
   if (!template) return toast('Select a template first');
@@ -1106,11 +1117,14 @@ async function sendFilteredViaBrevo() {
   const totalToSend = ids.length;
   const numBatches = Math.ceil(totalToSend / CHUNK_SIZE);
 
-  if (totalToSend > CHUNK_SIZE) {
-    const estMins = (numBatches - 1) * 5;
-    const ok = confirm('This will email ' + totalToSend + ' contacts in ' + numBatches +
-      ' batches of up to ' + CHUNK_SIZE + ', with a 5-minute gap between each batch to protect deliverability.\n\nTotal time: about ' + estMins + ' minutes. Please keep this tab open until it finishes. Continue?');
-    if (!ok) return;
+  {
+    const estMins = numBatches > 1 ? (numBatches - 1) * 5 : 0;
+    const _sf = composeSenderFields();
+    const _fromLine = _sf.fromEmail ? _sf.fromEmail : (composeSourceLabel() + ' team address (per specialty)');
+    let _msg = 'Send "' + (template.name || 'this template') + '" to ' + totalToSend + ' contact' + (totalToSend === 1 ? '' : 's') + '.\n\nSource: ' + composeSourceLabel() + '\nFrom: ' + _fromLine;
+    if (numBatches > 1) _msg += '\n\n' + numBatches + ' batches of up to ' + CHUNK_SIZE + ', 5-min gaps (~' + estMins + ' min). Keep this tab open until it finishes.';
+    _msg += '\n\nContinue?';
+    if (!confirm(_msg)) return;
   }
 
   state.composeBrevoSending = true;
@@ -1140,7 +1154,7 @@ async function sendFilteredViaBrevo() {
         const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ templateId: template.id, contactIds: chunk, batchId: stamp + '_' + batchNo }),
+          body: JSON.stringify({ templateId: template.id, contactIds: chunk, batchId: stamp + '_' + batchNo, ...composeSenderFields() }),
         });
         d = await res.json();
       } catch (err) {
@@ -1206,6 +1220,8 @@ async function sendSelectedViaBrevo() {
   const template = state.templates.find(t => t.id === state.composeTemplateId);
   if (!template) return toast('Select a template first');
 
+  if (!confirm('Send "' + (template.name || 'this template') + '" to ' + ids.length + ' selected contact' + (ids.length === 1 ? '' : 's') + '?\nSource: ' + composeSourceLabel())) return;
+
   state.composeBrevoSending = true;
   state.composeBrevoResult = null;
   render();
@@ -1226,8 +1242,7 @@ async function sendSelectedViaBrevo() {
         templateId: template.id,
         contactIds:  ids,
         batchId,
-        senderEmail: 'scott.lane@daywebster.com',
-        senderName:  'Day Webster Group',
+        ...composeSenderFields(),
       }),
     });
 
