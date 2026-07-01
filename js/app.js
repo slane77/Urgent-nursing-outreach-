@@ -1091,11 +1091,8 @@ const COMPOSE_SRC_LABELS = { all:'ALL SOURCES \u26a0', gp_surgery:'GP Surgeries'
 function composeSourceLabel() { return COMPOSE_SRC_LABELS[state.composeSourceFilter] || state.composeSourceFilter || 'ALL SOURCES \u26a0'; }
 function composeSenderFields() {
   const s = state.composeSourceFilter;
-  if (s === 'ahp' || s === 'nhs_scotland') {
-    const sub = (state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') ? state.composeSpecialtyFilter : null;
-    return sub ? { source: s, subSource: sub } : { source: s };
-  }
-  return { fromEmail: 'scott.lane@daywebster.com', fromName: 'Day Webster Group' };
+  const sub = (s === 'ahp' || s === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all' ? state.composeSpecialtyFilter : null;
+  return sub ? { source: s, subSource: sub } : { source: s };
 }
 
 async function sendFilteredViaBrevo() {
@@ -1119,8 +1116,8 @@ async function sendFilteredViaBrevo() {
 
   {
     const estMins = numBatches > 1 ? (numBatches - 1) * 5 : 0;
-    const _sf = composeSenderFields();
-    const _fromLine = _sf.fromEmail ? _sf.fromEmail : (composeSourceLabel() + ' team address (per specialty)');
+    const _isAhp = (state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland');
+    const _fromLine = _isAhp ? 'your Day Webster team address (per specialty)' : 'you \u2014 ' + (state.senderEmail || (state.user && state.user.email) || 'your signed-in address');
     let _msg = 'Send "' + (template.name || 'this template') + '" to ' + totalToSend + ' contact' + (totalToSend === 1 ? '' : 's') + '.\n\nSource: ' + composeSourceLabel() + '\nFrom: ' + _fromLine;
     if (numBatches > 1) _msg += '\n\n' + numBatches + ' batches of up to ' + CHUNK_SIZE + ', 5-min gaps (~' + estMins + ' min). Keep this tab open until it finishes.';
     _msg += '\n\nContinue?';
