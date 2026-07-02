@@ -379,74 +379,54 @@ function bindAuthEvents() {
 //  DATABASE QUERIES
 // ============================================================================
 
+// ── Consolidated dashboard counts: ONE RPC replaces ~17 separate count
+// queries (status + source + per-source-status + new-today), all computed in
+// a single table scan by public.dashboard_counts(). A short-lived cache lets
+// parallel Promise.all callers share one request.
+var _dashCountsCache = { at: 0, promise: null };
+function fetchDashboardCounts() {
+  var now = Date.now();
+  if (!_dashCountsCache.promise || (now - _dashCountsCache.at) > 2000) {
+    _dashCountsCache.at = now;
+    _dashCountsCache.promise = sb.rpc('dashboard_counts').then(function (r) {
+      if (r.error) throw r.error;
+      return r.data;
+    }).catch(function (e) {
+      _dashCountsCache.promise = null;
+      throw e;
+    });
+  }
+  return _dashCountsCache.promise;
+}
+
 async function loadStatusCounts() {
-  const statuses = ['lead', 'live', 'unsubscribed'];
-  const results = await Promise.all(statuses.map(s =>
-    sb.from('contacts').select('*', { count: 'exact', head: true }).eq('status', s)
-  ));
-  statuses.forEach((s, i) => {
-    state.counts[s] = results[i].count || 0;
-  });
+  try {
+    const d = await fetchDashboardCounts();
+    state.counts.lead = (d.status && d.status.lead) || 0;
+    state.counts.live = (d.status && d.status.live) || 0;
+    state.counts.unsubscribed = (d.status && d.status.unsubscribed) || 0;
+  } catch (e) { console.error('dashboard counts', e); }
 }
 
 
 async function loadSourceStatusCounts() {
-  // Load lead/live/unsub counts filtered by current source
+  // Lead/live/unsub counts filtered by current source (from the same RPC)
   const sf = state.sourceFilter;
   if (sf === 'all') {
     // Reset to null so subtabs show global counts
     state.sourceStatusCounts = { lead: null, live: null, unsubscribed: null };
     return;
   }
-
-  const SOURCE_TAGS = {
-    gp_surgery:      null,
-    hse:             'Source: HSE',
-    children_homes:  'Ofsted Register',
-    agency:          'Source: Agency Outreach',
-    ahp:             'Source: NHS Jobs AHP',
-    nhs_scotland:    'Source: NHS Scotland',
-    private_theatre: 'Source: Theatres',
-    care_home:       'Source: Care Home',
-    bms:             'Source: BMS Outreach',
-    sterile:         'Source: Sterile Services',
-    nhs_staffbank:   'Source: NHS Staff Bank',
-    camhs:           'Source: CAMHS',
-    anp:             'Source: ANP',
-    enp:             'Source: ENP',
-  };
-
-  function applyFilter(q) {
-    if (sf === 'gp_surgery') {
-      return q
-        .not('notes', 'ilike', '%Ofsted Register%')
-        .not('notes', 'ilike', '%Source: Agency%')
-        .not('notes', 'ilike', '%Source: Pharmacy%')
-        .not('notes', 'ilike', '%Source: BMS%')
-        .not('notes', 'ilike', '%Source: Sterile%')
-        .not('notes', 'ilike', '%Source: Theatres%')
-        .not('notes', 'ilike', '%Source: NHS Staff Bank%')
-        .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
-        .not('notes', 'ilike', '%Source: Care Home%')
-        .not('notes', 'ilike', '%Source: CAMHS%')
-        .not('notes', 'ilike', '%Source: HSE%');
-    }
-    const tag = SOURCE_TAGS[sf];
-    if (tag) return q.ilike('notes', `%${tag}%`);
-    return q;
+  try {
+    const d = await fetchDashboardCounts();
+    const s = d.source_status && d.source_status[sf];
+    state.sourceStatusCounts = s
+      ? { lead: s.lead || 0, live: s.live || 0, unsubscribed: s.unsubscribed || 0 }
+      : { lead: null, live: null, unsubscribed: null };
+  } catch (e) {
+    console.error('source status counts', e);
+    state.sourceStatusCounts = { lead: null, live: null, unsubscribed: null };
   }
-
-  const [leadRes, liveRes, unsubRes] = await Promise.all([
-    applyFilter(sb.from('contacts').select('id', { count: 'exact', head: true })).eq('status', 'lead'),
-    applyFilter(sb.from('contacts').select('id', { count: 'exact', head: true })).eq('status', 'live'),
-    applyFilter(sb.from('contacts').select('id', { count: 'exact', head: true })).eq('status', 'unsubscribed'),
-  ]);
-
-  state.sourceStatusCounts = {
-    lead:         leadRes.count  || 0,
-    live:         liveRes.count  || 0,
-    unsubscribed: unsubRes.count || 0,
-  };
 }
 
 async function loadFilterOptions() {
@@ -459,76 +439,11 @@ async function loadFilterOptions() {
 
 
 async function loadSourceCounts() {
-  const [allRes, chRes, ahpRes, agencyRes, theatreRes, careRes, gpRes, anpRes, enpRes, scotRes, hseRes] = await Promise.all([
-    sb.from('contacts').select('id', { count: 'exact', head: true }),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Ofsted Register%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: NHS Jobs AHP%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: Agency Outreach%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: Theatres%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: Care Home%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .not('notes', 'ilike', '%Ofsted Register%')
-      .not('notes', 'ilike', '%Source: Agency%')
-      .not('notes', 'ilike', '%Source: Pharmacy%')
-      .not('notes', 'ilike', '%Source: BMS%')
-      .not('notes', 'ilike', '%Source: Sterile%')
-      .not('notes', 'ilike', '%Source: Theatres%')
-      .not('notes', 'ilike', '%Source: NHS Staff Bank%')
-      .not('notes', 'ilike', '%Source: NHS Jobs AHP%')
-      .not('notes', 'ilike', '%Source: Care Home%')
-      .not('notes', 'ilike', '%Source: CAMHS%')
-      .not('notes', 'ilike', '%Source: ANP%')
-      .not('notes', 'ilike', '%Source: ENP%')
-      .not('notes', 'ilike', '%Source: HSE%')
-      .not('notes', 'ilike', '%Source: NHS Scotland%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: ANP%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: ENP%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: NHS Scotland%'),
-    sb.from('contacts').select('id', { count: 'exact', head: true })
-      .ilike('notes', '%Source: HSE%'),
-  ]);
-  state.sourceCounts = {
-    all:             allRes.count     || 0,
-    gp_surgery:      gpRes.count      || 0,
-    children_homes:  chRes.count      || 0,
-    ahp:             ahpRes.count     || 0,
-    agency:          agencyRes.count  || 0,
-    private_theatre: theatreRes.count || 0,
-    care_home:       careRes.count    || 0,
-    anp:             anpRes.count     || 0,
-    enp:             enpRes.count     || 0,
-    nhs_scotland:    scotRes.count    || 0,
-    hse:             hseRes.count    || 0,
-  };
   try {
-    var dayStart = new Date(); dayStart.setHours(0,0,0,0);
-    var tRes = await sb.from('contacts').select('notes').gte('created_at', dayStart.toISOString()).limit(3000);
-    var todayRows = tRes.data || [];
-    var tc = { all: todayRows.length, gp_surgery: 0, children_homes: 0, ahp: 0, agency: 0, private_theatre: 0, care_home: 0, anp: 0, enp: 0, nhs_scotland: 0, hse: 0 };
-    todayRows.forEach(function(r){
-      var n = (r.notes || '').toLowerCase();
-      if (n.indexOf('ofsted register') >= 0) { tc.children_homes++; }
-      else if (n.indexOf('source: nhs jobs ahp') >= 0) { tc.ahp++; }
-      else if (n.indexOf('source: nhs scotland') >= 0) { tc.nhs_scotland++; }
-      else if (n.indexOf('source: agency outreach') >= 0) { tc.agency++; }
-      else if (n.indexOf('source: theatres') >= 0) { tc.private_theatre++; }
-      else if (n.indexOf('source: care home') >= 0) { tc.care_home++; }
-      else if (n.indexOf('source: anp') >= 0) { tc.anp++; }
-      else if (n.indexOf('source: enp') >= 0) { tc.enp++; }
-      else if (n.indexOf('source: hse') >= 0) { tc.hse++; }
-      else if (n.indexOf('source: pharmacy') >= 0 || n.indexOf('source: bms') >= 0 || n.indexOf('source: sterile') >= 0 || n.indexOf('source: nhs staff bank') >= 0 || n.indexOf('source: camhs') >= 0) { }
-      else { tc.gp_surgery++; }
-    });
-    state.newTodayCounts = tc;
-  } catch (e) { state.newTodayCounts = null; }
+    const d = await fetchDashboardCounts();
+    if (d.sources) state.sourceCounts = d.sources;
+    state.newTodayCounts = d.today || null;
+  } catch (e) { console.error('source counts', e); state.newTodayCounts = null; }
 }
 
 async function loadContactsPage() {
