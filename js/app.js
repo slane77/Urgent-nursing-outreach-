@@ -405,6 +405,7 @@ async function loadStatusCounts() {
     state.counts.lead = (d.status && d.status.lead) || 0;
     state.counts.live = (d.status && d.status.live) || 0;
     state.counts.unsubscribed = (d.status && d.status.unsubscribed) || 0;
+    state.sourceStatusAll = d.source_status || null;
   } catch (e) { console.error('dashboard counts', e); }
 }
 
@@ -1178,7 +1179,11 @@ function renderCompose() {
   if (state.composeSelectedIds) return renderBrevoSend();
 
   const template = state.templates.find(t => t.id === state.composeTemplateId);
-  const sourceCount = state.counts[state.composeListFilter] || 0;
+  // Counts scoped to the selected Source (falls back to global for 'all')
+  const _composeSS = (state.composeSourceFilter !== 'all' && state.sourceStatusAll && state.sourceStatusAll[state.composeSourceFilter]) || null;
+  const composeLeadCount = _composeSS ? (_composeSS.lead || 0) : state.counts.lead;
+  const composeLiveCount = _composeSS ? (_composeSS.live || 0) : state.counts.live;
+  const sourceCount = (state.composeListFilter === 'live' ? composeLiveCount : composeLeadCount) || 0;
   const previewMatch = state.composePreviewCounts ? state.composePreviewCounts.matching : null;
 
   return `
@@ -1234,8 +1239,8 @@ function renderCompose() {
         <div class="field">
           <label>Status</label>
           <select class="select" id="compose-list">
-            <option value="lead" ${state.composeListFilter==='lead'?'selected':''}>Leads (${state.counts.lead})</option>
-            <option value="live" ${state.composeListFilter==='live'?'selected':''}>Live (${state.counts.live})</option>
+            <option value="lead" ${state.composeListFilter==='lead'?'selected':''}>Leads (${composeLeadCount.toLocaleString()})</option>
+            <option value="live" ${state.composeListFilter==='live'?'selected':''}>Live (${composeLiveCount.toLocaleString()})</option>
           </select>
         </div>
         <div class="field">
