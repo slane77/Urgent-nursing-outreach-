@@ -48,18 +48,53 @@ function badge(status) {
 }
 function canUpload(status){ return status !== 'verified' && status !== 'received' && status !== 'verifying'; }
 
+let referees = [];
+const refBadge = (s) => s==='confirmed' ? '<span class="badge b-ok">Confirmed</span>'
+  : s==='received' ? '<span class="badge b-have">Reference received</span>'
+  : s==='requested' ? '<span class="badge b-have">Request sent</span>'
+  : '<span class="badge b-need">Queued</span>';
+
+function refereeBlock() {
+  const list = referees.map(r => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13.5px;"><span style="flex:1"><strong>${esc(r.name)}</strong>${r.organisation?(' · '+esc(r.organisation)):''}</span>${refBadge(r.status)}</div>`).join('');
+  return `
+    <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px;">
+      <div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;">We need referees covering your last <strong>3 years</strong> of work. Add them below and <strong>we'll contact them for you</strong> — nothing else for you to do.</div>
+      ${list}
+      <div class="up" style="flex-direction:column;align-items:stretch;gap:6px;" id="refForm">
+        <input placeholder="Referee name" class="rf-name" />
+        <input placeholder="Referee email" type="email" class="rf-email" />
+        <input placeholder="Organisation (e.g. the hospital or agency)" class="rf-org" />
+        <div style="display:flex;gap:8px;align-items:center;"><button class="btn sm" id="addRefBtn">Add referee</button><span class="muted" id="refMsg"></span></div>
+      </div>
+    </div>`;
+}
+
 function render(items) {
   if (!items.length) { $('list').innerHTML = '<p class="muted">No documents are outstanding right now. 🎉</p>'; return; }
   $('list').innerHTML = items.map(it => `
     <div class="item" data-item="${it.id}" data-req="${it.requirement_id||''}">
       <div class="top"><span class="nm">${esc(it.name)}</span>${badge(it.status)}</div>
-      ${canUpload(it.status) ? `<div class="up"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" /><button class="btn sm">Upload</button><span class="muted s"></span></div>` : ''}
+      ${canUpload(it.status) ? `<div class="up"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" /><button class="btn sm up-btn">Upload</button><span class="muted s"></span></div>` : ''}
+      ${it.is_reference ? refereeBlock() : ''}
     </div>`).join('');
   $('list').querySelectorAll('.item').forEach(row => {
-    const btn = row.querySelector('button'); if (!btn) return;
-    btn.onclick = () => uploadFor(row);
+    const btn = row.querySelector('.up-btn'); if (btn) btn.onclick = () => uploadFor(row);
   });
+  const addBtn = document.getElementById('addRefBtn');
+  if (addBtn) addBtn.onclick = async () => {
+    const f = document.getElementById('refForm');
+    const name = f.querySelector('.rf-name').value.trim();
+    const email = f.querySelector('.rf-email').value.trim();
+    const organisation = f.querySelector('.rf-org').value.trim();
+    const m = document.getElementById('refMsg');
+    if (!name || !email) { m.textContent = 'Name and email needed.'; return; }
+    addBtn.disabled = true; m.textContent = 'Adding…';
+    const out = await api({ action:'add_referee', name, email, organisation });
+    if (out.ok) { referees = out.referees || []; $('msg').textContent = 'Referee added — we\'ll contact them for you. ✓'; render(lastItems); }
+    else { m.textContent = out.message || 'Could not add — try again.'; addBtn.disabled = false; }
+  };
 }
+let lastItems = [];
 async function prepareFile(file) {
   // Downscale large images in-browser so uploads are reliable.
   if (file.type && file.type.startsWith('image/')) {
@@ -85,7 +120,7 @@ async function uploadFor(row) {
     const { b64, type, name } = await prepareFile(file);
     if (b64.length > 13000000) { s.textContent = 'That file’s too big — please upload a smaller scan, or email it to compliance@daywebster.com.'; btn.disabled = false; return; }
     const out = await api({ action: 'upload', item_id: row.dataset.item || null, requirement_id: row.dataset.req || null, filename: name, content_type: type, content_base64: b64 });
-    if (out.ok) { $('msg').textContent = 'Thank you — that’s with our team. ✓'; render(out.items); }
+    if (out.ok) { $('msg').textContent = 'Thank you — that’s with our team. ✓'; lastItems = out.items || []; render(lastItems); }
     else { s.textContent = out.message || 'Upload failed — please try again.'; btn.disabled = false; }
   } catch (e) { s.textContent = 'Upload failed — please try again.'; btn.disabled = false; }
 }
@@ -96,7 +131,9 @@ async function start() {
   if (out.error) { $('sub').textContent = 'That link doesn’t look right — please use the latest one we emailed you.'; return; }
   $('hello').textContent = `Hi ${out.candidate.first_name || 'there'} 👋`;
   $('sub').textContent = out.candidate.discipline ? `${out.candidate.discipline} — here’s what we need to get you work-ready.` : 'Here’s what we need to get you work-ready.';
-  render(out.items);
+  referees = out.referees || [];
+  lastItems = out.items || [];
+  render(lastItems);
 }
 start();
 </script>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Compliance rules — governance — Day Webster</title>
+<link rel="stylesheet" href="dw-theme.css" />
+<style>
+  .doc { max-width:880px; margin:0 auto; padding:0 20px 60px; }
+  .doc h1 { font-size:26px; margin:20px 0 4px; }
+  .lead { color:var(--ink-soft); font-size:14.5px; margin:0 0 18px; }
+  .banner { border-radius:14px; padding:14px 16px; margin:14px 0; font-size:14px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .banner.ok { background:var(--green-l); color:var(--green); }
+  .banner.warn { background:var(--amber-l); color:var(--amber); }
+  .banner b { font-size:15px; }
+  .disc { margin:26px 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--green); }
+  .rule { border:1px solid var(--hair); border-radius:14px; padding:14px 16px; margin-bottom:10px; font-size:13.5px; }
+  .rule h3 { margin:0 0 4px; font-size:15px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .tagz { font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:980px; background:var(--field); color:var(--ink-soft); }
+  .tagz.req { background:var(--green-l); color:var(--green); }
+  .tagz.hum { background:#f3e8ff; color:#7e22ce; }
+  .rule .sec { margin-top:7px; }
+  .rule .sec b { color:var(--ink-soft); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; }
+  .rule ul { margin:3px 0 0; padding-left:18px; }
+  .hist { font-size:12.5px; color:var(--ink-soft); }
+  .printbar { text-align:center; padding:12px; }
+  @media print { .topbar,.printbar,.approve { display:none; } body{background:#fff;} .rule{ break-inside:avoid; } }
+</style>
+</head>
+<body>
+<div class="topbar"><a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+  <nav class="topnav"><a href="candidates.html">Candidates</a><a href="admin.html">Admin</a><a href="golive.html">Go-live</a></nav>
+</div>
+<div class="printbar"><button class="btn secondary" onclick="window.print()">Print / Save as PDF</button></div>
+<div class="doc">
+  <h1>Compliance rules — review &amp; sign-off</h1>
+  <p class="lead">These are the rules the system enforces on every document — what's accepted, what must be true, and what gets flagged or bounced back to a candidate. <strong>Approving creates a numbered, dated, signed version;</strong> any later rule change is recorded and shown here until re-approved.</p>
+  <div id="status"></div>
+  <div id="list"><p class="muted">Loading…</p></div>
+  <h2 class="disc">Approval history</h2>
+  <div id="history" class="hist">—</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script>
+const sb = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY, { db:{ schema:'candidate' } });
+const $ = (id)=>document.getElementById(id);
+const esc = (s)=>(s??'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function renderSpec(sp){
+  if (!sp) return '<div class="sec muted">No review spec.</div>';
+  const li = (a)=>Array.isArray(a)?`<ul>${a.map(x=>`<li>${esc(typeof x==='string'?x:JSON.stringify(x))}</li>`).join('')}</ul>`:esc(JSON.stringify(a));
+  let h = '';
+  if (sp.accepted) h += `<div class="sec"><b>Accepted</b><div>${esc(sp.accepted)}</div></div>`;
+  if (sp.must_be_true) h += `<div class="sec"><b>Must be true</b>${li(sp.must_be_true)}</div>`;
+  if (sp.flag_if) h += `<div class="sec"><b>Flag if</b>${li(sp.flag_if)}</div>`;
+  if (sp.extract) h += `<div class="sec"><b>Extract</b> <span class="muted">${esc((sp.extract||[]).join(' · '))}</span></div>`;
+  for (const k of ['expiry','webcheck_validity','content_rule','update_service_rule','eu_settlement','other_accepted_evidence','clearance_levels','required_modules','standard','note','barred_list','also_record','methods','source'])
+    if (sp[k]) h += `<div class="sec"><b>${esc(k.replace(/_/g,' '))}</b> ${Array.isArray(sp[k])?li(sp[k]):(typeof sp[k]==='object'?`<span class="muted">${esc(JSON.stringify(sp[k]))}</span>`:esc(sp[k])) }</div>`;
+  return h;
+}
+
+async function load(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if (!session) { $('list').innerHTML = '<p class="muted">Please sign in via the <a href="candidates.html">cockpit</a> first, then reopen this page.</p>'; return; }
+
+  const [{ data: st }, { data: reqs }, { data: discs }, { data: hist }] = await Promise.all([
+    sb.from('ruleset_status').select('*').maybeSingle(),
+    sb.from('compliance_requirements').select('*, disciplines(name), specialties(name)').order('sort_order'),
+    sb.from('disciplines').select('id,name').order('sort_order'),
+    sb.from('ruleset_approvals').select('version_no,approved_at,approved_email,notes').order('version_no',{ascending:false}).limit(10),
+  ]);
+
+  // status banner
+  if (!st) {
+    $('status').innerHTML = `<div class="banner warn"><b>⚠ Never approved.</b><span>The system is enforcing rules that no one has formally signed off. Review below, then approve.</span><button class="btn approve" id="approveBtn">Approve ruleset v1</button></div>`;
+  } else if ((st.changes_since ?? 0) > 0) {
+    $('status').innerHTML = `<div class="banner warn"><b>⚠ ${st.changes_since} rule change(s) since v${st.version_no}</b><span>approved ${(st.approved_at||'').slice(0,10)} by ${esc(st.approved_email)||'—'}. Re-approval needed.</span><button class="btn approve" id="approveBtn">Approve as v${st.version_no + 1}</button></div>`;
+  } else {
+    $('status').innerHTML = `<div class="banner ok"><b>✓ Ruleset v${st.version_no} approved</b><span>${(st.approved_at||'').slice(0,10)} by ${esc(st.approved_email)||'—'}${st.notes?(' · '+esc(st.notes)):''}. No changes since.</span></div>`;
+  }
+  const btn = $('approveBtn');
+  if (btn) btn.onclick = async () => {
+    const notes = prompt('Sign-off note (optional) — e.g. "Reviewed against framework schedule v6":') ;
+    if (notes === null) return;
+    btn.disabled = true; btn.textContent = 'Approving…';
+    const { data, error } = await sb.rpc('approve_ruleset', { p_notes: notes || null });
+    if (error) { alert(error.message); btn.disabled = false; btn.textContent = 'Approve'; }
+    else load();
+  };
+
+  // grouped rules
+  const groups = {};
+  (reqs||[]).filter(r=>r.active).forEach(r=>{
+    const g = r.disciplines?.name ? (r.disciplines.name + (r.specialties?.name?(' — '+r.specialties.name):'')) : 'All disciplines';
+    (groups[g] = groups[g] || []).push(r);
+  });
+  const order = ['All disciplines', ...(discs||[]).map(d=>d.name)];
+  const keys = Object.keys(groups).sort((a,b)=>{
+    const ia = order.findIndex(o=>a.startsWith(o)), ib = order.findIndex(o=>b.startsWith(o));
+    return (ia<0?99:ia)-(ib<0?99:ib) || a.localeCompare(b);
+  });
+  $('list').innerHTML = keys.map(k=>`<h2 class="disc">${esc(k)}</h2>` + groups[k].map(r=>`
+    <div class="rule">
+      <h3>${esc(r.name)} <span class="tagz">${esc(r.code)}</span>${r.required?'<span class="tagz req">required</span>':'<span class="tagz">optional</span>'}${r.needs_human?'<span class="tagz hum">human-decided</span>':''}${r.tier?`<span class="tagz">tier ${esc(r.tier)}</span>`:''}</h3>
+      ${renderSpec(r.review_spec)}
+    </div>`).join('')).join('');
+
+  $('history').innerHTML = (hist&&hist.length)
+    ? hist.map(h=>`v${h.version_no} — ${(h.approved_at||'').slice(0,16).replace('T',' ')} by ${esc(h.approved_email)||'—'}${h.notes?(' · '+esc(h.notes)):''}`).join('<br>')
+    : 'No approvals yet.';
+}
+load();
+</script>
+</body>
+</html>

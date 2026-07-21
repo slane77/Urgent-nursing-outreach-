@@ -7,6 +7,7 @@
     { "source": "/portal", "destination": "/portal.html" },
     { "source": "/audit-pack", "destination": "/audit-pack.html" },
     { "source": "/guide", "destination": "/guide.html" },
+    { "source": "/rules", "destination": "/rules.html" },
     { "source": "/golive", "destination": "/golive.html" },
     { "source": "/documents", "destination": "/portal.html" },
     { "source": "/poster", "destination": "/register-poster.html" },
