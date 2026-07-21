@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Go-live checklist — Candidate Engine — Day Webster</title>
+<link rel="stylesheet" href="dw-theme.css" />
+<style>
+  .doc { max-width:820px; margin:0 auto; padding:0 20px 60px; }
+  .doc h1 { font-size:28px; margin:22px 0 6px; }
+  .lead { color:var(--ink-soft); font-size:15px; margin:0 0 22px; }
+  .item { display:flex; gap:14px; padding:16px 0; border-bottom:1px solid var(--hair); font-size:14.5px; line-height:1.55; }
+  .item:last-child { border-bottom:0; }
+  .cb { flex:0 0 26px; height:26px; border:2px solid var(--line); border-radius:8px; margin-top:2px; }
+  .item h3 { margin:0 0 4px; font-size:15px; }
+  .who { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; padding:2px 9px; border-radius:980px; margin-left:8px; vertical-align:middle; }
+  .who.you { background:var(--green-l); color:var(--green); }
+  .who.it { background:#e8f0fe; color:#1a56db; }
+  .who.lead { background:#f3e8ff; color:#7e22ce; }
+  code { background:var(--field); border:1px solid var(--line); border-radius:6px; padding:1px 7px; font-size:12px; word-break:break-all; }
+  section > h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--green); margin:28px 0 4px; }
+  .printbar { text-align:center; padding:14px; }
+  @media print { .topbar,.printbar { display:none; } body{ background:#fff; } .item{ break-inside:avoid; } }
+</style>
+</head>
+<body>
+<div class="topbar"><a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+  <nav class="topnav"><a href="guide.html">Staff guide</a><a href="brief.html">Project brief</a></nav>
+</div>
+<div class="printbar"><button class="btn" onclick="window.print()">Print / Save as PDF</button></div>
+<div class="doc">
+  <h1>Go-live checklist</h1>
+  <p class="lead">The system is built and running. These are the remaining steps — most need a person with the right access, not more code. Work top to bottom.</p>
+
+  <section><h2>Governance — decides everything else</h2>
+    <div class="item"><div class="cb"></div><div><h3>Compliance lead validates the review rules <span class="who lead">Compliance lead</span></h3>All 45 document requirements carry review rules built from our own SOPs (DBS, OH/Healthier Business, NMC, RTW, references, PoA…). The compliance lead should read them against the current framework schedule and confirm or correct. Ask Claude for a printout of any/all specs.</div></div>
+    <div class="item"><div class="cb"></div><div><h3>Decide: feeder or system of record? <span class="who you">Scott</span></h3>Does this system <em>feed</em> apps.daywebster.com (which stays the audited record), or become the record itself? This sets how far we harden retention, exports and verification workflows.</div></div>
+    <div class="item"><div class="cb"></div><div><h3>Data-protection sign-off for AI processing <span class="who lead">Compliance lead</span></h3>Candidate documents are read by Anthropic's API (no training on API data by default; DPA available). Confirm and record this before real candidate PII flows in production. Test with dummy data until then.</div></div>
+  </section>
+
+  <section><h2>Plumbing — one-off technical steps</h2>
+    <div class="item"><div class="cb"></div><div><h3>join.daywebster.com <span class="who it">IT / DNS</span></h3>Vercel → project settings → Domains → add <code>join.daywebster.com</code>, then add the CNAME it shows (host <code>join</code> → <code>cname.vercel-dns.com</code>) at the daywebster.com DNS host. Then tell Claude — the QR poster, form links and emails get repointed in minutes.</div></div>
+    <div class="item"><div class="cb"></div><div><h3>Brevo inbound email <span class="who it">IT / Brevo admin</span></h3>Brevo → Inbound Parsing → add domain <code>candidates.daywebster.com</code> (add the MX record Brevo shows, on that subdomain only) and set the webhook to <code>https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/inbound-email?secret=dw_in_ba01233ebf9fe76963949b1c</code>. Unlocks referee replies and emailed documents being auto-filed and AI-checked.</div></div>
+    <div class="item"><div class="cb"></div><div><h3>Allow-list Brevo in Microsoft 365 <span class="who it">IT</span></h3>So internal @daywebster.com test emails stop being quarantined (real candidates on Gmail/Outlook are unaffected). Optional but saves confusion.</div></div>
+    <div class="item"><div class="cb"></div><div><h3>Enable leaked-password protection <span class="who it">IT</span></h3>Supabase → Authentication → password settings → enable HaveIBeenPwned check. Two clicks.</div></div>
+  </section>
+
+  <section><h2>People — switch the team on</h2>
+    <div class="item"><div class="cb"></div><div><h3>Everyone logs in once, desks assigned <span class="who you">Scott</span></h3>All six staff accounts already work (same password as the outreach app). Each person opens <code>/candidates.html</code> and signs in; then on <code>/admin.html → People &amp; desks</code> tick each recruiter's desks (and any extra admins). Share the <a href="guide.html">one-page staff guide</a>.</div></div>
+    <div class="item"><div class="cb"></div><div><h3>Dress rehearsal <span class="who you">Scott</span></h3>Run one candidate end-to-end with a personal (non-daywebster) email: register → receive the document email → upload to the portal → see the AI pre-check → verify → sign off to Maintenance → print the audit pack. Confirms the whole chain in ten minutes.</div></div>
+    <div class="item"><div class="cb"></div><div><h3>Clear test data <span class="who you">Scott</span></h3>Before launch, ask Claude to purge the test candidates (Billy, Cassey, Rebecca &amp; co.) so reporting starts clean.</div></div>
+  </section>
+
+  <section><h2>Launch — start filling the funnel</h2>
+    <div class="item"><div class="cb"></div><div><h3>Point candidates at the front door <span class="who you">Scott</span></h3>Website "Register your interest" button (snippets at <code>/embed-snippets.html</code>), QR posters (<code>/register-poster.html</code>), email signatures, referral push to existing candidates.</div></div>
+    <div class="item"><div class="cb"></div><div><h3>Import the old spreadsheets <span class="who you">Scott</span></h3>Once live, bulk-load historic candidate lists via <code>/candidate-import.html</code> — the AI maps each file's columns; duplicates are skipped.</div></div>
+  </section>
+</div>
+</body>
+</html>
