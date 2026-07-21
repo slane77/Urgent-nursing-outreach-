@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Staff guide — Candidate Engine — Day Webster</title>
+<link rel="stylesheet" href="dw-theme.css" />
+<style>
+  .doc { max-width:820px; margin:0 auto; padding:0 20px 60px; }
+  .doc h1 { font-size:28px; margin:22px 0 6px; }
+  .lead { color:var(--ink-soft); font-size:15px; margin:0 0 22px; }
+  section { margin:26px 0; }
+  section > h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--green); margin:0 0 10px; }
+  .step { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid var(--hair); font-size:14.5px; line-height:1.5; }
+  .step:last-child { border-bottom:0; }
+  .n { flex:0 0 30px; height:30px; border-radius:50%; background:var(--green-l); color:var(--green); font-weight:700; display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .kbd { background:var(--field); border:1px solid var(--line); border-radius:6px; padding:1px 7px; font-size:12.5px; font-weight:600; white-space:nowrap; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--hair); vertical-align:top; }
+  th { color:var(--ink-soft); font-size:12px; }
+  .warn { background:var(--amber-l); border:1px solid #f3dca6; color:var(--amber); border-radius:14px; padding:12px 14px; font-size:13.5px; }
+  @media print { .topbar,.printbar { display:none; } body{ background:#fff; } section{ break-inside:avoid; } }
+  .printbar { text-align:center; padding:14px; }
+</style>
+</head>
+<body>
+<div class="topbar"><a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
+  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a><a href="admin.html">Admin</a></nav>
+</div>
+<div class="printbar"><button class="btn" onclick="window.print()">Print / Save as PDF</button></div>
+<div class="doc">
+  <h1>Candidate Engine — staff guide</h1>
+  <p class="lead">One page on how to sign in, work your candidates, and get files audit-ready. Five minutes to read.</p>
+
+  <section>
+    <h2>1 · Sign in</h2>
+    <div class="step"><div class="n">1</div><div>Go to <strong>urgent-nursing-outreach.vercel.app/candidates.html</strong> and sign in with your <strong>Day Webster email + password</strong> (same login across all pages). First time in? Ask an admin for your temporary password, then use <span class="kbd">Change my password</span> on the Admin page.</div></div>
+    <div class="step"><div class="n">2</div><div>You'll see candidates on <strong>your desks only</strong>. If your list is empty, an admin needs to tick your desks on <strong>Admin → People &amp; desks</strong>. Admins see everything.</div></div>
+  </section>
+
+  <section>
+    <h2>2 · How a candidate flows through</h2>
+    <div class="step"><div class="n">1</div><div><strong>They register</strong> (web form or chat). The system captures their details, profession, PIN, address and consent — and <strong>auto-routes them to the right desk</strong>. Their document checklist opens and they're emailed a secure upload link automatically.</div></div>
+    <div class="step"><div class="n">2</div><div><strong>They upload documents</strong> via their personal portal link (or email). Each document is <strong>pre-checked by AI</strong> against our compliance rules — clear problems (expired, wrong type, blurry) are automatically bounced back to the candidate with a friendly fix-it email. Sensitive items are never auto-emailed; they wait for you.</div></div>
+    <div class="step"><div class="n">3</div><div><strong>You review.</strong> Everything arrives as <em>unverified — for audit</em>. Open the candidate, look at each document (<span class="kbd">View document</span>), read the AI pre-check, and mark <span class="kbd">Verified</span> or <span class="kbd">Unsuitable</span> (with a reason).</div></div>
+    <div class="step"><div class="n">4</div><div><strong>Full file audit → sign-off.</strong> When every requirement is verified, click <span class="kbd">Sign off → Maintenance</span>. That records you + the date, and marks the candidate <strong>compliant and bookable</strong>. If a document later expires, they drop to <em>Requires update</em> automatically and get chased daily.</div></div>
+  </section>
+
+  <section>
+    <h2>3 · The buttons on a candidate's file</h2>
+    <table>
+      <tr><th>Button</th><th>What it does</th></tr>
+      <tr><td><span class="kbd">Run agent</span></td><td>The AI recruiter engages/qualifies the candidate and emails them (never makes compliance decisions).</td></tr>
+      <tr><td><span class="kbd">Email document request</span></td><td>(Re)sends their personalised checklist + secure upload link from compliance@.</td></tr>
+      <tr><td><span class="kbd">Copy portal link</span></td><td>Copies their personal upload link — paste into a text or WhatsApp.</td></tr>
+      <tr><td><span class="kbd">View document</span> / <span class="kbd">Run AI review</span></td><td>Opens the stored file securely / re-runs the AI pre-check on it.</td></tr>
+      <tr><td><span class="kbd">Sign off → Maintenance</span></td><td>The audit gate: candidate becomes compliant &amp; bookable. Auditors only.</td></tr>
+      <tr><td><span class="kbd">Requires update</span></td><td>Drops a lapsed candidate out of compliance until re-audited.</td></tr>
+      <tr><td><span class="kbd">Audit pack</span></td><td>Printable per-candidate compliance file for framework audits.</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>4 · Where things live</h2>
+    <table>
+      <tr><th>Page</th><th>Use it for</th></tr>
+      <tr><td><strong>/dashboard.html</strong></td><td>Control tower — pipeline counts, needs-review, expiring, intake by channel.</td></tr>
+      <tr><td><strong>/candidates.html</strong></td><td>Your day-to-day cockpit — pipeline, review queue, <strong>Audit / readiness</strong> tab.</td></tr>
+      <tr><td><strong>/admin.html</strong></td><td>Admins: people, desks, routing rules, passwords.</td></tr>
+      <tr><td><strong>/intake.html</strong> · <strong>/chat</strong></td><td>The public candidate front door — share these links.</td></tr>
+      <tr><td><strong>/candidate-import.html</strong></td><td>Bulk-load old spreadsheets (AI maps the columns).</td></tr>
+    </table>
+  </section>
+
+  <div class="warn"><strong>The golden rule:</strong> the system collects, checks and chases — but nothing counts as verified, and nobody is bookable, until a human auditor has reviewed the file and signed it off to Maintenance. AI pre-checks help you work faster; they are never the decision.</div>
+</div>
+</body>
+</html>
