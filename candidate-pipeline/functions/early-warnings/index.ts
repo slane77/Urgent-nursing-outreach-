@@ -22,8 +22,10 @@ const sb = createClient(
 );
 
 Deno.serve(async (req) => {
+  // Fail CLOSED: this endpoint is public (verify_jwt=false). If the secret is
+  // not configured, reject — a missing env var must not leave it wide open.
   const need = Deno.env.get("CRON_SECRET");
-  if (need && new URL(req.url).searchParams.get("secret") !== need) return new Response("forbidden", { status: 403 });
+  if (!need || new URL(req.url).searchParams.get("secret") !== need) return new Response("forbidden", { status: 403 });
 
   const now = Date.now();
   const cutoff = new Date(now + 60 * 864e5).toISOString();
