@@ -20,7 +20,8 @@ window.CONFIG = {
   SUPABASE_URL: 'https://udttpnaenmyxviuiwxqw.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_fDVJY1ZTiBWcTE9cTD7GBw_A6VYda5x',
 
-  // Public "Prefer to chat?" registration agent. Flip to true on Monday once the
-  // ANTHROPIC_API_KEY secret is set on the chat-intake function.
-  CHAT_ENABLED: true
+  // Public "Prefer to chat?" registration agent. Disabled until the chat-intake
+  // function is built (its backend does not yet exist). Flip to true once the
+  // chat-intake function is deployed and the ANTHROPIC_API_KEY secret is set.
+  CHAT_ENABLED: false
 };

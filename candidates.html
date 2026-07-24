@@ -13,9 +13,9 @@
 </header>
 <div class="subbar">
   <div class="tabs" id="tabs">
-    <div class="tab active" data-view="pipeline">Pipeline</div>
-    <div class="tab" data-view="review">Review queue <span id="reviewCount"></span></div>
-    <div class="tab" data-view="audit">Audit / readiness</div>
+    <div class="tab active" data-view="pipeline" role="tab" tabindex="0">Pipeline</div>
+    <div class="tab" data-view="review" role="tab" tabindex="0">Review queue <span id="reviewCount"></span></div>
+    <div class="tab" data-view="audit" role="tab" tabindex="0">Audit / readiness</div>
   </div>
 </div>
 
@@ -23,7 +23,7 @@
 <div class="loginwrap card hidden" id="login">
   <h3 style="margin-top:0">Sign in</h3>
   <p class="muted">Day Webster email &amp; password.</p>
-  <div class="loginform"><input type="email" id="email" placeholder="you@daywebster.com" /><input type="password" id="password" placeholder="Password" /><button class="btn" id="loginBtn">Sign in</button></div>
+  <div class="loginform"><input type="email" id="email" autocomplete="username" placeholder="you@daywebster.com" /><input type="password" id="password" autocomplete="current-password" placeholder="Password" /><button class="btn" id="loginBtn">Sign in</button></div>
   <p class="muted" id="loginMsg"></p>
 </div>
 
@@ -88,6 +88,9 @@ const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<'
 
 let state = { status:'sourced', disc:'', desk:'', search:'', page:0, disciplines:[], specialties:[], desks:[] };
 
+// Keyboard activation for div/span elements exposed as buttons/tabs.
+document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role=button],[role=tab]')) { e.preventDefault(); e.target.click(); } });
+
 // ---- Auth ----
 function refreshAuth(session) {
   if (session) { sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{}); $('login').classList.add('hidden'); $('app').classList.remove('hidden'); init(); }
@@ -126,7 +129,7 @@ async function count(status) {
 }
 async function renderStatusTabs() {
   const counts = await Promise.all(STATUSES.map(count));
-  $('statusTabs').innerHTML = STATUSES.map((s,i)=>`<div class="subtab ${s===state.status?'active':''}" data-s="${s}">${s}<span class="n">${counts[i]}</span></div>`).join('');
+  $('statusTabs').innerHTML = STATUSES.map((s,i)=>`<div class="subtab ${s===state.status?'active':''}" data-s="${s}" role="button" tabindex="0">${s}<span class="n">${counts[i]}</span></div>`).join('');
   $('statusTabs').querySelectorAll('.subtab').forEach(el => el.onclick = () => { state.status = el.dataset.s; state.page = 0; renderStatusTabs(); loadList(); });
 }
 
@@ -197,10 +200,13 @@ async function openCandidate(id) {
       </div>
       <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <button class="btn sm" id="signoffBtn">Sign off → Maintenance</button>
-        <button class="btn sm secondary" id="reqDocsBtn">Email document request</button>
-        <button class="btn sm secondary" id="copyLinkBtn">Copy portal link</button>
+        <!-- disabled: backend function not yet built (request-documents) -->
+        <button class="btn sm secondary" id="reqDocsBtn" disabled title="Coming soon">Email document request</button>
+        <!-- disabled: backend function not yet built (candidate portal / candidate-portal) -->
+        <button class="btn sm secondary" id="copyLinkBtn" disabled title="Coming soon">Copy portal link</button>
         <button class="btn sm secondary" id="reqUpdateBtn">Requires update</button>
         <span class="muted" id="compMsg"></span>
+        <span class="muted">Email request &amp; portal link — coming soon</span>
       </div>
       <p class="muted" style="margin-top:8px">Collected documents are held <strong>unverified — for audit</strong>. Signing off to Maintenance marks the candidate compliant and bookable, and records you + the date.</p>
     </div>
@@ -231,7 +237,7 @@ async function openCandidate(id) {
         </div>`:''}
         ${(it.artefact_path || it.needs_human)?`<div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
           ${it.artefact_path?`<button class="btn sm secondary" data-view="${esc(it.artefact_path)}">View document</button>`:''}
-          ${it.artefact_path?`<button class="btn sm secondary" data-airev="${it.id}">${it.ai_review?'Re-run AI review':'Run AI review'}</button>`:''}
+          ${it.artefact_path?`<!-- disabled: backend function not yet built (review-document) --><button class="btn sm secondary" data-airev="${it.id}" disabled title="Coming soon">${it.ai_review?'Re-run AI review':'Run AI review'}</button>`:''}
           ${it.needs_human?`<button class="btn sm" data-resolve="${it.id}" data-st="verified">Mark verified</button><button class="btn sm secondary" data-resolve="${it.id}" data-st="unsuitable">Mark unsuitable</button>`:''}
         </div>`:''}
       </div>`).join('') || '<span class="muted">None requested yet.</span>'}

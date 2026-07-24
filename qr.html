@@ -23,15 +23,15 @@
     <p class="muted" style="margin-bottom:18px;">Generate a QR code for any link, resize it, and download it as a PNG to drop into posters, emails or socials.</p>
 
     <div class="card">
-      <label>Link the QR points to</label>
+      <label for="url">Link the QR points to</label>
       <input id="url" type="url" value="https://urgent-nursing-outreach.vercel.app/intake.html" style="width:100%;" />
 
       <label style="margin-top:16px;">Size</label>
       <div class="sizes" id="sizes" style="justify-content:flex-start;">
-        <span class="chip" data-s="240">Small</span>
-        <span class="chip on" data-s="360">Medium</span>
-        <span class="chip" data-s="520">Large</span>
-        <span class="chip" data-s="800">XL (print)</span>
+        <span class="chip" data-s="240" role="button" tabindex="0">Small</span>
+        <span class="chip on" data-s="360" role="button" tabindex="0">Medium</span>
+        <span class="chip" data-s="520" role="button" tabindex="0">Large</span>
+        <span class="chip" data-s="800" role="button" tabindex="0">XL (print)</span>
       </div>
 
       <div class="stage" style="margin-top:22px;">
@@ -48,6 +48,8 @@
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
+  // Keyboard activation for span elements exposed as buttons.
+  document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role=button],[role=tab]')) { e.preventDefault(); e.target.click(); } });
   let size = 360;
   function render() {
     $('qr').innerHTML = '';
