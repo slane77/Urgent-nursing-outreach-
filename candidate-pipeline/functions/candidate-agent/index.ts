@@ -149,12 +149,21 @@ async function executeTool(candidateId: string, name: string, input: any): Promi
       if (input.town) patch.town = input.town;
       if (input.postcode) patch.postcode = input.postcode;
       if (input.shift_prefs) patch.shift_prefs = input.shift_prefs;
+      let discId: string | null = null;
       if (input.discipline_code) {
         const { data } = await sb.from("disciplines").select("id").eq("code", input.discipline_code).maybeSingle();
-        if (data) patch.discipline_id = data.id;
+        if (data) { patch.discipline_id = data.id; discId = data.id; }
       }
       if (input.specialty_code) {
-        const { data } = await sb.from("specialties").select("id").eq("code", input.specialty_code).maybeSingle();
+        // Specialty codes are unique only WITHIN a discipline — scope by the
+        // discipline just set, else the candidate's current one.
+        if (!discId) {
+          const { data: cur } = await sb.from("candidates").select("discipline_id").eq("id", candidateId).maybeSingle();
+          discId = cur?.discipline_id ?? null;
+        }
+        let sq = sb.from("specialties").select("id").eq("code", input.specialty_code);
+        sq = discId ? sq.eq("discipline_id", discId) : sq;
+        const { data } = await sq.limit(1).maybeSingle();
         if (data) patch.primary_specialty_id = data.id;
       }
       const { error } = await sb.from("candidates").update(patch).eq("id", candidateId);
@@ -250,7 +259,7 @@ Deno.serve(async (req) => {
 
     // --- Load context (taxonomy, candidate, recent transcript) ---
     const [{ data: disciplines }, { data: specialties }, { data: cand }, { data: history }, { data: allReqs }] = await Promise.all([
-      sb.from("disciplines").select("code,name").eq("active", true),
+      sb.from("disciplines").select("id,code,name").eq("active", true),
       sb.from("specialties").select("code,name,discipline_id,is_registered_manager"),
       sb.from("candidates").select("*").eq("id", candidate_id).maybeSingle(),
       sb.from("messages").select("direction,body,author").eq("candidate_id", candidate_id).order("created_at").limit(30),
@@ -265,7 +274,7 @@ Deno.serve(async (req) => {
       : "(no requirements configured for this discipline yet — qualify first, then a human will set them)";
 
     const taxonomy = (disciplines ?? [])
-      .map((d: any) => `${d.code} (${d.name}): ${(specialties ?? []).filter((s: any) => s.discipline_id).map((s: any) => s.code).join(", ")}`)
+      .map((d: any) => `${d.code} (${d.name}): ${(specialties ?? []).filter((s: any) => s.discipline_id === d.id).map((s: any) => s.code).join(", ")}`)
       .join("\n");
     const ctx = {
       taxonomy,

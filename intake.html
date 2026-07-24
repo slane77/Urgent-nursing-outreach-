@@ -158,6 +158,10 @@
         <input type="checkbox" id="consent" required />
         <label for="consent" style="font-weight:400; margin:0;">I consent to Day Webster storing my details and contacting me about work opportunities. I can withdraw consent at any time.</label>
       </div>
+      <div class="consent">
+        <input type="checkbox" id="marketing" />
+        <label for="marketing" style="font-weight:400; margin:0;">Optional: I'm happy to receive occasional updates, referral offers and news from Day Webster.</label>
+      </div>
       <button type="submit" class="submit" id="submit">Register</button>
       <div class="msg" id="msg"></div>
     </form>
@@ -255,6 +259,7 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   const f = e.target, msg = document.getElementById('msg'), btn = document.getElementById('submit');
   const data = Object.fromEntries(new FormData(f).entries());
   data.consent = document.getElementById('consent').checked;
+  data.marketing_consent = document.getElementById('marketing').checked;
   // Gather referred friends (only rows with a name or email).
   data.friends = [...friendsWrap.children].map((r) => ({
     name: r.querySelector('.f-name').value.trim(),
