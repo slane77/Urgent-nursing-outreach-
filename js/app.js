@@ -319,10 +319,10 @@ function renderAuthScreen(errorMsg, infoMsg, savedEmail) {
         <h1>Day Webster Group Outreach</h1>
         <div class="subtitle">Sign in to continue</div>
         <div class="field">
-          <input type="email" id="auth-email" placeholder="firstname.surname@daywebster.com" value="${esc(savedEmail || '')}" autofocus />
+          <input type="email" id="auth-email" autocomplete="username" placeholder="firstname.surname@daywebster.com" value="${esc(savedEmail || '')}" autofocus />
         </div>
         <div class="field">
-          <input type="password" id="auth-password" placeholder="Password" />
+          <input type="password" id="auth-password" autocomplete="current-password" placeholder="Password" />
         </div>
         <button id="auth-submit">Sign in</button>
         ${errorMsg ? `<div class="error">${esc(errorMsg)}</div>` : ''}
@@ -734,13 +734,13 @@ function renderAppShell() {
       <span class="user-pill">${esc(state.user.email)} <button id="sign-out-btn" title="Sign out">Sign out</button></span>
     </div>
     <div class="tabs">
-      <div class="tab ${state.view === 'dashboard' ? 'active' : ''}" data-view="dashboard">Dashboard</div>
-      <div class="tab ${state.view === 'database' ? 'active' : ''}" data-view="database">Database</div>
-      <div class="tab ${state.view === 'templates' ? 'active' : ''}" data-view="templates">Templates</div>
-      <div class="tab ${state.view === 'compose' ? 'active' : ''}" data-view="compose">Compose</div>
-      <div class="tab ${state.view === 'settings' ? 'active' : ''}" data-view="settings">Settings</div>
-      <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import">⬇ Import</div>
-      <div class="tab ${state.view === 'responses' ? 'active' : ''}" data-view="responses">&#x1F4EC; Responses</div>
+      <div class="tab ${state.view === 'dashboard' ? 'active' : ''}" data-view="dashboard" role="tab" tabindex="0">Dashboard</div>
+      <div class="tab ${state.view === 'database' ? 'active' : ''}" data-view="database" role="tab" tabindex="0">Database</div>
+      <div class="tab ${state.view === 'templates' ? 'active' : ''}" data-view="templates" role="tab" tabindex="0">Templates</div>
+      <div class="tab ${state.view === 'compose' ? 'active' : ''}" data-view="compose" role="tab" tabindex="0">Compose</div>
+      <div class="tab ${state.view === 'settings' ? 'active' : ''}" data-view="settings" role="tab" tabindex="0">Settings</div>
+      <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import" role="tab" tabindex="0">⬇ Import</div>
+      <div class="tab ${state.view === 'responses' ? 'active' : ''}" data-view="responses" role="tab" tabindex="0">&#x1F4EC; Responses</div>
     </div>
     <div class="main" id="main">
       ${state.view === 'dashboard' ? renderDashboard() :
@@ -864,15 +864,15 @@ function renderDatabase() {
       ].map(s => `<button class="stage-tab${state.dbStage===s.k?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
     </div>` : ''}
     <div class="subtabs">
-      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">
+      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead" role="button" tabindex="0">
         Leads
         <span class="count">${state.sourceStatusCounts.lead !== null ? state.sourceStatusCounts.lead.toLocaleString() : state.counts.lead.toLocaleString()}</span>
       </div>
-      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">
+      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live" role="button" tabindex="0">
         Live
         <span class="count">${state.sourceStatusCounts.live !== null ? state.sourceStatusCounts.live.toLocaleString() : state.counts.live.toLocaleString()}</span>
       </div>
-      <div class="subtab ${state.subTab === 'unsubscribed' ? 'active' : ''}" data-subtab="unsubscribed">
+      <div class="subtab ${state.subTab === 'unsubscribed' ? 'active' : ''}" data-subtab="unsubscribed" role="button" tabindex="0">
         Unsubscribes
         <span class="count">${state.sourceStatusCounts.unsubscribed !== null ? state.sourceStatusCounts.unsubscribed.toLocaleString() : state.counts.unsubscribed.toLocaleString()}</span>
       </div>
@@ -3862,6 +3862,10 @@ async function exportAllAsCsv() {
 // ============================================================================
 //  INIT
 // ============================================================================
+
+// Keyboard activation for div/span elements exposed as buttons/tabs (event
+// delegation — one listener covers all re-rendered tabs/subtabs).
+document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role=button],[role=tab]')) { e.preventDefault(); e.target.click(); } });
 
 (async function init() {
   // Sanity check config

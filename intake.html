@@ -18,6 +18,15 @@
          border-bottom:1px solid rgba(0,0,0,.07); }
   .nav img { height:38px; }
 
+  /* Soft brand glow behind the hero for a warmer first impression. */
+  body::before { content:""; position:fixed; left:0; right:0; top:0; height:460px; z-index:-1; pointer-events:none;
+    background:radial-gradient(58% 72% at 50% -6%, rgba(22,163,74,.11), rgba(14,165,164,.06) 42%, transparent 72%); }
+
+  /* Accessibility: visible keyboard focus + respect reduced motion. */
+  :focus-visible { outline:2px solid var(--green); outline-offset:3px; border-radius:12px; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline:none; }
+  @media (prefers-reduced-motion: reduce){ *,*::before,*::after{ animation-duration:.001ms !important; transition-duration:.001ms !important; scroll-behavior:auto !important; } }
+
   .hero { text-align:center; padding:72px 20px 30px; }
   .hero h1 { font-size:clamp(36px,6.5vw,58px); line-height:1.04; letter-spacing:-.025em; font-weight:700; margin:0 0 16px; }
   .hero .accent { background:linear-gradient(90deg,#16a34a,#0ea5a4); -webkit-background-clip:text; background-clip:text; color:transparent; }
@@ -87,36 +96,36 @@
     <div class="card">
     <form id="form">
       <div class="row">
-        <div><label>First name</label><input name="first_name" required /></div>
-        <div><label>Last name</label><input name="last_name" required /></div>
+        <div><label for="fn">First name</label><input id="fn" name="first_name" autocomplete="given-name" required /></div>
+        <div><label for="ln">Last name</label><input id="ln" name="last_name" autocomplete="family-name" required /></div>
       </div>
-      <label>Email</label><input type="email" name="email" required />
-      <label>Mobile number</label><input name="phone" inputmode="tel" />
+      <label for="em">Email</label><input id="em" type="email" name="email" autocomplete="email" required />
+      <label for="ph">Mobile number</label><input id="ph" name="phone" inputmode="tel" autocomplete="tel" />
       <div class="row">
-        <div><label>Profession</label>
+        <div><label for="disc">Profession</label>
           <select name="discipline_code" id="disc" required><option value="">Select…</option></select>
         </div>
-        <div><label>Speciality / role</label>
+        <div><label for="spec">Speciality / role</label>
           <select name="specialty_code" id="spec"><option value="">Select…</option></select>
         </div>
       </div>
-      <label>Which area are you mainly looking for work?</label>
-      <select name="region">
+      <label for="region">Which area are you mainly looking for work?</label>
+      <select name="region" id="region">
         <option value="">Prefer not to say</option>
         <option value="North">North of England</option>
         <option value="South">South of England</option>
         <option value="Other">Elsewhere / nationwide</option>
       </select>
-      <label>Home address</label><input name="address" placeholder="House/flat & street" />
+      <label for="addr">Home address</label><input id="addr" name="address" autocomplete="street-address" placeholder="House/flat & street" />
       <div class="row">
-        <div><label>Town</label><input name="town" id="town" /></div>
-        <div><label>Postcode</label><input name="postcode" id="postcode" /><small id="pcMsg" style="font-size:12px;color:var(--ink-soft);"></small></div>
+        <div><label for="town">Town</label><input name="town" id="town" autocomplete="address-level2" /></div>
+        <div><label for="postcode">Postcode</label><input name="postcode" id="postcode" autocomplete="postal-code" /><small id="pcMsg" style="font-size:12px;color:var(--ink-soft);"></small></div>
       </div>
-      <label>National Insurance number (optional)</label><input name="ni_number" id="ni" placeholder="e.g. QQ123456C — helps us identify you" /><small id="niMsg" style="font-size:12px;color:var(--ink-soft);"></small>
+      <label for="ni">National Insurance number (optional)</label><input name="ni_number" id="ni" placeholder="e.g. QQ123456C — helps us identify you" /><small id="niMsg" style="font-size:12px;color:var(--ink-soft);"></small>
       <input type="hidden" name="latitude" /><input type="hidden" name="longitude" />
-      <label>Availability (optional)</label><input name="availability" placeholder="e.g. immediate, days/nights, from June" />
+      <label for="avail">Availability (optional)</label><input id="avail" name="availability" placeholder="e.g. immediate, days/nights, from June" />
 
-      <label>How did you hear about us?</label>
+      <label for="heard">How did you hear about us?</label>
       <select name="heard_about" id="heard">
         <option value="">Select…</option>
         <option value="Indeed">Indeed</option>

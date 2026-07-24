@@ -14,27 +14,27 @@
 <main style="max-width:920px;">
   <div class="loginwrap card hidden" id="login">
     <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email &amp; password.</p>
-    <div class="loginform"><input type="email" id="email" placeholder="you@daywebster.com"/><input type="password" id="password" placeholder="Password"/><button class="btn" id="loginBtn">Sign in</button></div>
+    <div class="loginform"><input type="email" id="email" autocomplete="username" placeholder="you@daywebster.com"/><input type="password" id="password" autocomplete="current-password" placeholder="Password"/><button class="btn" id="loginBtn">Sign in</button></div>
     <p class="muted" id="loginMsg"></p>
   </div>
 
   <div id="app" class="hidden">
     <div class="card">
       <h3 style="margin-top:0">New vacancy</h3>
-      <label>Title</label><input id="title" placeholder="e.g. Theatres Nurse (RGN)"/>
+      <label for="title">Title</label><input id="title" placeholder="e.g. Theatres Nurse (RGN)"/>
       <div class="row">
-        <div><label>Discipline</label><select id="disc"></select></div>
-        <div><label>Specialty</label><select id="spec"><option value="">—</option></select></div>
+        <div><label for="disc">Discipline</label><select id="disc"></select></div>
+        <div><label for="spec">Specialty</label><select id="spec"><option value="">—</option></select></div>
       </div>
       <div class="row">
-        <div><label>Town</label><input id="town"/></div>
-        <div><label>Region</label><input id="region"/></div>
+        <div><label for="town">Town</label><input id="town"/></div>
+        <div><label for="region">Region</label><input id="region"/></div>
       </div>
       <div class="row">
-        <div><label>Pay</label><input id="pay" placeholder="Band 5 / £18–22/hr"/></div>
-        <div><label>Type</label><select id="etype"><option value="">—</option><option>full_time</option><option>part_time</option><option>contract</option><option>temporary</option></select></div>
+        <div><label for="pay">Pay</label><input id="pay" placeholder="Band 5 / £18–22/hr"/></div>
+        <div><label for="etype">Type</label><select id="etype"><option value="">—</option><option>full_time</option><option>part_time</option><option>contract</option><option>temporary</option></select></div>
       </div>
-      <label>Notes for the advert (optional)</label><textarea id="notes" rows="2" placeholder="shifts, setting, must-haves…"></textarea>
+      <label for="notes">Notes for the advert (optional)</label><textarea id="notes" rows="2" placeholder="shifts, setting, must-haves…"></textarea>
       <div style="margin-top:14px;"><button class="btn" id="gen">Generate advert</button> <span class="muted" id="genMsg"></span></div>
     </div>
 
