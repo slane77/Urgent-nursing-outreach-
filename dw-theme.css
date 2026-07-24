@@ -19,7 +19,9 @@ body{
   font-family:-apple-system,"SF Pro Display","SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
 }
-a{ color:var(--green); text-decoration:none; }
+/* Link/label green uses the darker shade so text clears WCAG AA (4.5:1) on
+   white — the bright --green is reserved for fills, icons and large type. */
+a{ color:var(--green-dark); text-decoration:none; }
 a:hover{ text-decoration:underline; }
 
 /* ---- Frosted top bar with logo ---- */
@@ -34,7 +36,7 @@ a:hover{ text-decoration:underline; }
 .topnav{ display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; }
 .topnav a{ color:var(--ink-soft); font-size:14px; font-weight:500; padding:7px 12px; border-radius:980px; transition:.15s ease; }
 .topnav a:hover{ background:rgba(0,0,0,.05); text-decoration:none; }
-.topnav a.here{ color:var(--green); background:var(--green-l); }
+.topnav a.here{ color:var(--green-dark); background:var(--green-l); }
 
 /* sub-bar for in-page tab strips */
 .subbar{ background:rgba(255,255,255,.7); border-bottom:1px solid var(--hair); padding:10px 22px; }
@@ -72,8 +74,8 @@ select{
 .loginform{ display:flex; flex-direction:column; gap:10px; }
 
 /* ---- Buttons (pill) ---- */
-.btn{ background:var(--green); color:#fff; border:0; border-radius:980px; padding:11px 20px; font-size:14px; font-weight:600; font-family:inherit; cursor:pointer; transition:transform .12s ease, background .16s ease, box-shadow .16s ease; box-shadow:0 6px 16px rgba(22,163,74,.24); }
-.btn:hover{ background:var(--green-dark); transform:translateY(-1px); }
+.btn{ background:linear-gradient(180deg,#1aa84f,#149a45); color:#fff; border:0; border-radius:980px; padding:11px 20px; font-size:14px; font-weight:600; font-family:inherit; cursor:pointer; transition:transform .12s ease, filter .16s ease, box-shadow .16s ease; box-shadow:0 6px 16px rgba(22,163,74,.26); }
+.btn:hover{ filter:brightness(1.04); transform:translateY(-1px); box-shadow:0 10px 22px rgba(22,163,74,.30); }
 .btn:active{ transform:translateY(0); }
 .btn:disabled{ opacity:.5; box-shadow:none; transform:none; cursor:not-allowed; }
 .btn.secondary{ background:#fff; color:var(--ink); border:1px solid var(--line); box-shadow:none; }
@@ -90,7 +92,7 @@ tr.click:hover{ background:#f7f7f9; cursor:pointer; }
 /* ---- Bits ---- */
 .muted{ color:var(--ink-soft); font-size:13px; }
 .hidden{ display:none !important; }
-.pill{ font-size:11px; font-weight:600; padding:3px 9px; border-radius:980px; background:var(--green-l); color:var(--green); white-space:nowrap; display:inline-block; }
+.pill{ font-size:11px; font-weight:600; padding:3px 9px; border-radius:980px; background:var(--green-l); color:var(--green-dark); white-space:nowrap; display:inline-block; }
 .pill.flag{ background:var(--amber-l); color:var(--amber); }
 pre{ white-space:pre-wrap; background:var(--field); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:13px; font-family:ui-monospace,Menlo,Consolas,monospace; }
 
@@ -133,7 +135,42 @@ pre{ white-space:pre-wrap; background:var(--field); border:1px solid var(--line)
 
 /* ---- Import ---- */
 .sample{ color:var(--ink-soft); font-size:12px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ok{ color:var(--green); font-weight:600; }
+.ok{ color:var(--green-dark); font-weight:600; }
 .result{ background:var(--green-l); border:1px solid #b9e6c9; border-radius:14px; padding:14px; margin-top:12px; }
 .bar{ height:8px; background:var(--field); border-radius:980px; overflow:hidden; margin-top:10px; }
 .bar>div{ height:100%; background:var(--green); width:0; transition:width .2s; }
+
+/* ---- Accessibility: visible keyboard focus (mouse users unaffected) ---- */
+:focus-visible{ outline:2px solid var(--green); outline-offset:2px; border-radius:8px; }
+.btn:focus-visible, .tab:focus-visible, .subtab:focus-visible, .topnav a:focus-visible{ outline-offset:3px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible{ outline:none; } /* they show a focus ring already */
+
+/* ---- Micro-interactions (depth on interactive surfaces) ---- */
+.kpi{ transition:transform .14s ease, box-shadow .16s ease; }
+.kpi:hover{ transform:translateY(-2px); box-shadow:0 12px 26px rgba(0,0,0,.07); }
+.card.interactive{ cursor:pointer; transition:transform .14s ease, box-shadow .16s ease; }
+.card.interactive:hover{ transform:translateY(-2px); box-shadow:0 14px 32px rgba(0,0,0,.08); }
+.tab, .subtab, [role="tab"]{ }
+.tab:hover:not(.active){ color:var(--ink); }
+
+/* ---- Loading / empty / error states ---- */
+.spinner{ display:inline-block; width:18px; height:18px; border:2.5px solid var(--hair); border-top-color:var(--green); border-radius:50%; animation:dw-spin .7s linear infinite; vertical-align:-3px; }
+.loading{ display:flex; align-items:center; justify-content:center; gap:10px; color:var(--ink-soft); font-size:14px; padding:40px 0; }
+.empty{ text-align:center; color:var(--ink-soft); padding:44px 20px; }
+.empty .emoji{ font-size:30px; display:block; margin-bottom:10px; opacity:.7; }
+.empty h4{ margin:0 0 4px; font-size:15px; color:var(--ink); }
+.errbox{ background:var(--red-l); border:1px solid #f3c6c6; color:var(--red); border-radius:14px; padding:12px 14px; font-size:13px; margin-bottom:16px; }
+.skeleton{ background:linear-gradient(90deg,var(--hair) 25%,#f3f3f5 37%,var(--hair) 63%); background-size:400% 100%; animation:dw-shimmer 1.3s ease infinite; border-radius:8px; color:transparent; }
+@keyframes dw-spin{ to{ transform:rotate(360deg); } }
+@keyframes dw-shimmer{ 0%{ background-position:100% 0; } 100%{ background-position:0 0; } }
+
+/* ---- Refined scrollbar (WebKit) ---- */
+::-webkit-scrollbar{ width:11px; height:11px; }
+::-webkit-scrollbar-thumb{ background:rgba(0,0,0,.18); border-radius:980px; border:3px solid transparent; background-clip:content-box; }
+::-webkit-scrollbar-thumb:hover{ background:rgba(0,0,0,.30); background-clip:content-box; }
+::-webkit-scrollbar-track{ background:transparent; }
+
+/* ---- Respect reduced-motion (a11y) ---- */
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important; }
+}
