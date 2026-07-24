@@ -70,9 +70,12 @@ Staff functions verify the access-token **signature** via the project JWKS at
 projects that sign tokens with the shared HS256 secret, also set
 `SUPABASE_JWT_SECRET` (Project Settings → API → JWT secret).
 
-> **Migration:** apply `candidate-pipeline/sql/20_consent_suppression.sql` (after 10–19)
+> **Migrations:** apply `candidate-pipeline/sql/20_consent_suppression.sql` (after 10–19)
 > before deploying `outreach-campaign`/`unsubscribe` — it adds the latest-consent
 > view, the `email_suppression` list, and the `campaign_targets()` function they rely on.
+> Then apply `21_candidate_matching.sql` before re-deploying `candidate-intake`/`csv-import`
+> — it adds the matching columns, the unique email index (needed for idempotent CSV
+> upsert), the `candidate_specialties` and `referrals` tables, and extra `sources`.
 
 ---
 

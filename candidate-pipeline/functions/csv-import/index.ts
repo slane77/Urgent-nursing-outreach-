@@ -13,8 +13,10 @@
 //    { mode: "map",    headers: [...], samples: [ {h: v}, ... ] }
 //        -> returns { mapping: [{source_header, target_field}], notes }
 //    { mode: "commit", mapping: [...], rows: [ {h: v}, ... ] }
-//        -> dedupes on email, inserts NEW rows as status='sourced' (source
-//           'import'), returns { inserted, skipped_duplicates, skipped_no_email }
+//        -> dedupes on email OR phone, upserts NEW rows as status='sourced'
+//           (source 'import'; email rows are idempotent, phone-only rows are
+//           kept too), returns { inserted, skipped_duplicates, skipped_no_contact,
+//           phone_only_inserted }
 //
 //  Imported candidates land UNQUALIFIED (status 'sourced'); the candidate-agent
 //  qualifies them later. Raw rows are kept in source_detail for provenance.
@@ -37,11 +39,33 @@ const sb = createClient(
 
 // Target fields the importer understands. Everything else is kept as provenance.
 const TARGET_FIELDS = [
-  "first_name", "last_name", "full_name", "title", "email", "phone",
-  "town", "postcode", "region", "country", "discipline", "specialty",
-  "registration_body", "registration_number", "availability",
+  "first_name", "last_name", "full_name", "title", "known_as", "email", "phone",
+  "town", "postcode", "region", "country", "dob", "ni_number", "right_to_work_status",
+  "discipline", "specialty", "registration_body", "registration_number", "availability",
   "employer", "job_title", "notes", "ignore",
 ] as const;
+
+// Fields written straight onto a candidate row (the rest are kept as provenance).
+const DIRECT_FIELDS = new Set([
+  "first_name", "last_name", "title", "known_as", "email", "phone",
+  "town", "postcode", "region", "country", "dob", "ni_number", "right_to_work_status",
+  "registration_body", "registration_number", "availability",
+]);
+
+// Normalise a phone to digits (+ optional leading +) for dedup; null if too short.
+function normPhone(p: unknown): string | null {
+  const d = (p ?? "").toString().replace(/[^\d+]/g, "");
+  return d.replace(/\D/g, "").length >= 7 ? d : null;
+}
+
+// Fields under a DB CHECK / type constraint — a non-conforming legacy value must
+// go to provenance, not into the column (else it fails the whole insert batch).
+const RTW_VALUES = new Set(["uk_citizen", "settled", "pre_settled", "visa", "unconfirmed", "no"]);
+function conformsToColumn(field: string, v: string): boolean {
+  if (field === "right_to_work_status") return RTW_VALUES.has(v);
+  if (field === "dob") return /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+  return true;
+}
 
 // ---- MAP: ask Claude to map this file's headers to schema fields -----------
 async function doMap(headers: string[], samples: Record<string, unknown>[]) {
@@ -100,8 +124,9 @@ async function doCommit(mapping: { source_header: string; target_field: string }
   const map = new Map(mapping.filter((m) => m.target_field !== "ignore").map((m) => [m.source_header, m.target_field]));
 
   const candidates: any[] = [];
-  let skipped_no_email = 0;
-  const seenInFile = new Set<string>();
+  let skipped_no_contact = 0;                 // no email AND no usable phone
+  const seenEmail = new Set<string>();
+  const seenPhone = new Set<string>();
 
   for (const row of rows) {
     const c: any = { status: "sourced", source_id: sourceId, source_detail: { raw: row }, name_variants: [] };
@@ -112,28 +137,22 @@ async function doCommit(mapping: { source_header: string; target_field: string }
       const v = (value ?? "").toString().trim();
       if (!v) continue;
       const field = map.get(header);
-      if (!field) continue;
-      switch (field) {
-        case "full_name": fullName = v; break;
-        case "first_name": c.first_name = v; break;
-        case "last_name": c.last_name = v; break;
-        case "title": c.title = v; break;
-        case "email": c.email = v.toLowerCase(); break;
-        case "phone": c.phone = v; break;
-        case "town": c.town = v; break;
-        case "postcode": c.postcode = v; break;
-        case "region": c.region = v; break;
-        case "country": c.country = v; break;
-        case "registration_body": c.registration_body = v; break;
-        case "registration_number": c.registration_number = v; break;
-        case "availability": c.availability = v; break;
+      if (!field || field === "ignore") continue;
+      if (field === "full_name") { if (!fullName) fullName = v; else extra[header] = v; continue; }
+      if (field === "notes") { c.notes = c.notes ? `${c.notes}\n${v}` : v; continue; }
+      if (DIRECT_FIELDS.has(field)) {
+        // A value that would violate the column's CHECK/type goes to provenance
+        // (e.g. "British" in an RTW column, "N/A" in a DOB column) so it can't
+        // fail the batch insert.
+        if (!conformsToColumn(field, v)) { extra[header] = v; continue; }
+        // First non-empty wins; a second header mapped to the same field is
+        // kept as provenance rather than silently overwriting.
+        if (c[field] == null || c[field] === "") c[field] = field === "email" ? v.toLowerCase() : v;
+        else extra[header] = v;
+      } else {
         // discipline/specialty/employer/job_title kept as provenance + notes;
         // the agent resolves them to taxonomy codes during qualification.
-        case "discipline": extra.discipline = v; break;
-        case "specialty": extra.specialty = v; break;
-        case "employer": extra.employer = v; break;
-        case "job_title": extra.job_title = v; break;
-        case "notes": c.notes = c.notes ? `${c.notes}\n${v}` : v; break;
+        extra[field] = v;
       }
     }
 
@@ -141,6 +160,7 @@ async function doCommit(mapping: { source_header: string; target_field: string }
       const parts = fullName.split(/\s+/);
       c.first_name = parts.shift() ?? null;
       c.last_name = parts.length ? parts.join(" ") : null;
+      c.name_variants = [fullName];           // keep the raw name for reconciliation
     }
     if (Object.keys(extra).length) {
       const tag = Object.entries(extra).map(([k, val]) => `${k}: ${val}`).join("; ");
@@ -148,29 +168,44 @@ async function doCommit(mapping: { source_header: string; target_field: string }
       c.source_detail.parsed = extra;
     }
 
-    if (!c.email) { skipped_no_email++; continue; }
-    if (seenInFile.has(c.email)) continue;
-    seenInFile.add(c.email);
+    // Accept a row with EITHER an email or a usable phone — legacy sheets are
+    // routinely phone-only, and dropping them defeats the point of the importer.
+    const phone = normPhone(c.phone);
+    if (!c.email && !phone) { skipped_no_contact++; continue; }
+    if (c.email) { if (seenEmail.has(c.email)) continue; seenEmail.add(c.email); }
+    else if (phone) { if (seenPhone.has(phone)) continue; seenPhone.add(phone); }
     candidates.push(c);
   }
 
-  // Dedupe against existing candidates (by email).
-  const emails = candidates.map((c) => c.email);
-  const existing = new Set<string>();
-  for (let i = 0; i < emails.length; i += 500) {
-    const { data } = await sb.from("candidates").select("email").in("email", emails.slice(i, i + 500));
-    (data ?? []).forEach((r: any) => r.email && existing.add(r.email.toLowerCase()));
-  }
-  const fresh = candidates.filter((c) => !existing.has(c.email));
-  const skipped_duplicates = candidates.length - fresh.length;
+  // Split by contactability. Email rows upsert idempotently (re-running an
+  // import won't duplicate them); phone-only rows are inserted.
+  const withEmail = candidates.filter((c) => c.email);
+  const phoneOnly = candidates.filter((c) => !c.email);
 
   let inserted = 0;
-  for (let i = 0; i < fresh.length; i += 500) {
-    const { data, error } = await sb.from("candidates").insert(fresh.slice(i, i + 500)).select("id");
-    if (error) return { error: error.message, inserted, skipped_duplicates, skipped_no_email };
-    inserted += data?.length ?? 0;
+  const errors: string[] = [];
+
+  // Email rows: upsert ignoring duplicates on the unique email index. One bad
+  // batch is recorded and skipped — it never aborts the remaining batches.
+  for (let i = 0; i < withEmail.length; i += 500) {
+    const { data, error } = await sb.from("candidates")
+      .upsert(withEmail.slice(i, i + 500), { onConflict: "email", ignoreDuplicates: true })
+      .select("id");
+    if (error) errors.push(error.message); else inserted += data?.length ?? 0;
   }
-  return { inserted, skipped_duplicates, skipped_no_email };
+  const skipped_duplicates = withEmail.length - inserted;   // pre-existing emails
+
+  let phone_only_inserted = 0;
+  for (let i = 0; i < phoneOnly.length; i += 500) {
+    const { data, error } = await sb.from("candidates").insert(phoneOnly.slice(i, i + 500)).select("id");
+    if (error) errors.push(error.message); else phone_only_inserted += data?.length ?? 0;
+  }
+
+  return {
+    inserted: inserted + phone_only_inserted,
+    skipped_duplicates, skipped_no_contact, phone_only_inserted,
+    ...(errors.length ? { errors } : {}),
+  };
 }
 
 Deno.serve(async (req) => {
