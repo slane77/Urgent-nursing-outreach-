@@ -119,5 +119,49 @@ Deno.serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ expired, reminded }), { headers: { "Content-Type": "application/json" } });
+  // ── Step 3: OPEN-BREACH backstop digest (daily safety net) ────────────────
+  // The real-time booking-breach function already alerts per breach; this is a
+  // LIGHT daily catch-all so nothing sits unnoticed. ONE digest to the central
+  // compliance mailbox summarising open breaches + DISTINCT candidates currently
+  // working non-compliant (shift_date >= today). Skips silently if no mailbox is
+  // configured or there are zero open breaches. Never re-alerts per breach.
+  let open_breaches = 0;
+  {
+    const today = iso10(now);
+    const { data: openRows } = await sb
+      .from("compliance_breaches")
+      .select("candidate_id,shift_date,status")
+      .neq("status", "resolved");
+    const rows = (openRows ?? []) as any[];
+    open_breaches = rows.length;
+
+    if (open_breaches > 0) {
+      const { data: settings } = await sb
+        .from("compliance_settings").select("compliance_alert_email").eq("id", true).maybeSingle();
+      const mailbox = settings?.compliance_alert_email || Deno.env.get("COMPLIANCE_ALERT_EMAIL") || null;
+
+      if (mailbox) {
+        const workingNow = new Set(
+          rows.filter((r) => (r.shift_date ?? "") >= today).map((r) => r.candidate_id),
+        ).size;
+        const subject = `Compliance breach digest: ${open_breaches} open · ${workingNow} working non-compliant`;
+        const body =
+          `Daily compliance-breach backstop (${today}).\n\n` +
+          `Open breaches (not yet resolved): ${open_breaches}\n` +
+          `Candidates currently/future working while non-compliant (shift on/after today): ${workingNow}\n\n` +
+          `Review and clear these in the compliance cockpit → Breaches.`;
+        const r = await sendBrevoEmail({ to: mailbox, subject, html: emailHtml(body) });
+        if (r.ok) {
+          await sb.from("messages").insert({
+            candidate_id: null, direction: "outbound", channel: "email", author: "system",
+            template: "breach_digest", subject,
+            body: `Digest to ${mailbox}: ${open_breaches} open breach(es), ${workingNow} working non-compliant.`,
+            status: "sent", external_ref: r.id ?? null,
+          });
+        }
+      }
+    }
+  }
+
+  return new Response(JSON.stringify({ expired, reminded, open_breaches }), { headers: { "Content-Type": "application/json" } });
 });

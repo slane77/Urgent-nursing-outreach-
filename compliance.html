@@ -34,6 +34,7 @@
     <div class="tab" data-view="backlog">Migration backlog</div>
     <div class="tab" data-view="reports" id="tabReports" style="display:none">Reports</div>
     <div class="tab" data-view="executive" id="tabExec" style="display:none">Executive</div>
+    <div class="tab" data-view="breaches" id="tabBreaches" style="display:none">Breaches</div>
   </div>
 </div>
 
@@ -50,6 +51,8 @@
 
   <!-- DASHBOARD VIEW -->
   <div id="dashboardView">
+    <!-- COMPLIANCE-BREACH alert banner (hidden when zero open breaches). Click to open the Breaches tab. -->
+    <div class="errbox hidden" id="breachBanner" style="margin-bottom:12px;font-weight:600;cursor:pointer" title="Open the Breaches tab"></div>
     <div class="card">
       <div class="controls">
         <select id="dashDesk"><option value="">All desks</option></select>
@@ -137,6 +140,39 @@
         <button class="btn secondary" id="exRefresh">Refresh</button>
       </div>
       <div id="exBody"><div class="spin">Loading overview…</div></div>
+    </div>
+  </div>
+
+  <!-- BREACHES VIEW (officer only) -->
+  <div id="breachesView" class="hidden">
+    <div class="card">
+      <h4 style="margin-top:0">Compliance breaches — workers booked while non-compliant</h4>
+      <p class="muted">A breach is logged when a candidate is booked for a shift on a date they are <strong>not compliant</strong> for — red, or bookable only via a manager override. The elapsed documents are snapshotted at booking time. Acknowledge to claim it; resolve when the placement is cleared or unwound.</p>
+      <div id="brExec" class="kpis" style="margin-bottom:6px;"></div>
+    </div>
+
+    <div class="card">
+      <h4 style="margin-top:0">Record a breach manually</h4>
+      <p class="muted">For a booking made outside the automated gate. The database refuses to log a breach for a candidate who is actually compliant.</p>
+      <div class="controls">
+        <input id="mbCand" placeholder="Candidate ID (uuid)" style="min-width:280px;" />
+        <select id="mbSet"><option value="">Requirement set…</option></select>
+        <input id="mbShift" type="date" />
+        <input id="mbRef" placeholder="Booking ref (optional)" />
+        <input id="mbReason" placeholder="Reason (optional)" />
+        <button class="btn" id="mbSave">Record breach</button>
+      </div>
+      <p class="muted" id="mbMsg" style="margin-top:8px;"></p>
+    </div>
+
+    <div class="card">
+      <div class="controls" style="justify-content:space-between;">
+        <h4 style="margin:0">Open queue</h4>
+        <button class="btn secondary" id="brRefresh">Refresh</button>
+      </div>
+      <table><thead><tr>
+        <th>Candidate</th><th>Officer</th><th>Division</th><th>Shift date</th><th>Elapsed docs</th><th>Booked by</th><th>Status</th><th>Actions</th>
+      </tr></thead><tbody id="brRows"></tbody></table>
     </div>
   </div>
 </main>
@@ -273,6 +309,8 @@ async function init() {
     $('wlMineWrap').style.display = 'inline-flex';
     $('tabReports').style.display = '';
     $('tabExec').style.display = '';
+    $('tabBreaches').style.display = '';
+    $('mbSet').innerHTML = '<option value="">Requirement set…</option>' + codeOpts;
     $('rpScope').innerHTML =
       '<option value="mine">My team (officers I oversee)</option>' +
       '<option value="all">All officers</option>' +
@@ -344,6 +382,10 @@ function wireControls() {
   $('rpScope').onchange = loadReport;
   $('exRefresh').onclick = loadExec;
   $('exDiv').onchange = loadExec;
+  // Breaches
+  $('brRefresh').onclick = loadBreaches;
+  $('mbSave').onclick = recordBreachManual;
+  $('breachBanner').onclick = () => showView('breaches');
   // Panel
   $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); };
 }
@@ -356,11 +398,13 @@ function showView(v) {
   $('backlogView').classList.toggle('hidden', v!=='backlog');
   $('reportsView').classList.toggle('hidden', v!=='reports');
   $('execView').classList.toggle('hidden', v!=='executive');
+  $('breachesView').classList.toggle('hidden', v!=='breaches');
   if (v==='dashboard') loadDashboard();
   if (v==='worklist') loadWorklist();
   if (v==='backlog') loadBacklog();
   if (v==='reports') loadReport();
   if (v==='executive') loadExec();
+  if (v==='breaches') loadBreaches();
 }
 
 // ---- Dashboard ----
@@ -403,6 +447,23 @@ async function loadDashboard() {
       <div class="kpi flag"><div class="n">${v.needs_human||0}</div><div class="l">Needs human</div></div>
       <div class="kpi warn"><div class="n">${v.failed||0}</div><div class="l">Failed</div></div>
     </div>`;
+  loadBreachBanner();
+}
+
+// ---- Compliance-breach banner (officer-only; hidden when zero) ----
+async function loadBreachBanner() {
+  if (!state.isOfficer) { $('breachBanner').classList.add('hidden'); return; }
+  const { data, error } = await sb.rpc('breach_exec_summary', {});
+  if (error) { $('breachBanner').classList.add('hidden'); return; }
+  const grand = (data ?? []).find(r => Number(r.is_total) === 1);
+  const working = grand ? (Number(grand.candidates_working_noncompliant) || 0) : 0;
+  const open = grand ? (Number(grand.open_breaches) || 0) : 0;
+  if (open > 0) {
+    $('breachBanner').innerHTML = `⚠ ${working} candidate(s) working with elapsed documents · ${open} open breach(es) — review in the Breaches tab`;
+    $('breachBanner').classList.remove('hidden');
+  } else {
+    $('breachBanner').classList.add('hidden');
+  }
 }
 
 // ---- Worklist ----
@@ -855,6 +916,94 @@ async function loadExec() {
     }).join('');
 
   $('exBody').innerHTML = headline + divCards;
+}
+
+// ---- Breaches queue + exec summary + acknowledge/resolve ----
+function chip(txt){ return `<span class="pill mut" style="margin:1px 2px;">${esc(txt)}</span>`; }
+
+async function loadBreaches() {
+  if (!state.isOfficer) return;
+  // Exec summary by division (grand-total headline via is_total=1).
+  $('brExec').innerHTML = '<div class="spin">Loading…</div>';
+  const { data: sum, error: sumErr } = await sb.rpc('breach_exec_summary', {});
+  if (sumErr) {
+    $('brExec').innerHTML = `<div class="errbox">Summary unavailable: ${esc(sumErr.message)}<br><span class="muted">Requires compliance-officer access.</span></div>`;
+  } else {
+    const grand = (sum ?? []).find(r => Number(r.is_total) === 1);
+    const divs = (sum ?? []).filter(r => Number(r.is_total) !== 1)
+      .sort((a,b)=> (a.division_name||'').localeCompare(b.division_name||''));
+    const gWork = grand ? (Number(grand.candidates_working_noncompliant)||0) : 0;
+    const gOpen = grand ? (Number(grand.open_breaches)||0) : 0;
+    $('brExec').innerHTML =
+      `<div class="kpi warn"><div class="n">${gWork}</div><div class="l">Working with elapsed documents</div></div>` +
+      `<div class="kpi flag"><div class="n">${gOpen}</div><div class="l">Open breaches (all divisions)</div></div>` +
+      divs.map(d => `<div class="kpi"><div class="n">${Number(d.open_breaches)||0}</div><div class="l">${esc(d.division_name||'No division')}</div></div>`).join('');
+  }
+
+  // Open queue from the officer-only view.
+  $('brRows').innerHTML = '<tr><td colspan="8"><div class="spin">Loading…</div></td></tr>';
+  const { data, error } = await sb.from('open_breaches')
+    .select('id,candidate_name,officer_name,division_name,shift_date,expired_items,via_override,booked_by_email,status')
+    .order('shift_date', { ascending:true });
+  if (error) { $('brRows').innerHTML = `<tr><td colspan="8"><div class="errbox">${esc(error.message)}</div></td></tr>`; return; }
+  const rows = data ?? [];
+  $('brRows').innerHTML = rows.map(r => {
+    const items = Array.isArray(r.expired_items) ? r.expired_items : [];
+    const chips = items.map(it => chip((it.name || it.code || 'doc') + (it.expires_at ? ` · ${fdate(it.expires_at)}` : ''))).join('') || '<span class="muted">—</span>';
+    const statusPill = r.status==='acknowledged' ? '<span class="pill flag">acknowledged</span>' : '<span class="pill red">open</span>';
+    return `<tr>
+      <td>${esc(r.candidate_name)}${r.via_override?' <span class="pill flag" title="Bookable only via a manager override">override</span>':''}</td>
+      <td>${esc(r.officer_name)||'<span class="muted">Unassigned</span>'}</td>
+      <td>${esc(r.division_name)||'<span class="muted">—</span>'}</td>
+      <td class="muted">${fdate(r.shift_date)}</td>
+      <td>${chips}</td>
+      <td class="muted">${esc(r.booked_by_email)||'—'}</td>
+      <td>${statusPill}</td>
+      <td>
+        ${r.status==='open' ? `<button class="btn sm secondary" data-ack="${r.id}">Acknowledge</button>` : ''}
+        <button class="btn sm" data-resolve="${r.id}">Resolve</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8"><div class="empty">No open breaches. 🎉</div></td></tr>';
+  $('brRows').querySelectorAll('[data-ack]').forEach(b => b.onclick = () => ackBreach(b.dataset.ack));
+  $('brRows').querySelectorAll('[data-resolve]').forEach(b => b.onclick = () => resolveBreach(b.dataset.resolve));
+}
+
+async function ackBreach(id) {
+  const note = prompt('Acknowledgement note (optional):') || null;
+  const { error } = await sb.rpc('acknowledge_breach', { p_id: id, p_note: note });
+  if (error) { alert('Error: ' + error.message); return; }
+  loadBreaches();
+}
+async function resolveBreach(id) {
+  if (!confirm('Mark this breach resolved?')) return;
+  const note = prompt('Resolution note (optional):') || null;
+  const { error } = await sb.rpc('resolve_breach', { p_id: id, p_note: note });
+  if (error) { alert('Error: ' + error.message); return; }
+  loadBreaches();
+  loadBreachBanner();
+}
+
+async function recordBreachManual() {
+  const cand = $('mbCand').value.trim();
+  const code = $('mbSet').value;
+  const shift = $('mbShift').value;
+  if (!cand || !code || !shift) { $('mbMsg').textContent = 'Candidate ID, set and shift date are required.'; return; }
+  // Resolve set_code -> latest active set id (mirrors the booking gate).
+  const { data: set } = await sb.from('requirement_sets')
+    .select('id').eq('code', code).eq('status','active').order('version',{ascending:false}).limit(1).maybeSingle();
+  if (!set?.id) { $('mbMsg').textContent = 'Unknown or inactive requirement set.'; return; }
+  $('mbMsg').textContent = 'Recording…';
+  const { data, error } = await sb.rpc('record_booking_breach', {
+    p_candidate_id: cand, p_set_id: set.id, p_shift_date: shift,
+    p_booking_ref: $('mbRef').value.trim() || null,
+    p_reason: $('mbReason').value.trim() || null,
+  });
+  if (error) { $('mbMsg').textContent = 'Error: ' + error.message; return; }
+  $('mbMsg').textContent = 'Breach recorded ✓ (' + data + ')';
+  $('mbCand').value = ''; $('mbRef').value = ''; $('mbReason').value = '';
+  loadBreaches();
+  loadBreachBanner();
 }
 
 sb.auth.getSession().then(({ data:{ session } }) => refreshAuth(session));

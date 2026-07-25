@@ -96,19 +96,60 @@ Deno.serve(async (req) => {
       // SHIFT-DATE MODE: evaluate compliance as-of the shift date (+buffer), and
       // reflect a manager override. The traffic light stays the TRUE colour so an
       // override is visible: work_ready=true while status may still be "red".
-      const [{ data: ready }, { data: status }, { data: overridden }] = await Promise.all([
+      //
+      // We ALSO surface a COMPLIANCE-BREACH warning: booking a candidate who is
+      // red — or ready ONLY via a manager override — for this date places a worker
+      // with an elapsed/unsatisfied required doc. `blocking_reasons` names WHICH
+      // docs (read-only; this endpoint logs nothing). The actual recording + alert
+      // is a separate call to the booking-breach function when the booking proceeds.
+      const [{ data: ready }, { data: status }, { data: overridden }, { data: items }] = await Promise.all([
         sb.rpc("is_work_ready_on", { p_candidate_id: candidateId, p_set_id: setId, p_as_of: shiftDate, p_buffer_days: bufferDays }),
         sb.rpc("work_ready_status_on", { p_candidate_id: candidateId, p_set_id: setId, p_as_of: shiftDate, p_buffer_days: bufferDays }),
         sb.rpc("has_active_override", { p_candidate_id: candidateId, p_set_id: setId, p_as_of: shiftDate }),
+        sb.rpc("noncompliant_items_on", { p_candidate_id: candidateId, p_set_id: setId, p_as_of: shiftDate, p_buffer_days: bufferDays }),
       ]);
       const asOfStatus = (status as string) ?? "red";
+      // A breach is STRICTLY a red light (a genuinely elapsed/unsatisfied blocking
+      // doc). green/amber = compliant/placeable — a stray active override never
+      // turns a compliant worker into a breach; it only explains why a RED worker
+      // is bookable. So: compliant = green|amber; breach = red; via_override = the
+      // booking is red yet permitted because a manager override is carrying it.
+      const compliant = ["green", "amber"].includes(asOfStatus);
+      const breachIfBooked = !compliant;                                  // === red
+      const viaOverride = ready === true && overridden === true && breachIfBooked;
+
+      // The elapsed/unsatisfied required docs (capped + serialised safely). Only
+      // populated for a real breach — a compliant (green/amber) worker carries none.
+      const blockingReasons = breachIfBooked
+        ? (Array.isArray(items) ? items : []).slice(0, 50).map((r: any) => ({
+            code: r?.code ?? null,
+            name: r?.name ?? null,
+            expires_at: r?.expires_at ?? null,
+            status: r?.status ?? null,
+          }))
+        : [];
+
+      let warning: string | null = null;
+      if (breachIfBooked) {
+        const names = blockingReasons.map((r) => r.name || r.code).filter(Boolean);
+        const list = names.length ? names.join(", ") : "required documents";
+        warning =
+          `⚠ NOT COMPLIANT for ${shiftDate}: ${blockingReasons.length} required document(s) ` +
+          `elapsed/unsatisfied (${list}). Booking will place a non-compliant worker and record a compliance breach.` +
+          (viaOverride ? " (currently permitted only by a manager override)." : "");
+      }
+
       return new Response(JSON.stringify({
         candidate_id: candidateId,
         set_id: setId,
         shift_date: shiftDate,
         work_ready: ready === true,
         status: asOfStatus,                      // the TRUE as-of colour (override not hidden)
-        via_override: ready === true && overridden === true && !["green", "amber"].includes(asOfStatus),
+        via_override: viaOverride,
+        compliant,                               // genuinely compliant (not via override)
+        breach_if_booked: breachIfBooked,        // booking this date creates a breach
+        blocking_reasons: blockingReasons,       // WHICH docs are elapsed/unsatisfied
+        warning,                                 // human string when breach_if_booked, else null
       }), { headers: CORS });
     }
 

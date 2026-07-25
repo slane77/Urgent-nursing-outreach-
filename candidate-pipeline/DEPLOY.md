@@ -60,7 +60,8 @@ In the dev project: Edge Functions → Secrets (or `supabase secrets set`). Set:
 | `REPLY_LOCAL` | `compliance` |
 | `INBOUND_SECRET` | any random string |
 | `CRON_SECRET` | any random string |
-| `WORK_READY_TOKEN` | any random string — shared bearer the external booking system sends to the `work-ready` gate; the function returns 401 until this is set |
+| `WORK_READY_TOKEN` | any random string — shared bearer the external booking system sends to the `work-ready` gate AND the `booking-breach` recorder; both functions return 401 until this is set |
+| `COMPLIANCE_ALERT_EMAIL` | central compliance mailbox for breach alerts + the daily breach digest — used by `booking-breach` and `early-warnings` when `compliance_settings.compliance_alert_email` is null |
 | `VERIFICATION_TOKEN` | any random string — bearer for automation calling `verification?mode=check` (officers use their own JWT instead) |
 | `NMC_API_KEY` / `GMC_API_KEY` / `HCPC_API_KEY` | per-regulator register-check credential (the `secret_ref` each provider row names). **Leave UNSET until you actually hold the credential** — the adapter then returns `needs_human`, never a pass. |
 | `DBS_API_KEY` / `RTW_API_KEY` | DBS Update Service / Right-to-Work (IDSP/aggregator) credential. Leave unset until contracted; adapter stays fail-closed. |
@@ -99,6 +100,7 @@ with these JWT settings:
 | `early-warnings` | **false** | cron (`?secret=`) |
 | `jobs` | **false** | public (Google) |
 | `work-ready` | **false** | external booking system (Bearer `WORK_READY_TOKEN`) — compliance gate; returns 401 until the token is set |
+| `booking-breach` | **false** | external booking system / officer (Bearer `WORK_READY_TOKEN`) — records a confirmed non-compliant booking + alerts; returns 401 until the token is set |
 | `verification` | **false** | officers (`mode=check`, their JWT) + cron (`mode=drain`/`mode=sweep`, `?secret=CRON_SECRET`) + automation (Bearer `VERIFICATION_TOKEN`). Deploy with the `adapters/` folder alongside `index.ts`. |
 
 > **Compliance Phase 0 migrations** — apply `sql/22_compliance_sets.sql`,
@@ -225,6 +227,52 @@ with these JWT settings:
 > step is unchanged). No new function or secret is required — `PUBLIC_SITE_URL`
 > (already listed) is used as the portal deep-link, and `CRON_SECRET` (already
 > listed) is now MANDATORY for `early-warnings` to run.
+>
+> **Compliance breach — record + alert + report (migration 42).**
+> `sql/42_compliance_breach.sql` (after 34–40): makes a COMPLIANCE BREACH — a
+> worker booked for a shift they are NOT compliant for (red, or bookable only via
+> a manager override) — first-class. Adds:
+> `noncompliant_items_on()` (the single source of WHICH required docs are elapsed
+> as-of a date+buffer — mirrors the gate's math; used both to WARN and to snapshot);
+> extends the append-only `verification_events` `event_type` CHECK (drop-then-add,
+> strict superset) with `breach_logged`/`breach_acknowledged`/`breach_resolved`;
+> adds `compliance_settings.compliance_alert_email` (the central mailbox);
+> `compliance_breaches` (one row per booked-non-compliant placement, a JSONB
+> snapshot of the elapsed docs, RLS = **officer read only, NO client write policy**
+> — writes ONLY via the SECURITY DEFINER RPCs); `record_booking_breach()`
+> (service-or-officer gated like the verification RPCs; NEVER logs a spurious
+> breach — a genuinely compliant candidate RAISES `no breach`; idempotent on
+> `(candidate,set,shift,booking_ref)`; appends one `breach_logged` audit event);
+> `acknowledge_breach()` / `resolve_breach()` (officer lifecycle, idempotent,
+> audited, core fields never rewritten); the `open_breaches` view + the
+> `compliance_breach_report()` / `breach_exec_summary()` reporting RPCs (officer-
+> gated, `rollup()` grand total via `is_total`). Additive + idempotent (re-run to
+> a no-op). **New `booking-breach` edge function** (verify_jwt=false; reuses the
+> **`WORK_READY_TOKEN`** bearer; add the **`COMPLIANCE_ALERT_EMAIL`** secret as the
+> central-mailbox fallback): the booking system (or an officer) calls it when a
+> flagged booking is CONFIRMED — it records the breach via `record_booking_breach`
+> (service role) and sends ONE alert email to the DEDUPED recipient list (the
+> candidate's compliance officer + that officer's overseeing manager via
+> `staff.overseen_by` + the central mailbox), logging one `messages` row
+> (`template='breach_alert'`). A clean 409 is returned if the candidate was
+> actually compliant (nothing logged). The **`work-ready`** function (shift-date
+> mode) now also returns `compliant` / `breach_if_booked` / `blocking_reasons` /
+> `warning` (read-only — it logs nothing; the loud warning names the elapsed docs).
+> The **`early-warnings`** cron gains a light **Step 3** daily backstop: if any
+> breaches remain `open`, ONE digest email to the central mailbox summarising open
+> breaches + DISTINCT candidates working non-compliant (`shift_date >= today`),
+> logged as `template='breach_digest'` (skips silently if no mailbox or zero open;
+> it does NOT re-alert per breach). **Config:** set the central mailbox once —
+> `update candidate.compliance_settings set compliance_alert_email='compliance@daywebster.com' where id=true;`
+> (or rely on the `COMPLIANCE_ALERT_EMAIL` secret). **Booking-system integration:**
+> after `work-ready` returns `breach_if_booked:true` and the booker still confirms,
+> the booking system POSTs the same identifiers to `booking-breach` (Bearer
+> `WORK_READY_TOKEN`) to record + alert. **Data protection:** the breach alert
+> email deliberately carries candidate-identifying compliance detail (full name,
+> the elapsed documents + expiry dates, who booked) — necessary for the recipient
+> to act — and is sent ONLY to authorised internal compliance staff (the assigned
+> officer, their overseeing manager, and the central compliance mailbox). Keep
+> that mailbox an internal, access-controlled address.
 
 ---
 
