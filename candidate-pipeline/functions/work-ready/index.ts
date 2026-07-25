@@ -11,6 +11,14 @@
 //    amber  -> work_ready:true   (placeable with a caveat — a refresh is due)
 //    red    -> work_ready:false  (blocked)
 //
+//  SHIFT-DATE MODE (decision E2/E3): pass `shift_date` (YYYY-MM-DD) and the gate
+//  confirms the candidate is compliant FOR THAT DATE, not just today — a blocking
+//  item must stay valid past shift_date + a configurable BUFFER (no bookings
+//  within N days of an expiry). Optional `buffer_days` overrides the DB default.
+//  `via_override` is true when readiness comes from a manager override (the
+//  underlying traffic light is still red) — so an override is always VISIBLE,
+//  never hidden. With no `shift_date` the behaviour is unchanged (today).
+//
 //  FAIL-CLOSED by construction: a missing status row, any downstream error, or
 //  an unknown candidate/set all resolve to { work_ready:false, status:"red" } —
 //  never a 500 the caller might treat as "unknown = proceed". Auth failure is a
@@ -37,7 +45,13 @@ const CORS = {
 };
 
 // The fail-closed answer, used for every non-authorised-but-reachable outcome.
-const NOT_READY = { work_ready: false, status: "red", blocking_open: null, next_expiry: null };
+const NOT_READY = { work_ready: false, status: "red", blocking_open: null, next_expiry: null, via_override: false };
+
+// Accept YYYY-MM-DD only; anything else is treated as "no shift date" (today mode).
+function parseShiftDate(v: unknown): string | null {
+  const s = (v ?? "").toString().trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
 
 function authorised(req: Request): boolean {
   const need = Deno.env.get("WORK_READY_TOKEN");
@@ -58,6 +72,9 @@ Deno.serve(async (req) => {
     const candidateId = (b.candidate_id ?? "").toString().trim();
     let setId = (b.set_id ?? "").toString().trim() || null;
     const setCode = (b.set_code ?? "").toString().trim() || null;
+    const shiftDate = parseShiftDate(b.shift_date);
+    const bufferDays = Number.isFinite(Number(b.buffer_days)) && b.buffer_days != null
+      ? Math.max(0, Math.trunc(Number(b.buffer_days))) : null;
 
     if (!candidateId || (!setId && !setCode)) {
       return new Response(JSON.stringify({ error: "candidate_id and set_id (or set_code) are required" }), { status: 400, headers: CORS });
@@ -70,12 +87,32 @@ Deno.serve(async (req) => {
         .order("version", { ascending: false }).limit(1).maybeSingle();
       if (!set?.id) {
         // Unknown/inactive set => not work-ready (fail closed), not an error.
-        return new Response(JSON.stringify({ candidate_id: candidateId, set_code: setCode, ...NOT_READY }), { headers: CORS });
+        return new Response(JSON.stringify({ candidate_id: candidateId, set_code: setCode, shift_date: shiftDate, ...NOT_READY }), { headers: CORS });
       }
       setId = set.id;
     }
 
-    // Derive the verdict from the fail-closed DB functions + the status row.
+    if (shiftDate) {
+      // SHIFT-DATE MODE: evaluate compliance as-of the shift date (+buffer), and
+      // reflect a manager override. The traffic light stays the TRUE colour so an
+      // override is visible: work_ready=true while status may still be "red".
+      const [{ data: ready }, { data: status }, { data: overridden }] = await Promise.all([
+        sb.rpc("is_work_ready_on", { p_candidate_id: candidateId, p_set_id: setId, p_as_of: shiftDate, p_buffer_days: bufferDays }),
+        sb.rpc("work_ready_status_on", { p_candidate_id: candidateId, p_set_id: setId, p_as_of: shiftDate, p_buffer_days: bufferDays }),
+        sb.rpc("has_active_override", { p_candidate_id: candidateId, p_set_id: setId, p_as_of: shiftDate }),
+      ]);
+      const asOfStatus = (status as string) ?? "red";
+      return new Response(JSON.stringify({
+        candidate_id: candidateId,
+        set_id: setId,
+        shift_date: shiftDate,
+        work_ready: ready === true,
+        status: asOfStatus,                      // the TRUE as-of colour (override not hidden)
+        via_override: ready === true && overridden === true && !["green", "amber"].includes(asOfStatus),
+      }), { headers: CORS });
+    }
+
+    // Default (today) mode — unchanged: derive from the stored traffic light.
     const [{ data: ready }, { data: status }, { data: row }] = await Promise.all([
       sb.rpc("is_work_ready", { p_candidate_id: candidateId, p_set_id: setId }),
       sb.rpc("work_ready_status", { p_candidate_id: candidateId, p_set_id: setId }),
@@ -91,6 +128,7 @@ Deno.serve(async (req) => {
       status: (status as string) ?? "red",
       blocking_open: row?.blocking_open ?? null,
       next_expiry: row?.next_expiry ?? null,
+      via_override: false,
     }), { headers: CORS });
   } catch (_e) {
     // Never surface a 500 that could read as "unknown, proceed" — fail closed.

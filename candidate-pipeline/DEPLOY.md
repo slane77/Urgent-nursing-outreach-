@@ -199,6 +199,33 @@ with these JWT settings:
 > real adapters are credential-gated (unset `secret_ref` env ⇒ `needs_human`,
 > never a pass) and the `sim` provider demonstrates the full pipeline end-to-end.
 
+> **Continuous compliance — shift-date gate + pre-expiry ladder (migrations 40–41).**
+> `sql/40_shift_compliance_gate.sql`: `compliance_settings` (single-row config;
+> `booking_buffer_days` default 3, admin-writable) + `booking_buffer_days()`;
+> `work_ready_status_on()` / `is_work_ready_on()` — the SHIFT-DATE gate that
+> evaluates compliance AS-OF a shift date + buffer (a blocking item must stay
+> valid past `shift_date + buffer`), fail-closed like `is_work_ready`; and the
+> manager **override** — `compliance_overrides` (RLS: officer **read only**, **NO
+> client write policy**; writes ONLY via `grant_compliance_override` /
+> `revoke_compliance_override`, both `is_compliance_officer()`-gated, reason
+> MANDATORY, time-bounded, and each appends an immutable `verification_events`
+> row). An override PERMITS booking but never auto-verifies — the traffic light
+> stays red so the override is visible in the audit. `sql/41_pre_expiry_ladder.sql`:
+> `pre_expiry_offsets` (seeded T-90/60/30/14/7/1, per-requirement override
+> supported), `expiry_reminders_sent` (once-only ledger keyed on
+> `(item, expires_at, offset)` so a renewal auto-resets the ladder and nothing is
+> double-sent), `candidate_help`/`candidate_label` on `compliance_requirements`,
+> a `template` tag on `messages`, and `due_expiry_reminders()` (the send worklist
+> — nearest due, unsent rung per current verified item). Both files are additive +
+> idempotent (re-run to a no-op). The **`work-ready`** function gains optional
+> `shift_date` + `buffer_days` inputs and returns `via_override`; the
+> **`early-warnings`** function gains a fail-closed `?secret=CRON_SECRET` gate
+> (now DEAD unless the secret is set AND matches) and a pre-expiry ladder step
+> that replaces the old ad-hoc weekly chase (the expired→`expired`+needs_human
+> step is unchanged). No new function or secret is required — `PUBLIC_SITE_URL`
+> (already listed) is used as the portal deep-link, and `CRON_SECRET` (already
+> listed) is now MANDATORY for `early-warnings` to run.
+
 ---
 
 ## 5. Schedule + inbound
