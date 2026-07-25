@@ -25,6 +25,7 @@
     <div class="tab active" data-v="people">People &amp; desks</div>
     <div class="tab" data-v="desks">Manage desks</div>
     <div class="tab" data-v="coverage">Routing rules</div>
+    <div class="tab" data-v="checklists">Checklist library</div>
   </div>
 
   <div id="peopleView" class="card" style="margin-top:14px;">
@@ -56,6 +57,32 @@
     </div>
     <table><thead><tr><th>Desk</th><th>Discipline</th><th>Specialty</th><th>Region</th><th></th></tr></thead><tbody id="covRows"></tbody></table>
   </div>
+
+  <div id="checklistsView" class="card hidden" style="margin-top:14px;">
+    <h3 style="margin-top:0">Checklist library</h3>
+    <p class="muted">One reusable template per client form. Upload a <code>.docx</code> containing <code>{tokens}</code>, map each token to a Compliance Passport field, then activate. Editing an active form makes a new version — existing sends keep the version they used.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px;">
+      <div><label>Client</label><input id="t_client" placeholder="St Elsewhere NHS"/></div>
+      <div><label>Form name</label><input id="t_name" placeholder="Agency Worker Checklist"/></div>
+      <div><label>Template .docx</label><input id="t_file" type="file" accept=".docx"/></div>
+      <button class="btn" id="addTemplate">Add template</button>
+    </div>
+    <div id="tplMsg" class="muted" style="margin-bottom:8px"></div>
+    <table><thead><tr><th>Client</th><th>Form</th><th>Ver</th><th>Status</th><th>Missing policy</th><th></th></tr></thead><tbody id="tplRows"></tbody></table>
+
+    <div id="mapEditor" class="hidden" style="margin-top:16px;border-top:1px solid var(--hair);padding-top:12px;">
+      <h4 id="mapTitle" style="margin-top:0">Field map</h4>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <label style="margin:0">Missing policy</label>
+        <select id="m_policy"><option value="block">block — never send incomplete</option><option value="annotate">annotate — send with «outstanding» markers</option></select>
+        <button class="btn sm secondary" id="addRow">+ token row</button>
+        <button class="btn sm" id="saveMap">Save map</button>
+        <button class="btn sm secondary" id="newVersion">Save as new version</button>
+        <span class="muted" id="mapSaveMsg"></span>
+      </div>
+      <table><thead><tr><th>Token</th><th>Passport field</th><th>Transform</th><th>Required</th><th>Static</th><th></th></tr></thead><tbody id="mapRows"></tbody></table>
+    </div>
+  </div>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -75,7 +102,7 @@ $('password').addEventListener('keydown',ev=>{if(ev.key==='Enter')$('loginBtn').
 $('logoutBtn').onclick=()=>sb.auth.signOut();
 $('changePw').onclick=async()=>{const p=prompt('New password (min 6 characters):');if(!p)return;const {error}=await sb.auth.updateUser({password:p});alert(error?error.message:'Password updated — use it next time you sign in.');};
 
-$('tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{$('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');const v=t.dataset.v;$('peopleView').classList.toggle('hidden',v!=='people');$('desksView').classList.toggle('hidden',v!=='desks');$('coverageView').classList.toggle('hidden',v!=='coverage');});
+$('tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{$('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');const v=t.dataset.v;$('peopleView').classList.toggle('hidden',v!=='people');$('desksView').classList.toggle('hidden',v!=='desks');$('coverageView').classList.toggle('hidden',v!=='coverage');$('checklistsView').classList.toggle('hidden',v!=='checklists');if(v==='checklists')loadTemplates();});
 
 let loaded=false;
 async function load(){ if(loaded)return; loaded=true; await reload(); }
@@ -138,6 +165,117 @@ $('addCov').onclick=async()=>{
   if(error){alert(error.message);return;}
   $('c_region').value=''; renderCoverage();
 };
+// ---- Checklist library ----
+// The Compliance Passport token vocabulary (design §1) — the closed target set a
+// token may map to. Generic item.<code>.* keys resolve for any seeded requirement.
+const PASSPORT_CATALOG = [
+  'identity.first_name','identity.last_name','identity.full_name','identity.known_as','identity.dob',
+  'identity.email','identity.phone','identity.town','identity.postcode','identity.region','identity.country',
+  'identity.address','identity.ni_number','identity.nationality','identity.gender','identity.place_of_birth',
+  'role.division','role.discipline','role.specialty','role.job_title',
+  'reg.body','reg.number','reg.expiry','reg.verified','reg.checked_at','reg.source_ref',
+  'dbs.number','dbs.level','dbs.issue_date','dbs.update_service','dbs.verified',
+  'rtw.status','rtw.share_code','rtw.method','rtw.expiry','rtw.verified',
+  'refs.covered','refs.years','refs.count','oh.status','oh.date','immun.status','immun.date',
+  'training.status','training.expiry','qual.name','qual.status','qual.cert_date',
+];
+const TRANSFORMS = ['','date_uk','yes_no','upper','title','with_provenance'];
+let templates=[], editingTpl=null;
+
+async function loadTemplates(){
+  const { data } = await sb.from('checklist_templates').select('*').order('client_name').order('name').order('version',{ascending:false});
+  templates = data||[];
+  $('tplRows').innerHTML = templates.map(t=>`<tr>
+    <td>${esc(t.client_name)}</td><td>${esc(t.name)}</td><td>v${t.version}</td>
+    <td><span class="pill">${t.status}</span></td><td class="muted">${t.missing_policy}</td>
+    <td style="white-space:nowrap">
+      <button class="btn sm secondary" data-edit="${t.id}">Map</button>
+      ${t.status!=='active'?`<button class="btn sm" data-activate="${t.id}">Activate</button>`:''}
+      ${t.status!=='retired'?`<button class="btn sm secondary" data-retire="${t.id}">Retire</button>`:''}
+    </td></tr>`).join('')||'<tr><td colspan="6" class="muted">No templates yet.</td></tr>';
+  $('tplRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editTemplate(b.dataset.edit));
+  $('tplRows').querySelectorAll('[data-activate]').forEach(b=>b.onclick=()=>setTemplateStatus(b.dataset.activate,'active'));
+  $('tplRows').querySelectorAll('[data-retire]').forEach(b=>b.onclick=()=>setTemplateStatus(b.dataset.retire,'retired'));
+}
+
+async function setTemplateStatus(id,status){
+  const { error } = await sb.from('checklist_templates').update({ status }).eq('id',id);
+  if (error) { alert(status==='retired'?'Retire is admin-only: '+error.message:error.message); return; }
+  loadTemplates();
+}
+
+$('addTemplate').onclick = async ()=>{
+  const client=$('t_client').value.trim(), name=$('t_name').value.trim(), file=$('t_file').files[0];
+  if(!client||!name||!file){ $('tplMsg').textContent='Client, form name and a .docx are all required.'; return; }
+  if(!/\.docx$/i.test(file.name)){ $('tplMsg').textContent='Template must be a .docx.'; return; }
+  $('tplMsg').textContent='Uploading…';
+  const path = client.replace(/[^a-zA-Z0-9._-]/g,'_')+'/'+Date.now()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+  const { error:upErr } = await sb.storage.from('checklist-templates').upload(path,file,{upsert:false});
+  if(upErr){ $('tplMsg').textContent='Upload error: '+upErr.message; return; }
+  const { error } = await sb.from('checklist_templates').insert({ client_name:client, name, template_path:path, status:'draft' });
+  if(error){ $('tplMsg').textContent='Error: '+error.message; return; }
+  $('t_client').value=$('t_name').value=''; $('t_file').value=''; $('tplMsg').textContent='Added as draft ✓ — map the tokens below.'; loadTemplates();
+};
+
+function editTemplate(id){
+  editingTpl = templates.find(t=>t.id===id); if(!editingTpl) return;
+  $('mapEditor').classList.remove('hidden');
+  $('mapTitle').textContent = `Field map — ${editingTpl.client_name} · ${editingTpl.name} (v${editingTpl.version}, ${editingTpl.status})`;
+  $('m_policy').value = editingTpl.missing_policy||'block';
+  const map = Array.isArray(editingTpl.field_map)?editingTpl.field_map:[];
+  $('mapRows').innerHTML=''; (map.length?map:[{token:'',field:''}]).forEach(addMapRow);
+  $('mapSaveMsg').textContent='';
+  $('mapEditor').scrollIntoView({behavior:'smooth'});
+}
+
+function addMapRow(entry){
+  entry = entry||{token:'',field:''};
+  const tr = document.createElement('tr');
+  const fieldOpts = '<option value="">— (static) —</option>'+PASSPORT_CATALOG.map(k=>`<option value="${k}" ${k===entry.field?'selected':''}>${k}</option>`).join('');
+  const trOpts = TRANSFORMS.map(x=>`<option value="${x}" ${x===(entry.transform||'')?'selected':''}>${x||'none'}</option>`).join('');
+  tr.innerHTML = `<td><input class="m_token" value="${esc(entry.token)}" placeholder="reg_number"/></td>
+    <td><select class="m_field">${fieldOpts}</select></td>
+    <td><select class="m_transform">${trOpts}</select></td>
+    <td style="text-align:center"><input type="checkbox" class="m_required" ${entry.required?'checked':''}/></td>
+    <td><input class="m_static" value="${esc(entry.static)}" placeholder="constant"/></td>
+    <td><button class="btn sm secondary m_del">✕</button></td>`;
+  tr.querySelector('.m_del').onclick=()=>tr.remove();
+  $('mapRows').appendChild(tr);
+}
+$('addRow').onclick = ()=>addMapRow();
+
+function collectMap(){
+  return [...$('mapRows').querySelectorAll('tr')].map(tr=>{
+    const token=tr.querySelector('.m_token').value.trim(); if(!token) return null;
+    const field=tr.querySelector('.m_field').value||null;
+    const stat=tr.querySelector('.m_static').value.trim();
+    const e={ token, required:tr.querySelector('.m_required').checked };
+    if(field){ e.field=field; const t=tr.querySelector('.m_transform').value; if(t) e.transform=t; }
+    else { e.field=null; e.static=stat; }
+    return e;
+  }).filter(Boolean);
+}
+
+$('saveMap').onclick = async ()=>{
+  if(!editingTpl) return;
+  const { error } = await sb.from('checklist_templates').update({ field_map:collectMap(), missing_policy:$('m_policy').value }).eq('id',editingTpl.id);
+  $('mapSaveMsg').textContent = error?('Error: '+error.message):'Saved ✓';
+  if(!error) loadTemplates();
+};
+
+$('newVersion').onclick = async ()=>{
+  if(!editingTpl) return;
+  const { error } = await sb.from('checklist_templates').insert({
+    client_name:editingTpl.client_name, client_ref:editingTpl.client_ref, name:editingTpl.name,
+    version:(editingTpl.version||1)+1, status:'draft', bucket:editingTpl.bucket,
+    template_path:editingTpl.template_path, original_path:editingTpl.original_path,
+    field_map:collectMap(), static_answers:editingTpl.static_answers, missing_policy:$('m_policy').value,
+    discipline_id:editingTpl.discipline_id,
+  });
+  $('mapSaveMsg').textContent = error?('Error: '+error.message):'New version created ✓';
+  if(!error) loadTemplates();
+};
+
 sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
 </script>
 </body>

@@ -237,6 +237,29 @@ async function openCandidate(id) {
       </div>`).join('') || '<span class="muted">None requested yet.</span>'}
     </div>
 
+    <div class="card" id="clCard">
+      <h4 style="margin-top:0">Client checklists</h4>
+      <p class="muted">Auto-fill a client's own form from this candidate's Compliance Passport. Preview first — every answer shows its provenance and any blank is flagged.</p>
+      <div class="controls" style="gap:8px;">
+        <select id="clTemplate" style="flex:1; min-width:200px"><option value="">Loading templates…</option></select>
+        <button class="btn sm secondary" id="clPreviewBtn">Generate (preview)</button>
+        <button class="btn sm" id="clDownloadBtn">Download</button>
+        <button class="btn sm secondary" id="clSentBtn" disabled>Mark as sent</button>
+      </div>
+      <div id="clStatus" class="muted" style="margin-top:6px"></div>
+      <div id="clReview" style="margin-top:8px"></div>
+      <div style="margin-top:12px; border-top:1px solid var(--hair); padding-top:10px;">
+        <label>Add a new client form (.docx with <code>{tokens}</code>)</label>
+        <div id="clDrop" style="border:1px dashed var(--hair); border-radius:10px; padding:14px; text-align:center; cursor:pointer;">
+          Drop a <strong>.docx</strong> here or click to choose — then <a href="admin.html" target="_blank">map it in Admin</a>.
+          <input type="file" id="clFile" accept=".docx" style="display:none" />
+        </div>
+        <div id="clUploadMsg" class="muted" style="margin-top:6px"></div>
+      </div>
+      <h4 style="margin:14px 0 6px">History</h4>
+      <div id="clHistory"><span class="muted">No checklists generated yet.</span></div>
+    </div>
+
     <div class="card">
       <h4 style="margin-top:0">Employment history</h4>
       ${cov?`<div class="muted" style="margin-bottom:8px;">3-year reference coverage: ${cov.covered?'<span style="color:var(--green);font-weight:600;">✓ complete</span>':(cov.entries===0?'<span style="color:#b45309;font-weight:600;">⚠ no history recorded</span>':`<span style="color:#b45309;font-weight:600;">⚠ ${cov.gaps.length} gap(s)</span> — ${cov.gaps.map(g=>g.from+'→'+g.to+' ('+g.days+'d)').join(', ')}`)}</div>`:''}
@@ -256,6 +279,7 @@ async function openCandidate(id) {
   $('detail').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>resolveItem(b.dataset.resolve,b.dataset.st));
   $('detail').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>viewDoc(b.dataset.view));
   $('detail').querySelectorAll('[data-airev]').forEach(b=>b.onclick=()=>aiReview(b.dataset.airev,b));
+  initChecklists(c.id);
 }
 $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); current=null; };
 $('auditPackBtn').onclick = () => { if (current) window.open('audit-pack.html?id=' + current.id, '_blank'); };
@@ -372,6 +396,108 @@ async function resolveItem(id, status) {
   if (current) openCandidate(current.id);
   loadReviewCount();
   if (!$('reviewView').classList.contains('hidden')) loadReview();
+}
+
+// ---- Client checklists ----
+const CHECKLIST_FN = window.CONFIG.SUPABASE_URL + '/functions/v1/checklist-fill';
+let clState = { fillId:null, status:null };
+const PROV_COLOR = { verified:'var(--green)', self_declared:'#b45309', derived:'#64748b', static:'#64748b', missing:'#dc2626' };
+
+async function initChecklists(candId) {
+  clState = { fillId:null, status:null };
+  $('clReview').innerHTML=''; $('clStatus').textContent=''; $('clDownloadBtn').disabled=false; $('clSentBtn').disabled=true;
+  const { data:tpls } = await sb.from('checklist_templates').select('id,client_name,name,version').eq('status','active').order('client_name');
+  $('clTemplate').innerHTML = (tpls&&tpls.length)
+    ? '<option value="">Select a client form…</option>' + tpls.map(t=>`<option value="${t.id}">${esc(t.client_name)} — ${esc(t.name)} (v${t.version})</option>`).join('')
+    : '<option value="">No active templates — add one in Admin</option>';
+  $('clPreviewBtn').onclick = () => runChecklist(candId, true);
+  $('clDownloadBtn').onclick = () => runChecklist(candId, false);
+  $('clSentBtn').onclick = () => markChecklistSent(candId);
+  $('clDrop').onclick = () => $('clFile').click();
+  $('clDrop').ondragover = (e)=>{ e.preventDefault(); $('clDrop').style.borderColor='var(--green)'; };
+  $('clDrop').ondragleave = ()=>{ $('clDrop').style.borderColor='var(--hair)'; };
+  $('clDrop').ondrop = (e)=>{ e.preventDefault(); $('clDrop').style.borderColor='var(--hair)'; if(e.dataTransfer.files[0]) uploadTemplate(e.dataTransfer.files[0]); };
+  $('clFile').onchange = ()=>{ if($('clFile').files[0]) uploadTemplate($('clFile').files[0]); };
+  loadChecklistHistory(candId);
+}
+
+async function runChecklist(candId, dryRun) {
+  const tid = $('clTemplate').value; if(!tid){ $('clStatus').textContent='Pick a template first.'; return; }
+  $('clStatus').textContent = dryRun ? 'Resolving preview…' : 'Generating…';
+  const { data:{ session } } = await sb.auth.getSession();
+  try {
+    const res = await fetch(CHECKLIST_FN, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'apikey':window.CONFIG.SUPABASE_ANON_KEY, 'Authorization':'Bearer '+(session?.access_token??'') },
+      body: JSON.stringify({ candidate_id:candId, template_id:tid, dry_run:dryRun }),
+    });
+    const out = await res.json();
+    if (out.error) { $('clStatus').textContent = 'Error: ' + out.error; return; }
+    clState.status = out.status;
+    renderChecklistReview(out);
+    if (dryRun) {
+      $('clStatus').innerHTML = statusPill(out.status) + ' · preview only, nothing saved';
+    } else {
+      clState.fillId = out.fill_id;
+      $('clStatus').innerHTML = statusPill(out.status) + ' · saved to history';
+      $('clSentBtn').disabled = (out.status === 'needs_attention');
+      if (out.signed_url) window.open(out.signed_url, '_blank');
+      loadChecklistHistory(candId);
+    }
+  } catch (e) { $('clStatus').textContent = 'Error: ' + e; }
+}
+
+function statusPill(s){ const c = s==='needs_attention'?'#dc2626':(s==='sent'?'var(--green)':'#64748b'); return `<span class="pill" style="border-color:${c};color:${c}">${(s||'').replace(/_/g,' ')}</span>`; }
+
+function renderChecklistReview(out) {
+  const rows = Object.entries(out.resolved||{}).map(([token,f])=>{
+    const prov = f.provenance||'missing'; const val = (f.rendered ?? f.value);
+    const shown = (val===null||val===undefined||val==='') ? '<span style="color:#dc2626">— missing —</span>' : esc(val);
+    return `<tr><td class="muted">${esc(token)}</td><td>${shown}</td>
+      <td><span class="pill" style="border-color:${PROV_COLOR[prov]||'#64748b'};color:${PROV_COLOR[prov]||'#64748b'}">${prov.replace(/_/g,' ')}</span></td></tr>`;
+  }).join('');
+  const miss = (out.missing_fields||[]).filter(m=>m.required);
+  $('clReview').innerHTML = `${miss.length?`<div class="note" style="border-color:#dc2626;color:#dc2626">${miss.length} required field(s) unresolved: ${miss.map(m=>esc(m.label)).join(', ')}</div>`:''}
+    <table style="margin-top:6px"><thead><tr><th>Token</th><th>Value</th><th>Provenance</th></tr></thead><tbody>${rows||'<tr><td colspan="3" class="muted">No mapped fields.</td></tr>'}</tbody></table>`;
+}
+
+async function markChecklistSent(candId) {
+  if (!clState.fillId) return;
+  const { error } = await sb.rpc('mark_checklist_sent', { p_fill_id: clState.fillId });
+  if (error) { $('clStatus').textContent = 'Error: ' + error.message; return; }
+  $('clStatus').innerHTML = statusPill('sent') + ' · recorded';
+  $('clSentBtn').disabled = true;
+  loadChecklistHistory(candId);
+}
+
+async function loadChecklistHistory(candId) {
+  const { data } = await sb.from('checklist_fills')
+    .select('id,output_path,status,generated_at,template_id,checklist_templates(client_name,name)')
+    .eq('candidate_id', candId).order('generated_at',{ascending:false}).limit(50);
+  $('clHistory').innerHTML = (data&&data.length) ? data.map(f=>`<div style="display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--hair);padding:6px 0;">
+      <span style="flex:1">${esc(f.checklist_templates?.client_name)||'—'} — ${esc(f.checklist_templates?.name)||''}</span>
+      ${statusPill(f.status)}
+      <span class="muted">${(f.generated_at||'').slice(0,16).replace('T',' ')}</span>
+      <button class="btn sm secondary" data-dl="${esc(f.output_path)}">Download</button>
+    </div>`).join('') : '<span class="muted">No checklists generated yet.</span>';
+  $('clHistory').querySelectorAll('[data-dl]').forEach(b=>b.onclick=()=>downloadOutput(b.dataset.dl));
+}
+
+async function downloadOutput(path) {
+  const { data, error } = await sb.storage.from('checklist-outputs').createSignedUrl(path, 300);
+  if (error || !data?.signedUrl) { alert('Could not open file: ' + (error?.message||'unknown')); return; }
+  window.open(data.signedUrl, '_blank');
+}
+
+async function uploadTemplate(file) {
+  if (!/\.docx$/i.test(file.name)) { $('clUploadMsg').textContent = 'Please choose a .docx file.'; return; }
+  $('clUploadMsg').textContent = 'Uploading…';
+  const path = 'inbox/' + Date.now() + '-' + file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+  const { error:upErr } = await sb.storage.from('checklist-templates').upload(path, file, { upsert:false });
+  if (upErr) { $('clUploadMsg').textContent = 'Upload error: ' + upErr.message; return; }
+  const { error:insErr } = await sb.from('checklist_templates').insert({ client_name:'(new — set in Admin)', name:file.name.replace(/\.docx$/i,''), template_path:path, status:'draft' });
+  $('clUploadMsg').innerHTML = insErr ? ('Saved file, but could not create draft: ' + esc(insErr.message))
+    : 'Uploaded ✓ — now <a href="admin.html" target="_blank">map the tokens in Admin</a>.';
 }
 
 // ---- Review queue ----

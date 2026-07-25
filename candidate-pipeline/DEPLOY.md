@@ -102,6 +102,7 @@ with these JWT settings:
 | `work-ready` | **false** | external booking system (Bearer `WORK_READY_TOKEN`) — compliance gate; returns 401 until the token is set |
 | `booking-breach` | **false** | external booking system / officer (Bearer `WORK_READY_TOKEN`) — records a confirmed non-compliant booking + alerts; returns 401 until the token is set |
 | `verification` | **false** | officers (`mode=check`, their JWT) + cron (`mode=drain`/`mode=sweep`, `?secret=CRON_SECRET`) + automation (Bearer `VERIFICATION_TOKEN`). Deploy with the `adapters/` folder alongside `index.ts`. |
+| `checklist-fill` | **true** | officers (candidate panel) — Client Checklist Auto-Fill; resolves the passport (service role) + merges the client `.docx`. No new secrets. |
 
 > **Compliance Phase 0 migrations** — apply `sql/22_compliance_sets.sql`,
 > `sql/23_work_ready_gate.sql`, then `sql/24_seed_nhs_rn_set.sql` (after 10–21).
@@ -273,6 +274,92 @@ with these JWT settings:
 > to act — and is sent ONLY to authorised internal compliance staff (the assigned
 > officer, their overseeing manager, and the central compliance mailbox). Keep
 > that mailbox an internal, access-controlled address.
+
+> **Client Checklist Auto-Fill — Phase 1 (after 42), apply in order:**
+> `sql/43_candidate_attributes.sql`, `sql/43b_compliance_passport.sql`,
+> `sql/44_checklist_templates.sql`. All additive + idempotent (re-run to a no-op).
+>
+> - **`sql/43` — fixes a live silent-drop bug + adds the KV overlay.**
+>   `candidates.html` already renders and WRITES `address`, `ni_number`,
+>   `compliance_status`, `audited_by`, `audited_at` (and `compliance_items.ai_review`)
+>   but **no migration ever added those columns** — every one of those writes has
+>   been silently no-oping. 43 adds them (`add column if not exists`, exact UI
+>   names) plus the identity columns the passport needs (`nationality`, `gender`,
+>   `place_of_birth`). It also adds `candidate.candidate_attributes` — the long-tail
+>   key-value overlay (`dbs.number`, `rtw.share_code`, `training.<module>.expiry`, …)
+>   the passport reads for any vocabulary key no first-class column/compliance_item
+>   satisfies. RLS: officer read + officer upsert, no anon.
+> - **`sql/43b` — `compliance_passport(candidate_id)`.** SECURITY DEFINER, gated
+>   `(is_authorized_user() and is_compliance_officer()) or is_service_role()`.
+>   Returns the versioned JSON token vocabulary — EVERY field an object
+>   `{value, provenance, as_at, source_ref}`; a field with no data is returned
+>   EXPLICITLY as `provenance:'missing'`, never omitted. Resolves identity from
+>   columns, role from the division→discipline→specialty joins, and item-backed
+>   fields from the latest `compliance_item` per requirement `code` (verified-wins
+>   lateral), then overlays `candidate_attributes`. Grant execute to authenticated,
+>   service_role.
+> - **`sql/44` — the template library + fill audit.**
+>   `checklist_templates` (one row per client-form VERSION: tokenized `.docx` path +
+>   token→field map + per-template `missing_policy` DEFAULT `'block'`). RLS: officers
+>   read/create/edit; **only admins retire** (the update `WITH CHECK` blocks a
+>   non-admin flipping `status='retired'`) **or delete** (admin-only DELETE policy).
+>   `checklist_fills` (the immutable "sent client X this file for candidate Y on Z"
+>   record) has **officer SELECT only and NO insert/update/delete policy** — every
+>   write is via the SECURITY DEFINER RPCs, so a fill can never be forged or
+>   back-dated (same un-forgeable pattern as `verification_events`). Extends the
+>   append-only `verification_events` `event_type` CHECK (drop-then-add, strict
+>   superset) with **`checklist_sent`**. RPCs: `record_checklist_fill()`
+>   (service-or-officer; freezes `template_version`; the SENT action is always
+>   audited) and `mark_checklist_sent(fill_id, override)` (officer-gated; refuses a
+>   `needs_attention` fill unless `override AND is_admin()`; appends ONE
+>   `checklist_sent` audit event; idempotent). The file also adds officer-read
+>   `storage.objects` policies for the two buckets — **guarded** so it applies clean
+>   on a bare Postgres harness with no `storage` schema.
+>
+> **Storage — two PRIVATE buckets (EU/UK region), created at deploy time** (like
+> `candidate-docs`, Supabase bucket creation is an API/dashboard action, not SQL):
+> ☐ `checklist-templates` — blank tokenized templates + originals (officer read;
+> service write). ☐ `checklist-outputs` — generated PII-bearing checklists (officer
+> read via 300s signed URL; service write). The officer-read RLS object policies are
+> installed by `sql/44`; the service-role edge function bypasses storage RLS for
+> writes, so no write policy is needed. Create both via the dashboard (Storage → New
+> bucket, **Private**) or `supabase storage` / the management API.
+>
+> **`checklist-fill` edge function** (`functions/checklist-fill/index.ts`,
+> **verify_jwt=true**, officers): resolves `compliance_passport` (service role),
+> downloads the tokenized `.docx` from `checklist-templates`, merges via
+> `npm:docxtemplater` + `npm:pizzip` (client layout/branding byte-preserved outside
+> the tokens), applies the safe transform allow-list
+> (`date_uk`/`yes_no`/`upper`/`title`/`with_provenance`/`static`), and a `nullGetter`
+> that renders a visible `«NEEDS ATTENTION: <label>»` sentinel + collects the gap. A
+> required field left empty → `missing_policy='block'`: `status='needs_attention'`
+> (mark-as-sent stays disabled until an admin override); `='annotate'`: renders the
+> sentinel, `status='generated'`. `dry_run:true` returns the resolved values +
+> missing list for the review view and **writes nothing**; a real run uploads to
+> `checklist-outputs/<cand>/<template>/<uuid>.docx`, calls `record_checklist_fill`,
+> and returns a 300s signed URL. Fail-closed: auth fail 401; any resolver/render/
+> upload error 5xx and nothing recorded (`record_checklist_fill` runs only after a
+> successful upload). No new secrets are needed (`SUPABASE_URL` /
+> `SUPABASE_SERVICE_ROLE_KEY` are injected). **Phase 2** `checklist-onboard` (the AI
+> auto-tokenizer) will reuse the existing **`ANTHROPIC_API_KEY`** secret.
+>
+> **UI:** `candidates.html` gains a **Client checklists** card in the candidate
+> slide-over (active-template dropdown → Generate/preview with provenance pills →
+> Download real fill → Mark as sent, disabled while `needs_attention` → fill
+> History; plus a drag-drop stub that uploads a new `.docx` and links to Admin).
+> `admin.html` gains a **Checklist library** tab (upload templates, the token→field
+> map editor with the passport vocabulary + transform + required + static + the
+> per-template `missing_policy`, activate/retire/new-version). All reads run under
+> the officer session + RLS; no secrets in the pages.
+>
+> **Data protection (UK GDPR):** generated checklists carry special-category-adjacent
+> PII (NI number, DOB, DBS number, address). Keep both buckets **private, EU/UK
+> region**; access ONLY via short-TTL (300s) signed URLs for an authenticated
+> officer. NI number is a first-class `candidates` column and DBS number lives in
+> `candidate_attributes` — both behind officer RLS, **never** returned to a
+> non-officer, **never** logged to `provider_jobs` payloads, and **never** placed in
+> any AI prompt. Outputs are subject to the same purge sweep as `candidate-docs`; the
+> `checklist_fills` row is retained as the immutable audit record.
 
 ---
 
