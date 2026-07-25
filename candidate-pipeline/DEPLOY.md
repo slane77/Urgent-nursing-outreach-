@@ -87,6 +87,7 @@ with these JWT settings:
 |---|---|---|
 | `candidate-agent` | **true** | staff (cockpit) |
 | `csv-import` | **true** | staff (importer) |
+| `compliance-import` | **true** | staff (compliance bulk migration) |
 | `reference-request` | **true** | staff |
 | `job-advert` | **true** | staff (vacancies) |
 | `outreach-campaign` | **true** | staff |
@@ -109,6 +110,59 @@ with these JWT settings:
 > candidates automatically — reassign them to the new version so the gate
 > recomputes; until then the booking system (which resolves `set_code` to the
 > latest active version) reads them as red (fail-closed, not fail-open).
+>
+> **Compliance Phase 1 migrations** — after 22–24, apply in order:
+> `sql/25_compliance_scale.sql` (adds `'waived'` + `migrated` to
+> `compliance_items`, the `candidate.bulk_load` trigger guard, the
+> `needs_human_count`/`expiring_count` scalars + waived-caps-at-amber recompute,
+> `recompute_candidate_status_bulk()`, the compliance-officer desk-read exemption,
+> and the scale indexes), `sql/26_requirement_set_map.sql` (the
+> `requirement_set_map` table + `assign_requirement_sets()` / `materialize_items()`
+> + the auto-assign trigger), `sql/27_seed_requirement_sets.sql` (composes
+> NHS_HCA / NHS_DOCTOR / AHP_HCPC / COMPLEX_CARE / CARE_HOME / CHILDRENS /
+> INSURANCE + the REG_MGR_* add-ons and seeds the map; adds a nursing-scoped
+> `care_certificate`), `sql/28_evidence.sql` (`candidate_evidence` + RLS), and
+> `sql/29_compliance_ops.sql` (the `compliance_worklist` view + the
+> `compliance_dashboard` / `decide_item` / `bulk_assign_set` / `bulk_request` /
+> `import_compliance_bulk` RPCs). Then deploy the `compliance-import` edge
+> function (verify_jwt=true, staff): `map` mode uses Claude to map spreadsheet
+> headers to `req:<code>:<field>` targets; `commit` mode batches to
+> `import_compliance_bulk` (service_role). Migrated items import as
+> `verified`+`migrated` with a 90-day grace expiry and one provenance
+> `verification_events` row each.
+>
+> **Compliance Phase 1b migrations (division taxonomy)** — after 30–33, apply in
+> order: `sql/30_divisions.sql` (adds `candidate.divisions` + a
+> `disciplines.division_id` FK/index, RLS = auth read / admin write, seeds the
+> five divisions and maps existing disciplines to them),
+> `sql/31_role_taxonomy.sql` (adds specialties: nursing `hca`/`enp`/`anp`,
+> doctors `psychiatry`; `enp`/`anp`/`psychiatry` inherit their discipline's base
+> set), `sql/32_seed_role_sets.sql` (adds the `performers_list` catalogue
+> requirement; composes `NHS_MIDWIFE` / `NHS_ODP` / `NHS_GP`; **fixes the Phase-1
+> map bug** where NHS_HCA was mapped discipline-wide because the `hca` specialty
+> did not yet exist — a plain nurse now correctly resolves to NHS_RN; then wires
+> the specialty→set map rows), and `sql/33_worklist_division.sql`
+> (`create or replace` on `compliance_worklist` adding
+> `division_id`/`division_code`/`division_name`). Migrations are SQL-only (no UI)
+> and idempotent — 30–33 re-run to a no-op.
+>
+> **Compliance Phase 1c migrations (officer assignment + reporting)** — after
+> 34–36, apply in order: `sql/34_compliance_officer.sql` (adds
+> `candidates.compliance_officer`; the append-only `officer_assignments` history
+> table — compliance-officer read+insert, NO update/delete = immutable; the
+> `assign_officer` / `bulk_assign_officer` / `auto_assign_officers_by_division`
+> RPCs, gated `is_compliance_officer()`, validating the target is staff with
+> `is_compliance`/`is_admin`; extends `compliance_worklist` with
+> `compliance_officer`). Assignment is ON-DEMAND ONLY — no trigger — and the new
+> column is absent from the set-assign / autoroute trigger `OF (...)` lists, so
+> writing it never fans out. Visibility stays open (all officers see the bench;
+> "my candidates" is a client-side filter, not RLS).
+> `sql/35_overseeing_hierarchy.sql` (adds `staff.overseen_by` + `my_reports()` /
+> `is_overseeing_officer()`). `sql/36_compliance_reporting.sql` (the
+> `candidate_overall_status` view — one fail-closed overall RAG per in-pipeline
+> candidate; the `compliance_officer_report` and `compliance_exec_overview`
+> report RPCs, gated `is_compliance_officer()`). Migrations are SQL-only (no UI)
+> and idempotent — 34–36 re-run to a no-op.
 
 ---
 

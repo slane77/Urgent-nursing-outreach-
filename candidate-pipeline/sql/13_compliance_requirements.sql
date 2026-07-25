@@ -24,6 +24,20 @@
 --  coverage_rule: {"type":"continuous_history","years":3,"reconcile":"cv"}
 -- ============================================================================
 
+-- ── Null-safe idempotency key (D5) ──────────────────────────────────────────
+-- The table's `unique (discipline_id, specialty_id, code)` constraint never
+-- constrains the global/discipline-scoped rows here, because a NULL discipline
+-- or specialty is DISTINCT from every other NULL in a b-tree unique index — so
+-- `on conflict (discipline_id, specialty_id, code)` silently never fires and a
+-- re-run duplicates every catalogue row. Add a null-collapsing expression index
+-- and use it as the conflict target so re-applying this file is a true no-op.
+-- Sentinel UUID stands in for "no discipline/specialty" so NULLs compare equal.
+create unique index if not exists compliance_requirements_key_uniq
+  on candidate.compliance_requirements (
+    coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+    code);
+
 -- ── GLOBAL (apply to every discipline; discipline_id = null) ────────────────
 insert into candidate.compliance_requirements
   (discipline_id, code, name, tier, required, expiry_rule, coverage_rule, needs_human, sort_order) values
@@ -32,7 +46,9 @@ insert into candidate.compliance_requirements
   (null, 'proof_of_address',   'Proof of address',             'B', true,  '{"type":"issue_plus","years":1,"recency_months":3}'::jsonb, null, false, 30),
   (null, 'references_3yr',     'References (continuous 3-year history)', 'D', true, null, '{"type":"continuous_history","years":3,"reconcile":"cv"}'::jsonb, true, 40),
   (null, 'overseas_police_check', 'Overseas police check (if overseas history)', 'H', false, null, null, true, 45)
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
 
 -- ── Helper to add a discipline-scoped requirement ───────────────────────────
 -- (written out explicitly per row for clarity / easy editing)
@@ -46,7 +62,9 @@ values
  ((select id from candidate.disciplines where code='nursing'), 'occupational_health','Occupational health clearance',   'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 80),
  ((select id from candidate.disciplines where code='nursing'), 'immunisations',      'Immunisations',                   'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 90),
  ((select id from candidate.disciplines where code='nursing'), 'mandatory_training', 'Mandatory training',              'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 100)
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
 
 -- DOCTORS (GMC) ------------------------------------------------------------
 insert into candidate.compliance_requirements (discipline_id, code, name, tier, required, expiry_rule, coverage_rule, needs_human, sort_order)
@@ -58,7 +76,9 @@ values
  ((select id from candidate.disciplines where code='doctors'), 'occupational_health','Occupational health clearance',   'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 80),
  ((select id from candidate.disciplines where code='doctors'), 'immunisations',      'Immunisations',                   'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 90),
  ((select id from candidate.disciplines where code='doctors'), 'mandatory_training', 'Mandatory training',              'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 100)
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
 
 -- AHP (HCPC) ---------------------------------------------------------------
 insert into candidate.compliance_requirements (discipline_id, code, name, tier, required, expiry_rule, coverage_rule, needs_human, sort_order)
@@ -69,7 +89,9 @@ values
  ((select id from candidate.disciplines where code='ahp'), 'occupational_health','Occupational health clearance', 'A', true, '{"type":"from_certificate"}'::jsonb, null, false, 80),
  ((select id from candidate.disciplines where code='ahp'), 'immunisations',      'Immunisations',             'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 90),
  ((select id from candidate.disciplines where code='ahp'), 'mandatory_training', 'Mandatory training',        'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 100)
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
 
 -- COMPLEX CARE (CQC) -------------------------------------------------------
 insert into candidate.compliance_requirements (discipline_id, code, name, tier, required, expiry_rule, coverage_rule, needs_human, sort_order)
@@ -78,7 +100,9 @@ values
  ((select id from candidate.disciplines where code='complex_care'), 'care_certificate',  'Care Certificate',           'A', true,  null, null, false, 55),
  ((select id from candidate.disciplines where code='complex_care'), 'occupational_health','Occupational health clearance','A', true, '{"type":"from_certificate"}'::jsonb, null, false, 80),
  ((select id from candidate.disciplines where code='complex_care'), 'mandatory_training','Mandatory training',          'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 100)
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
 
 -- CARE HOMES (CQC) ---------------------------------------------------------
 insert into candidate.compliance_requirements (discipline_id, code, name, tier, required, expiry_rule, coverage_rule, needs_human, sort_order)
@@ -87,7 +111,9 @@ values
  ((select id from candidate.disciplines where code='care_homes'), 'care_certificate',   'Care Certificate',           'A', true,  null, null, false, 55),
  ((select id from candidate.disciplines where code='care_homes'), 'mandatory_training', 'Mandatory training',         'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 100),
  ((select id from candidate.disciplines where code='care_homes'), 'occupational_health','Occupational health clearance','A', true, '{"type":"from_certificate"}'::jsonb, null, false, 80)
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
 
 -- CHILDREN'S SERVICES (Ofsted) ---------------------------------------------
 insert into candidate.compliance_requirements (discipline_id, code, name, tier, required, expiry_rule, coverage_rule, needs_human, sort_order)
@@ -96,14 +122,18 @@ values
  ((select id from candidate.disciplines where code='childrens'), 'qualification_cert',   'Level 3 Diploma (Children & Young People)', 'C', true, null, null, true, 60),
  ((select id from candidate.disciplines where code='childrens'), 'mandatory_training',   'Mandatory training',        'A', true,  '{"type":"from_certificate"}'::jsonb, null, false, 100),
  ((select id from candidate.disciplines where code='childrens'), 'occupational_health',  'Occupational health clearance','A', true, '{"type":"from_certificate"}'::jsonb, null, false, 80)
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
 
 -- INSURANCE (John Williams) — non-clinical --------------------------------
 insert into candidate.compliance_requirements (discipline_id, code, name, tier, required, expiry_rule, coverage_rule, needs_human, sort_order)
 values
  ((select id from candidate.disciplines where code='insurance'), 'cii_qualification',  'CII / professional qualification', 'C', false, null, null, false, 50),
  ((select id from candidate.disciplines where code='insurance'), 'financial_reference','Financial / credit reference',     'B', false, null, null, true,  60)
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
 
 -- REGISTERED MANAGERS (specialty-scoped extras) ----------------------------
 -- Children's home registered manager
@@ -116,4 +146,6 @@ cross join (values
   ('fit_person_declaration','Fit-person declaration / interview',        'H', true,  120)
 ) as v(code,name,tier,nh,so)
 where d.code in ('childrens','care_homes')
-on conflict (discipline_id, specialty_id, code) do nothing;
+on conflict (coalesce(discipline_id, '00000000-0000-0000-0000-000000000000'::uuid),
+             coalesce(specialty_id,  '00000000-0000-0000-0000-000000000000'::uuid),
+             code) do nothing;
