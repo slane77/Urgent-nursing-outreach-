@@ -190,6 +190,17 @@ function critPill(c){
   const cls = c==='blocking' ? 'red' : c==='standard' ? 'flag' : 'mut';
   return `<span class="pill ${cls}">${esc(c||'—')}</span>`;
 }
+// Automated-verification pill from the latest provider job for a requirement.
+function verifyPill(job){
+  if (!job) return '<span class="pill mut" title="No automated check yet">not checked</span>';
+  let label = job.status;
+  if (job.status==='succeeded') label = (job.outcome==='verified') ? 'auto-verified' : (job.outcome||'checked');
+  else if (job.status==='needs_human') label = 'needs-human';
+  else if (job.status==='failed') label = 'error';
+  const map = { 'auto-verified':'', queued:'mut', running:'mut', 'needs-human':'flag', error:'red', expired:'red', unsuitable:'red' };
+  const cls = (label in map) ? map[label] : 'mut';
+  return `<span class="pill ${cls}" title="Automated register/DBS/RTW check">${esc(label)}</span>`;
+}
 
 // ---- Auth ----
 function refreshAuth(session) {
@@ -357,12 +368,15 @@ async function loadDashboard() {
   $('dashBody').innerHTML = '<div class="spin">Loading dashboard…</div>';
   const p_desk = $('dashDesk').value || null;
   const p_set  = $('dashSet').value || null;
-  const { data, error } = await sb.rpc('compliance_dashboard', { p_desk, p_set });
+  const [{ data, error }, { data: vc }] = await Promise.all([
+    sb.rpc('compliance_dashboard', { p_desk, p_set }),
+    sb.rpc('verification_counts'),   // Phase 2 register-checks tile (officer-gated)
+  ]);
   if (error) {
     $('dashBody').innerHTML = `<div class="errbox">Dashboard unavailable: ${esc(error.message)}<br><span class="muted">The compliance dashboard requires compliance-officer access.</span></div>`;
     return;
   }
-  const rag = data?.rag || {}, exp = data?.expiring || {};
+  const rag = data?.rag || {}, exp = data?.expiring || {}, v = vc || {};
   $('dashBody').innerHTML = `
     <h4 style="margin-top:0">Work-ready (RAG)</h4>
     <div class="kpis">
@@ -380,6 +394,14 @@ async function loadDashboard() {
       <div class="kpi warn"><div class="n">${exp.d30||0}</div><div class="l">≤ 30 days</div></div>
       <div class="kpi flag"><div class="n">${exp.d60||0}</div><div class="l">≤ 60 days</div></div>
       <div class="kpi"><div class="n">${exp.d90||0}</div><div class="l">≤ 90 days</div></div>
+    </div>
+    <h4>Register checks <span class="muted" style="font-weight:normal">(automated NMC/GMC/HCPC · DBS · RTW)</span></h4>
+    <div class="kpis">
+      <div class="kpi"><div class="n">${v.auto_verified_24h||0}</div><div class="l">Auto-verified (24h)</div></div>
+      <div class="kpi"><div class="n">${v.queued||0}</div><div class="l">Queued</div></div>
+      <div class="kpi"><div class="n">${v.running||0}</div><div class="l">Running</div></div>
+      <div class="kpi flag"><div class="n">${v.needs_human||0}</div><div class="l">Needs human</div></div>
+      <div class="kpi warn"><div class="n">${v.failed||0}</div><div class="l">Failed</div></div>
     </div>`;
 }
 
@@ -521,11 +543,15 @@ async function openDetail(candidateId, setId, setCode) {
   $('dName').textContent = 'Loading…';
   $('detail').innerHTML = '<div class="spin">Loading candidate file…</div>';
 
-  const [{ data:c }, { data:setItems }, { data:items }, { data:evidence }] = await Promise.all([
+  const [{ data:c }, { data:setItems }, { data:items }, { data:evidence }, { data:jobs }, { data:vhist }] = await Promise.all([
     sb.from('candidates').select('id,first_name,last_name,email,phone,discipline_id,primary_specialty_id,desk_id,compliance_officer').eq('id', candidateId).maybeSingle(),
-    sb.from('requirement_set_items').select('id,requirement_id,criticality,required_override,sort_order,compliance_requirements(id,code,name,criticality,required)').eq('set_id', setId).order('sort_order'),
+    sb.from('requirement_set_items').select('id,requirement_id,criticality,required_override,sort_order,compliance_requirements(id,code,name,criticality,required,verification_method,provider_key)').eq('set_id', setId).order('sort_order'),
     sb.from('compliance_items').select('id,requirement_id,status,expires_at,needs_human,migrated,human_notes,artefact_path,channel,source_confidence,updated_at').eq('candidate_id', candidateId),
     sb.from('candidate_evidence').select('id,item_id,requirement_id,filename,path,content_type,uploaded_at').eq('candidate_id', candidateId).order('uploaded_at', { ascending:false }),
+    // Latest provider job + append-only verification history per requirement (RLS:
+    // officers only; a non-officer viewer simply sees no verification pill).
+    sb.from('provider_jobs').select('id,requirement_id,status,outcome,source_ref,trigger,updated_at').eq('candidate_id', candidateId).order('updated_at', { ascending:false }),
+    sb.from('verification_history').select('requirement_id,event_type,method,actor_name,actor_kind,source_ref,occurred_at').eq('candidate_id', candidateId).order('occurred_at', { ascending:false }),
   ]);
   if (!c) { $('dName').textContent = 'Candidate'; $('detail').innerHTML = '<div class="errbox">Candidate not found or not visible to you.</div>'; return; }
   $('dName').textContent = `${c.first_name||''} ${c.last_name||''}`.trim() || c.email || 'Candidate';
@@ -542,6 +568,11 @@ async function openDetail(candidateId, setId, setCode) {
   }
   const evByItem = new Map();
   for (const e of (evidence??[])) { const a = evByItem.get(e.item_id)||[]; a.push(e); evByItem.set(e.item_id, a); }
+  // Latest provider job + latest audit event per requirement (arrays are newest-first).
+  const jobByReq = new Map();
+  for (const j of (jobs??[])) { if (!jobByReq.has(j.requirement_id)) jobByReq.set(j.requirement_id, j); }
+  const histByReq = new Map();
+  for (const h of (vhist??[])) { if (!histByReq.has(h.requirement_id)) histByReq.set(h.requirement_id, h); }
 
   const off = state.isOfficer;
   const rows = (setItems??[]).map(si => {
@@ -549,20 +580,26 @@ async function openDetail(candidateId, setId, setCode) {
     const crit = si.criticality || req.criticality || 'blocking';
     const it = bestByReq.get(si.requirement_id);
     const evs = it ? (evByItem.get(it.id)||[]) : [];
+    const automatable = !!req.verification_method;
+    const job = jobByReq.get(si.requirement_id);
+    const last = histByReq.get(si.requirement_id);
     return `<div class="checkitem">
       <div class="top">
         <strong>${esc(req.name)||esc(req.code)||'(requirement)'}</strong>
         ${critPill(crit)}
         ${it ? itemPill(it.status) : '<span class="pill mut">no item</span>'}
+        ${automatable ? verifyPill(job) : ''}
         ${it && it.migrated ? '<span class="badge mig">migrated — re-verify</span>' : ''}
         ${it && it.expires_at ? `<span class="muted">expires ${fdate(it.expires_at)}</span>` : ''}
       </div>
       ${it && it.human_notes ? `<div class="muted">${esc(it.human_notes)}</div>` : ''}
+      ${automatable && last ? `<div class="muted" style="margin-top:2px;">Last check: ${esc(last.event_type)} by ${esc(last.actor_name)||esc(last.actor_kind)||'system'} on ${fdate(last.occurred_at)}${last.source_ref?` · ref ${esc(last.source_ref)}`:''}</div>` : ''}
       ${evs.length ? `<div class="muted" style="margin-top:4px;">Evidence: ${evs.map(e=>`<a href="#" data-doc="${esc(e.path)}">${esc(e.filename)||'file'}</a>`).join(' · ')}</div>` : ''}
       ${off && it ? `<div class="acts">
         <button class="btn sm" data-decide="verify" data-item="${it.id}">Verify</button>
         <button class="btn sm secondary" data-decide="reject" data-item="${it.id}">Reject</button>
         <button class="btn sm secondary" data-decide="waive" data-item="${it.id}">Waive</button>
+        ${automatable ? `<button class="btn sm secondary" data-verify="${esc(req.code)}">Verify now</button>` : ''}
         <label class="btn sm secondary" style="cursor:pointer;">Upload evidence<input type="file" data-up-item="${it.id}" data-up-req="${si.requirement_id}" style="display:none;"/></label>
       </div>` : ''}
       ${off && !it ? '<div class="muted" style="margin-top:4px;">No item yet — use bulk “Request items” to create one.</div>' : ''}
@@ -592,6 +629,7 @@ async function openDetail(candidateId, setId, setCode) {
 
   // Wire actions
   $('detail').querySelectorAll('[data-decide]').forEach(b => b.onclick = () => decide(b.dataset.item, b.dataset.decide));
+  $('detail').querySelectorAll('[data-verify]').forEach(b => b.onclick = () => verifyNow(b.dataset.verify));
   $('detail').querySelectorAll('[data-doc]').forEach(a => a.onclick = (ev) => { ev.preventDefault(); viewDoc(a.dataset.doc); });
   $('detail').querySelectorAll('[data-up-item]').forEach(inp => inp.onchange = () => uploadEvidence(inp));
   if (off && $('dOfficer')) $('dOfficer').onchange = () => assignOfficer($('dOfficer').value || null);
@@ -620,6 +658,32 @@ async function decide(itemId, decision) {
   $('detailMsg').textContent = 'Saving…';
   const { error } = await sb.rpc('decide_item', { p_item_id: itemId, p_decision: decision, p_reason: reason });
   if (error) { $('detailMsg').textContent = 'Error: ' + error.message; return; }
+  await openDetail(current.id, current.setId, current.setCode);
+  if (state.view==='worklist') loadWorklist(); else if (state.view==='backlog') loadBacklog();
+}
+
+// Officer "Verify now": drives the verification function (mode=check). Run under
+// the officer's JWT so the request event is attributed to THEM (actor = officer);
+// the function claims + processes the job as service and writes the immutable
+// result event. Fail-closed: a provider error/ambiguity never becomes verified.
+async function verifyNow(code) {
+  if (!state.isOfficer || !current) return;
+  $('detailMsg').textContent = 'Running verification…';
+  try {
+    const { data:{ session } } = await sb.auth.getSession();
+    const res = await fetch(window.CONFIG.SUPABASE_URL + '/functions/v1/verification?mode=check', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'apikey': window.CONFIG.SUPABASE_ANON_KEY,
+                 'Authorization': 'Bearer ' + (session?.access_token||'') },
+      body: JSON.stringify({ candidate_id: current.id, requirement_code: code, trigger: 'manual', set_id: current.setId }),
+    });
+    const j = await res.json().catch(()=>({}));
+    if (!res.ok) { $('detailMsg').textContent = 'Verification error: ' + (j.error || res.status); return; }
+    $('detailMsg').textContent = 'Verification ' + (j.outcome ? ('→ ' + j.outcome) : 'queued') + '.';
+  } catch (e) {
+    $('detailMsg').textContent = 'Verification failed: ' + e.message;
+    return;
+  }
   await openDetail(current.id, current.setId, current.setCode);
   if (state.view==='worklist') loadWorklist(); else if (state.view==='backlog') loadBacklog();
 }
