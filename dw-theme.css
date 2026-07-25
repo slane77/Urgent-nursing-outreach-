@@ -31,6 +31,11 @@ a:hover{ text-decoration:underline; }
 }
 .topbar .brand{ display:flex; align-items:center; }
 .topbar .brand img{ height:30px; display:block; }
+/* Product wordmark — sits beside the Day Webster logo so the bar reads
+   "Day Webster · Compliance Portal" without dropping the company mark. */
+.topbar .wordmark{ display:flex; align-items:center; gap:10px; font-weight:600; font-size:15px; letter-spacing:-.01em; color:var(--ink); }
+.topbar .wordmark::before{ content:""; width:1px; height:20px; background:rgba(0,0,0,.14); display:block; }
+@media (max-width:720px){ .topbar .wordmark{ display:none; } }
 .topnav{ display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; }
 .topnav a{ color:var(--ink-soft); font-size:14px; font-weight:500; padding:7px 12px; border-radius:980px; transition:.15s ease; }
 .topnav a:hover{ background:rgba(0,0,0,.05); text-decoration:none; }
