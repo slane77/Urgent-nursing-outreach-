@@ -87,6 +87,7 @@ with these JWT settings:
 |---|---|---|
 | `candidate-agent` | **true** | staff (cockpit) |
 | `csv-import` | **true** | staff (importer) |
+| `compliance-import` | **true** | staff (compliance bulk migration) |
 | `reference-request` | **true** | staff |
 | `job-advert` | **true** | staff (vacancies) |
 | `outreach-campaign` | **true** | staff |
@@ -109,6 +110,26 @@ with these JWT settings:
 > candidates automatically — reassign them to the new version so the gate
 > recomputes; until then the booking system (which resolves `set_code` to the
 > latest active version) reads them as red (fail-closed, not fail-open).
+>
+> **Compliance Phase 1 migrations** — after 22–24, apply in order:
+> `sql/25_compliance_scale.sql` (adds `'waived'` + `migrated` to
+> `compliance_items`, the `candidate.bulk_load` trigger guard, the
+> `needs_human_count`/`expiring_count` scalars + waived-caps-at-amber recompute,
+> `recompute_candidate_status_bulk()`, the compliance-officer desk-read exemption,
+> and the scale indexes), `sql/26_requirement_set_map.sql` (the
+> `requirement_set_map` table + `assign_requirement_sets()` / `materialize_items()`
+> + the auto-assign trigger), `sql/27_seed_requirement_sets.sql` (composes
+> NHS_HCA / NHS_DOCTOR / AHP_HCPC / COMPLEX_CARE / CARE_HOME / CHILDRENS /
+> INSURANCE + the REG_MGR_* add-ons and seeds the map; adds a nursing-scoped
+> `care_certificate`), `sql/28_evidence.sql` (`candidate_evidence` + RLS), and
+> `sql/29_compliance_ops.sql` (the `compliance_worklist` view + the
+> `compliance_dashboard` / `decide_item` / `bulk_assign_set` / `bulk_request` /
+> `import_compliance_bulk` RPCs). Then deploy the `compliance-import` edge
+> function (verify_jwt=true, staff): `map` mode uses Claude to map spreadsheet
+> headers to `req:<code>:<field>` targets; `commit` mode batches to
+> `import_compliance_bulk` (service_role). Migrated items import as
+> `verified`+`migrated` with a 90-day grace expiry and one provenance
+> `verification_events` row each.
 
 ---
 
