@@ -61,6 +61,9 @@ In the dev project: Edge Functions → Secrets (or `supabase secrets set`). Set:
 | `INBOUND_SECRET` | any random string |
 | `CRON_SECRET` | any random string |
 | `WORK_READY_TOKEN` | any random string — shared bearer the external booking system sends to the `work-ready` gate; the function returns 401 until this is set |
+| `VERIFICATION_TOKEN` | any random string — bearer for automation calling `verification?mode=check` (officers use their own JWT instead) |
+| `NMC_API_KEY` / `GMC_API_KEY` / `HCPC_API_KEY` | per-regulator register-check credential (the `secret_ref` each provider row names). **Leave UNSET until you actually hold the credential** — the adapter then returns `needs_human`, never a pass. |
+| `DBS_API_KEY` / `RTW_API_KEY` | DBS Update Service / Right-to-Work (IDSP/aggregator) credential. Leave unset until contracted; adapter stays fail-closed. |
 | `PUBLIC_SITE_URL` | where `intake.html` is hosted (see step 6) |
 | `ORG_NAME` / `ORG_URL` | `Day Webster` / `https://www.daywebster.com` |
 
@@ -96,6 +99,7 @@ with these JWT settings:
 | `early-warnings` | **false** | cron (`?secret=`) |
 | `jobs` | **false** | public (Google) |
 | `work-ready` | **false** | external booking system (Bearer `WORK_READY_TOKEN`) — compliance gate; returns 401 until the token is set |
+| `verification` | **false** | officers (`mode=check`, their JWT) + cron (`mode=drain`/`mode=sweep`, `?secret=CRON_SECRET`) + automation (Bearer `VERIFICATION_TOKEN`). Deploy with the `adapters/` folder alongside `index.ts`. |
 
 > **Compliance Phase 0 migrations** — apply `sql/22_compliance_sets.sql`,
 > `sql/23_work_ready_gate.sql`, then `sql/24_seed_nhs_rn_set.sql` (after 10–21).
@@ -163,6 +167,37 @@ with these JWT settings:
 > candidate; the `compliance_officer_report` and `compliance_exec_overview`
 > report RPCs, gated `is_compliance_officer()`). Migrations are SQL-only (no UI)
 > and idempotent — 34–36 re-run to a no-op.
+>
+> **Compliance Phase 2 migrations (automated verification)** — after 36, apply in
+> order: `sql/37_verification_providers.sql` (the `verification_providers`
+> registry — NON-SECRET config only; a `secret_ref` NAMES an env var, credentials
+> never live in the DB or client — `provider_jobs` fail-closed queue with an
+> in-flight UNIQUE guard for idempotency, and `verification_consent`; adds the
+> deferred `regulator`/`provider_key`/`verification_method` columns to
+> `compliance_requirements` + wires the NMC/GMC/HCPC/DBS/RTW codes; the
+> **load-bearing** switch of the register codes to
+> `expiry_rule = '{"type":"regulator_driven"}'` so the provider writes the
+> regulator's renewal date into `expires_at` and the existing expiry sweep + amber
+> window start working; seeds the Phase-2a providers incl. a `sim` provider for
+> the POC; RLS = providers read-officer/write-admin, `provider_jobs` read-officer
+> with **NO client write policy** (service-role + definer RPCs only), consent
+> read/insert-officer). `sql/38_verification_rpcs.sql` (SECURITY DEFINER RPCs:
+> `enqueue_verification` [officer/service, idempotent, sets `verifying` only if not
+> already `verified`], `claim_provider_jobs` [service, `FOR UPDATE SKIP LOCKED`],
+> `apply_verification_result` [service, only a `verified` outcome credits the gate;
+> one immutable result event], `fail_provider_job` [service, backoff retry then
+> `needs_human` — never a pass], `enqueue_due_rechecks` [service, set-based
+> rate-spread sweep], `verification_counts` [officer], the actor-resolved read-only
+> `verification_history` view, and the `is_service_role()` helper).
+> `sql/39_verification_schedule.sql` (the `purge_provider_job_responses()`
+> retention purge + guarded pg_cron `verification-drain` (*/10) and
+> `verification-sweep` (daily) — apply-safe without pg_cron; it just NOTICEs).
+> Then deploy the `verification` edge function (verify_jwt=false) **with its
+> `adapters/` folder**. Migrations are additive + idempotent — 37–39 re-run to a
+> no-op (the `regulator_driven` fix is `where expiry_rule is null` so it never
+> re-fires). **POC framing:** we hold no real regulator credentials yet, so the
+> real adapters are credential-gated (unset `secret_ref` env ⇒ `needs_human`,
+> never a pass) and the `sim` provider demonstrates the full pipeline end-to-end.
 
 ---
 
@@ -170,6 +205,16 @@ with these JWT settings:
 
 ☐ **Cron:** schedule `early-warnings` daily — Dashboard → Cron, or pg_cron:
 `select cron.schedule('early-warnings','0 8 * * *', $$ select net.http_post('https://<dev>.functions.supabase.co/early-warnings?secret=<CRON_SECRET>') $$);`
+☐ **Verification cron (Phase 2):** `sql/39_verification_schedule.sql` schedules
+these for you IF pg_cron is installed and you set the two GUCs first:
+`alter database postgres set app.functions_base_url = 'https://<ref>.functions.supabase.co';`
+and `alter database postgres set app.cron_secret = '<CRON_SECRET>';` then re-run 39.
+Otherwise schedule them manually:
+`select cron.schedule('verification-drain','*/10 * * * *', $$ select net.http_post('https://<dev>.functions.supabase.co/verification?mode=drain&secret=<CRON_SECRET>') $$);`
+`select cron.schedule('verification-sweep','30 6 * * *', $$ select net.http_post('https://<dev>.functions.supabase.co/verification?mode=sweep&secret=<CRON_SECRET>') $$);`
+The daily sweep enqueues due annual/expiry re-checks and purges stale raw
+`provider_jobs.response` payloads (retention). `mode=check` is called on demand by
+compliance officers ("Verify now") under their own JWT.
 ☐ **Inbound email:** in your email provider (Brevo Inbound Parsing / SendGrid
 Inbound Parse / Mailgun Routes), point inbound to
 `https://<dev>.functions.supabase.co/inbound-email?secret=<INBOUND_SECRET>` and
@@ -254,6 +299,26 @@ When dev is proven and the §11 terms are signed off:
 6. ☐ Go live with inbound + Google for Jobs first; turn on paid channels once connectors + budgets are set.
 
 ---
+
+## Data protection (Phase 2 verification)
+
+Automated register/DBS/RTW checks transmit candidate PII to third parties, so
+before turning any REAL adapter on (i.e. before setting its `secret_ref` env):
+
+- ☐ **UK/EU region.** Confirm the Supabase project is hosted in a UK/EU region;
+  keep candidate PII in-region.
+- ☐ **DPA per provider.** Each regulator facility / aggregator / IDSP must be a
+  **UK/EU processor under a signed DPA** (an aggregator is a disclosed
+  sub-processor). No credential goes in `verification_providers` — only the
+  `secret_ref` env name; the key lives in Function env / Supabase Vault.
+- ☐ **Consent for DBS + RTW.** Those two are lawful only with recorded candidate
+  consent + identifiers (`verification_consent`). Capture is stubbed in this POC —
+  wire the capture policy before enabling `DBS_API_KEY` / `RTW_API_KEY`.
+- ☐ **Retention.** The daily sweep purges raw `provider_jobs.response`/`request`
+  payloads after 90 days (`purge_provider_job_responses`); the immutable
+  `verification_events` audit skeleton (who/when/outcome/source_ref) is kept.
+- ☐ **Fail-closed guarantee.** Until a real key is set, every real adapter returns
+  `needs_human` (never a pass); the `sim` provider is for non-production demos only.
 
 ## Rollback
 
