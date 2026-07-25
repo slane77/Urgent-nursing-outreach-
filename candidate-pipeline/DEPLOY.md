@@ -53,6 +53,7 @@ In the dev project: Edge Functions → Secrets (or `supabase secrets set`). Set:
 | Secret | Example / note |
 |---|---|
 | `ANTHROPIC_API_KEY` | `sk-ant-…` |
+| `CHAT_PII_MODE` | `aggregate` (default) or `identifying` — used by `compliance-chat`. **Leave `aggregate` until the Anthropic DPA / zero-retention terms are recorded**: in aggregate mode candidate names/emails are stripped before any data reaches Anthropic (counts + coded reasons only). Switch to `identifying` only after the DPA is in place. |
 | `BREVO_API_KEY` | from Brevo |
 | `CANDIDATE_SENDER_EMAIL` | `candidates@candidates.daywebster.com` |
 | `CANDIDATE_SENDER_NAME` | `Day Webster` |
@@ -103,6 +104,7 @@ with these JWT settings:
 | `booking-breach` | **false** | external booking system / officer (Bearer `WORK_READY_TOKEN`) — records a confirmed non-compliant booking + alerts; returns 401 until the token is set |
 | `verification` | **false** | officers (`mode=check`, their JWT) + cron (`mode=drain`/`mode=sweep`, `?secret=CRON_SECRET`) + automation (Bearer `VERIFICATION_TOKEN`). Deploy with the `adapters/` folder alongside `index.ts`. |
 | `checklist-fill` | **true** | officers (candidate panel) — Client Checklist Auto-Fill; resolves the passport (service role) + merges the client `.docx`. No new secrets. |
+| `compliance-chat` | **true** | officers/managers/admins (Compliance → **Assistant** tab) — Role-Scoped Compliance AI Chat. **Deliberately NOT service-role**: builds its data client with the ANON key + the caller's forwarded JWT so every `*_in_scope` RPC runs under the caller and RLS/scope apply. Secrets: `ANTHROPIC_API_KEY` + `CHAT_PII_MODE` (default `aggregate`). |
 
 > **Compliance Phase 0 migrations** — apply `sql/22_compliance_sets.sql`,
 > `sql/23_work_ready_gate.sql`, then `sql/24_seed_nhs_rn_set.sql` (after 10–21).
@@ -360,6 +362,54 @@ with these JWT settings:
 > non-officer, **never** logged to `provider_jobs` payloads, and **never** placed in
 > any AI prompt. Outputs are subject to the same purge sweep as `candidate-docs`; the
 > `checklist_fills` row is retained as the immutable audit record.
+
+> **Role-Scoped Compliance AI Chat (v1)** — apply `sql/45_compliance_manager_role.sql`
+> then `sql/46_compliance_chat.sql` (after 34/36/41/42). Both additive + idempotent
+> (add-column-if-not-exists, create-or-replace, tables if-not-exists — re-run to a
+> no-op). Do NOT touch the bodies of `sql/34/36/42`; the chat simply never calls the
+> whole-bench RPCs.
+> - **`sql/45` — the `is_manager` role (the THIRD compliance tier).** Adds
+>   `staff.is_manager` + `candidate.is_manager()` (mirrors `is_admin()`, same
+>   bootstrap-allow posture; admins are managers too). **Widens
+>   `is_compliance_officer()`** to `is_compliance OR is_manager OR is_admin` (a
+>   manager can do everything an officer can). Reusable by the training engine later.
+>   Tiers: officer (`is_compliance`) → own candidates; manager (`is_manager`) → ALL
+>   compliance data + manager-only actions; admin → everything.
+> - **`sql/46` — the chat data layer.** `chat_scope()` (no args; reads `auth.uid()`;
+>   `all_access = is_manager()`, else `officer_ids = {auth.uid()}`) + seven
+>   SECURITY-DEFINER `*_in_scope` read RPCs (`chat_stats`, `chat_urgent`,
+>   `chat_expiring`, `chat_breach_summary`, `chat_workready`, `chat_candidate_lookup`,
+>   `chat_officer_breakdown` — the last **manager-only**, raises otherwise), each with
+>   the `is_authorized_user() and is_compliance_officer()` gate and a scope WHERE
+>   clause (`v_all or compliance_officer = any(v_ids)`) derived from `chat_scope()` —
+>   **never** a model argument. These are thin projections over the EXISTING
+>   `candidate_overall_status` / `open_breaches` / `compliance_worklist` views + the
+>   `due_expiry_reminders` latest-item pattern; the leaky whole-bench
+>   `compliance_officer_report` / `compliance_breach_report` / `compliance_dashboard`
+>   (which take an arbitrary officer id) are **never** exposed to the chat.
+>   `chat_candidate_lookup` returns zero rows identically for an unknown OR
+>   out-of-scope candidate (never leaks existence). Plus `compliance_chat_log`
+>   (append-only audit; officer reads OWN rows, manager/admin read all; NO client
+>   write) + `log_compliance_chat()` (the sole, SECURITY DEFINER writer — stores tool
+>   names+inputs+row-counts only, never candidate rows).
+>
+> **`compliance-chat` edge function** (`functions/compliance-chat/index.ts`,
+> **verify_jwt=true**): domain-gate (401) → **caller-JWT data client (ANON key +
+> forwarded `Authorization`, NOT service role)** → `chat_scope()` once (role label;
+> 403 if not an officer) → tool array (`chat_officer_breakdown` only for
+> manager/admin) → manual agentic loop (each `tool_use` → the matching `*_in_scope`
+> RPC via the caller client) → `log_compliance_chat()` → `{answer}`. Single response,
+> `max_tokens 1500`, effort `low`. **`CHAT_PII_MODE`** (default `aggregate` until the
+> Anthropic DPA is recorded): aggregate strips candidate names/emails before any data
+> reaches Anthropic; `identifying` surfaces names once the DPA is in place. The mode
+> is stamped into every log row. Fail-closed throughout.
+>
+> **UI:** `compliance.html` gains an **Assistant** tab (shown to officers; extra
+> manager/admin suggested prompts) — a scrolling thread + input + role-aware chips, a
+> persistent "answers reflect only the candidates you're authorised to see" note and
+> an aggregate-mode note. It reuses the page's `sb.auth.getSession()` +
+> `fetch(SUPABASE_URL + '/functions/v1/compliance-chat')` with the caller's Bearer
+> token; no secrets, no data beyond the caller's scope.
 
 ---
 

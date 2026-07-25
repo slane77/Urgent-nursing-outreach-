@@ -20,6 +20,15 @@
   .checkitem .top{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .checkitem .acts{ margin-top:8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
   th.sel, td.sel{ width:34px; text-align:center; }
+  /* Assistant (compliance chat) */
+  .asst-thread{ border:1px solid var(--hair); border-radius:14px; background:var(--field); padding:10px; height:min(52vh,460px); overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
+  .asst-msg{ max-width:82%; padding:9px 12px; border-radius:14px; font-size:13.5px; line-height:1.45; white-space:pre-wrap; }
+  .asst-msg.user{ align-self:flex-end; background:var(--green-l); border:1px solid var(--green-line); }
+  .asst-msg.ai{ align-self:flex-start; background:var(--bg); border:1px solid var(--hair); }
+  .asst-msg.err{ align-self:flex-start; background:var(--red-l); border:1px solid var(--red-line); color:var(--red); }
+  .asst-chips{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .asst-chip{ font-size:12.5px; padding:6px 12px; border-radius:980px; border:1px solid var(--hair); background:var(--field); color:var(--ink-soft); cursor:pointer; }
+  .asst-chip:hover{ color:var(--ink); border-color:var(--green-line); }
 </style>
 </head>
 <body>
@@ -35,6 +44,7 @@
     <div class="tab" data-view="reports" id="tabReports" style="display:none">Reports</div>
     <div class="tab" data-view="executive" id="tabExec" style="display:none">Executive</div>
     <div class="tab" data-view="breaches" id="tabBreaches" style="display:none">Breaches</div>
+    <div class="tab" data-view="assistant" id="tabAssistant" style="display:none">Assistant</div>
   </div>
 </div>
 
@@ -175,6 +185,20 @@
       </tr></thead><tbody id="brRows"></tbody></table>
     </div>
   </div>
+
+  <!-- ASSISTANT VIEW (Role-Scoped Compliance AI Chat) -->
+  <div id="assistantView" class="hidden">
+    <div class="card">
+      <div class="note" style="margin-top:0">Answers reflect <strong>only the candidates you are authorised to see</strong>. This assistant is read-only — it cannot change any data, verify a document, or book anyone.</div>
+      <div class="note hidden" id="asstPiiNote">Privacy mode: <strong>aggregate</strong> — the assistant reports counts and coded reasons only; candidate names are not sent to the AI (until the data-processing agreement is recorded).</div>
+      <div id="asstThread" class="asst-thread"><div class="muted" style="padding:8px">Ask a question about your compliance workload.</div></div>
+      <div id="asstChips" class="asst-chips"></div>
+      <div class="controls" style="margin-top:8px">
+        <input type="text" id="asstInput" placeholder="e.g. What needs urgent attention?" style="flex:1;min-width:220px" />
+        <button class="btn" id="asstSend">Ask</button>
+      </div>
+    </div>
+  </div>
 </main>
 
 <!-- DETAIL PANEL -->
@@ -195,7 +219,7 @@ const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<'
 const fdate = (t) => t ? (t+'').slice(0,10) : '—';
 
 let state = {
-  view: 'dashboard', isOfficer: false, uid: null,
+  view: 'dashboard', isOfficer: false, isManager: false, uid: null,
   disciplines: [], desks: [], sets: [], setCodes: [],
   divisions: [], officers: [], officerName: new Map(),
   wl: { status:'', div:'', disc:'', set:'', desk:'', expiry:'', needsHuman:false, migrated:false, mine:false, page:0 },
@@ -260,10 +284,15 @@ async function resolveOfficer() {
   const { data:{ session } } = await sb.auth.getSession();
   const uid = session?.user?.id;
   if (!uid) return false;
-  const { data: mine } = await sb.from('staff').select('is_compliance,is_admin').eq('user_id', uid).maybeSingle();
-  if (mine) return !!(mine.is_compliance || mine.is_admin);
+  const { data: mine } = await sb.from('staff').select('is_compliance,is_admin,is_manager').eq('user_id', uid).maybeSingle();
+  if (mine) {
+    state.isManager = !!(mine.is_manager || mine.is_admin);   // manager/admin => all_access
+    return !!(mine.is_compliance || mine.is_manager || mine.is_admin);
+  }
   const { count } = await sb.from('staff').select('*', { count:'exact', head:true });
-  return (count || 0) === 0;   // bootstrap: no staff rows yet => allowed
+  const boot = (count || 0) === 0;   // bootstrap: no staff rows yet => allowed
+  state.isManager = boot;
+  return boot;
 }
 
 // ---- Init ----
@@ -310,6 +339,8 @@ async function init() {
     $('tabReports').style.display = '';
     $('tabExec').style.display = '';
     $('tabBreaches').style.display = '';
+    $('tabAssistant').style.display = '';
+    renderAsstChips();
     $('mbSet').innerHTML = '<option value="">Requirement set…</option>' + codeOpts;
     $('rpScope').innerHTML =
       '<option value="mine">My team (officers I oversee)</option>' +
@@ -386,6 +417,9 @@ function wireControls() {
   $('brRefresh').onclick = loadBreaches;
   $('mbSave').onclick = recordBreachManual;
   $('breachBanner').onclick = () => showView('breaches');
+  // Assistant
+  $('asstSend').onclick = askAssistant;
+  $('asstInput').addEventListener('keydown', ev => { if (ev.key === 'Enter') askAssistant(); });
   // Panel
   $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); };
 }
@@ -399,12 +433,73 @@ function showView(v) {
   $('reportsView').classList.toggle('hidden', v!=='reports');
   $('execView').classList.toggle('hidden', v!=='executive');
   $('breachesView').classList.toggle('hidden', v!=='breaches');
+  $('assistantView').classList.toggle('hidden', v!=='assistant');
   if (v==='dashboard') loadDashboard();
   if (v==='worklist') loadWorklist();
   if (v==='backlog') loadBacklog();
   if (v==='reports') loadReport();
   if (v==='executive') loadExec();
   if (v==='breaches') loadBreaches();
+  if (v==='assistant') $('asstInput').focus();
+}
+
+// ---- Assistant (Role-Scoped Compliance AI Chat) ----------------------------
+// Role-aware suggested prompts; managers/admins get bench-wide extras.
+function renderAsstChips() {
+  const officer = [
+    'What needs urgent attention?',
+    'How many of my candidates are work-ready?',
+    "Who's expiring in the next 30 days?",
+  ];
+  const manager = [
+    'Give me a RAG breakdown by officer',
+    'How many candidates are working non-compliant?',
+  ];
+  const prompts = state.isManager ? officer.concat(manager) : officer;
+  $('asstChips').innerHTML = prompts.map(p => `<span class="asst-chip">${esc(p)}</span>`).join('');
+  $('asstChips').querySelectorAll('.asst-chip').forEach(c => c.onclick = () => {
+    $('asstInput').value = c.textContent; askAssistant();
+  });
+  // Aggregate-mode note is advisory; the server enforces the real PII policy.
+  $('asstPiiNote').classList.remove('hidden');
+}
+
+function asstBubble(cls, text) {
+  const div = document.createElement('div');
+  div.className = 'asst-msg ' + cls;
+  div.textContent = text;
+  const first = $('asstThread').querySelector('.muted');
+  if (first) first.remove();
+  $('asstThread').appendChild(div);
+  $('asstThread').scrollTop = $('asstThread').scrollHeight;
+  return div;
+}
+
+let asstBusy = false;
+async function askAssistant() {
+  if (asstBusy) return;
+  const q = $('asstInput').value.trim();
+  if (!q) return;
+  asstBusy = true;
+  $('asstInput').value = '';
+  $('asstSend').disabled = true;
+  asstBubble('user', q);
+  const thinking = asstBubble('ai', '…');
+  try {
+    const { data:{ session } } = await sb.auth.getSession();
+    const res = await fetch(window.CONFIG.SUPABASE_URL + '/functions/v1/compliance-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (session?.access_token || '') },
+      body: JSON.stringify({ question: q }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { thinking.className = 'asst-msg err'; thinking.textContent = j.error || `Error ${res.status}`; }
+    else { thinking.textContent = j.answer || '(no answer)'; }
+  } catch (e) {
+    thinking.className = 'asst-msg err'; thinking.textContent = 'Network error: ' + e;
+  } finally {
+    asstBusy = false; $('asstSend').disabled = false; $('asstInput').focus();
+  }
 }
 
 // ---- Dashboard ----
