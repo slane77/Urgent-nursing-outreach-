@@ -52,6 +52,52 @@ gate, evidence storage, the AI candidate-agent, the auto-chase loop).
 - PECR: capture per-channel consent at intake; honour STOP/START; keep compliance and
   marketing streams separate.
 
+## 2a. Continuous compliance — nothing ever expires unnoticed (pre-expiry ladder + booking cut-off)
+
+Non-negotiable requirement: **a candidate must be compliant at ALL times — no part of
+their file may lapse.** The system enforces and communicates this at three layers.
+
+**Enforcement (already built, date-aware).** The work-ready gate credits a blocking
+item only when it is `verified` AND unexpired (`expires_at > now()`). The instant any
+item expires, `recompute_candidate_status` flips the candidate **red → not work-ready →
+not bookable** — automatically, no human step. So an expired file cannot be placed. To
+prevent a *booked shift spanning* an expiry, the gate/booking check must also consider
+the **shift date**, not just today (see decision E2).
+
+**Pre-expiry reminder ladder (the new work).** Every time-bound item drives an
+escalating, expiry-anchored nudge sequence off its own `expires_at`, e.g.
+**T-90 / T-60 / T-30 / T-14 / T-7 / T-1 days** (per-requirement, configurable). Each
+message:
+- names the item and its **exact expiry date**,
+- gives **plain renewal advice** ("your DBS lapses on 3 May — here's how to renew: …"),
+- **deep-links straight to re-upload** in the portal,
+- states the **booking consequence + deadline** explicitly: *"You must renew by
+  **3 May** or you won't be able to be booked for shifts from **3 May**."* (or a
+  buffered cut-off per E2),
+- escalates channel/tone as the date nears (email → +SMS → +WhatsApp → recruiter),
+- and **auto-stops the moment the renewed document lands** and re-verifies.
+
+**Transition into amber, then red.** In the lead window the candidate is **amber**
+(placeable-with-caveat, per the earlier decision) so recruiters see "renewal due"; if
+the date passes with no renewal the item expires → **red → unbookable** and it surfaces
+in the officer worklist + review queue. The officer dashboard's "expiring" buckets
+(30/60/90d) already give the team the same forward view.
+
+**Ongoing, hands-off.** For register/DBS items the Phase-2 verification sweep also
+re-checks against the regulator ahead of expiry, so a lapse detected at source (e.g. a
+struck-off nurse) flips the candidate red immediately, independent of the document date.
+
+### Expiry-management decisions
+- **[DECISION E1] Ladder offsets** — proposed T-90/60/30/14/7/1; confirm per requirement
+  type (registration renewals differ from DBS from training).
+- **[DECISION E2] Booking cut-off = expiry date, or a buffer before it?** For true
+  continuous compliance you don't want a shift that runs *past* an expiry. Recommend the
+  booking check verifies the candidate is compliant **for the shift's date(s)**, and/or a
+  configurable **buffer** (e.g. stop new bookings N days before expiry) so there's no
+  in-shift lapse. This is a booking-side policy that reads the same `expires_at`.
+- **[DECISION E3] Hard vs soft cut-off** — does the candidate go fully unbookable at
+  expiry (recommended, for audit), or is there a short grace with escalated flagging?
+
 ## 3. Architecture (on the existing Supabase/edge/vanilla-HTML stack)
 
 ### Reuse (don't reinvent)
