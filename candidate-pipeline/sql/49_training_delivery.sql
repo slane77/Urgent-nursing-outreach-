@@ -141,9 +141,13 @@ begin
     set status = 'in_progress'
   where id = v_assignment and status in ('assigned','failed');
 
+  -- Session token is hashed AT REST (symmetric with the magic link): we mint a raw
+  -- token, store only sha256(raw), and return the raw to the edge function — which
+  -- hashes it again on each start/submit/status call. A DB-read compromise cannot
+  -- replay an in-flight session.
   v_session := encode(gen_random_bytes(32), 'hex');
   insert into candidate.training_sessions (token_hash, assignment_id, candidate_id, expires_at)
-  values (v_session, v_assignment, v_candidate, now() + interval '60 minutes');
+  values (encode(digest(v_session, 'sha256'), 'hex'), v_assignment, v_candidate, now() + interval '60 minutes');
 
   select tm.id, tm.code, tm.title, tm.framework, tm.framework_subject,
          tm.question_count, tm.pass_threshold, mv.content
@@ -153,7 +157,7 @@ begin
   where mv.id = v_version;
 
   return jsonb_build_object(
-    'session_hash', v_session,
+    'session_token', v_session,          -- RAW token; the DB stores only its sha256
     'assignment_id', v_assignment,
     'module', jsonb_build_object(
         'code', v_module.code, 'title', v_module.title,
@@ -185,6 +189,12 @@ begin
   where token_hash = p_session_hash and expires_at > now();
   if v_assignment is null then
     raise exception 'invalid or expired session';
+  end if;
+
+  -- Idempotent per assignment: once passed, no further attempts (a crafted client
+  -- must not be able to start a new attempt and mint a second certificate).
+  if (select status from candidate.training_assignments where id = v_assignment) = 'passed' then
+    raise exception 'assessment already completed for this assignment';
   end if;
 
   select ta.module_version_id, tm.question_count

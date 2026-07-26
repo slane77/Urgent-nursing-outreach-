@@ -9,7 +9,7 @@
 <body>
 <header class="topbar">
   <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a><span class="wordmark">Compliance Portal</span>
-  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a class="here" href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="compliance.html">Compliance</a><a href="admin.html">Admin</a></nav>
+  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a class="here" href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="compliance.html">Compliance</a><a href="training-admin.html">Training</a><a href="admin.html">Admin</a></nav>
 </header>
 <div class="subbar">
   <div class="tabs" id="tabs">
@@ -237,6 +237,11 @@ async function openCandidate(id) {
       </div>`).join('') || '<span class="muted">None requested yet.</span>'}
     </div>
 
+    <div class="card" id="trainingCard">
+      <h4 style="margin-top:0">Training</h4>
+      <div id="trainingBody"><span class="muted">Loading…</span></div>
+    </div>
+
     <div class="card" id="clCard">
       <h4 style="margin-top:0">Client checklists</h4>
       <p class="muted">Auto-fill a client's own form from this candidate's Compliance Passport. Preview first — every answer shows its provenance and any blank is flagged.</p>
@@ -280,8 +285,74 @@ async function openCandidate(id) {
   $('detail').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>viewDoc(b.dataset.view));
   $('detail').querySelectorAll('[data-airev]').forEach(b=>b.onclick=()=>aiReview(b.dataset.airev,b));
   initChecklists(c.id);
+  renderTraining(c.id);
 }
 $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); current=null; };
+
+// ---- Training card (mandatory-training engine) ----
+let _pubModules = null;
+async function pubModules() {
+  if (_pubModules) return _pubModules;
+  const { data } = await sb.from('training_modules').select('id,title,current_version_id').not('current_version_id','is',null).order('title');
+  _pubModules = data || [];
+  return _pubModules;
+}
+async function renderTraining(candId) {
+  const body = $('trainingBody');
+  const [{ data:recs }, { data:asgs }, { data:atts }, mods] = await Promise.all([
+    sb.from('training_records').select('id,module_id,source,score,completion_date,expiry_date,certificate_id,certificate_path,training_modules(title)').eq('candidate_id',candId).order('completion_date',{ascending:false}),
+    sb.from('training_assignments').select('id,module_id,status,assigned_at,training_modules(title)').eq('candidate_id',candId).order('assigned_at',{ascending:false}),
+    sb.from('training_attempts').select('id,score,passed,submitted_at,module_versions(training_modules(title))').eq('candidate_id',candId).not('submitted_at','is',null).order('submitted_at',{ascending:false}).limit(20),
+    pubModules(),
+  ]);
+  const today = new Date().toISOString().slice(0,10);
+  const recRows = (recs||[]).map(r=>{
+    const expired = r.expiry_date && r.expiry_date < today;
+    return `<div style="border-bottom:1px solid var(--hair);padding:8px 0;">
+      <strong>${esc(r.training_modules?.title)||'(module)'}</strong>
+      <span class="pill ${expired?'flag':''}">${expired?'expired':'valid'}</span>
+      <span class="muted">${r.source==='manual'?'manual':'assessed'}${r.score!=null?' · '+r.score+'%':''}</span>
+      <div class="muted">Completed ${esc(r.completion_date)} · expires ${esc(r.expiry_date)} · ${esc(r.certificate_id)}</div>
+      ${r.certificate_path?`<button class="btn sm secondary" data-cert="${esc(r.certificate_path)}" style="margin-top:4px">Download certificate</button>`:''}
+    </div>`;
+  }).join('');
+  const openAsg = (asgs||[]).filter(a=>a.status!=='passed');
+  const asgRows = openAsg.map(a=>`<div class="muted" style="padding:2px 0">${esc(a.training_modules?.title)||'(module)'} — <span class="pill">${a.status}</span> assigned ${(a.assigned_at||'').slice(0,10)}</div>`).join('');
+  const attRows = (atts||[]).map(a=>`<div class="muted" style="padding:2px 0">${esc(a.module_versions?.training_modules?.title)||'(module)'} — ${a.passed?'passed':'failed'} ${a.score!=null?a.score+'%':''} · ${(a.submitted_at||'').slice(0,16).replace('T',' ')}</div>`).join('');
+
+  body.innerHTML = `
+    ${recRows||'<span class="muted">No completed training records.</span>'}
+    <div style="margin-top:12px;border-top:1px solid var(--hair);padding-top:10px;">
+      <label>Assign a module</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <select id="tr_module" style="flex:1;min-width:200px">${(mods||[]).map(m=>`<option value="${m.id}">${esc(m.title)}</option>`).join('')||'<option value="">— no published modules —</option>'}</select>
+        <button class="btn sm" id="tr_assign">Assign training</button>
+      </div>
+      <div id="tr_link" class="hidden" style="margin-top:8px;">
+        <div style="display:flex;gap:8px;"><input id="tr_url" readonly style="flex:1"/><button class="btn sm secondary" id="tr_copy">Copy</button></div>
+        <p class="muted" style="margin-top:4px">Single-use magic link, expires in 7 days. Copy it now.</p>
+      </div>
+      <span class="muted" id="tr_msg"></span>
+    </div>
+    ${openAsg.length?`<div style="margin-top:10px"><strong class="muted">Open assignments</strong>${asgRows}</div>`:''}
+    ${attRows?`<div style="margin-top:10px"><strong class="muted">Attempt history</strong>${attRows}</div>`:''}`;
+
+  body.querySelectorAll('[data-cert]').forEach(b=>b.onclick=()=>downloadCert(b.dataset.cert));
+  $('tr_assign').onclick = async () => {
+    const moduleId=$('tr_module').value; if(!moduleId){ $('tr_msg').textContent='Pick a published module.'; return; }
+    $('tr_msg').textContent='Creating link…';
+    const { data, error } = await sb.rpc('assign_training',{ p_candidate_id:candId, p_module_id:moduleId });
+    if(error){ $('tr_msg').textContent='Error: '+error.message; return; }
+    const url = location.origin.replace(/\/$/,'') + '/training.html?token=' + data;
+    $('tr_url').value=url; $('tr_link').classList.remove('hidden'); $('tr_msg').textContent='Link created ✓';
+  };
+  $('tr_copy').onclick=()=>{ $('tr_url').select(); navigator.clipboard?.writeText($('tr_url').value); };
+}
+async function downloadCert(path) {
+  const { data, error } = await sb.storage.from('training-certs').createSignedUrl(path, 300);
+  if (error) { alert(error.message); return; }
+  window.open(data.signedUrl, '_blank');
+}
 $('auditPackBtn').onclick = () => { if (current) window.open('audit-pack.html?id=' + current.id, '_blank'); };
 
 async function saveProfile() {

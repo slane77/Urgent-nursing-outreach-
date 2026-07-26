@@ -105,6 +105,9 @@ with these JWT settings:
 | `verification` | **false** | officers (`mode=check`, their JWT) + cron (`mode=drain`/`mode=sweep`, `?secret=CRON_SECRET`) + automation (Bearer `VERIFICATION_TOKEN`). Deploy with the `adapters/` folder alongside `index.ts`. |
 | `checklist-fill` | **true** | officers (candidate panel) — Client Checklist Auto-Fill; resolves the passport (service role) + merges the client `.docx`. No new secrets. |
 | `compliance-chat` | **true** | officers/managers/admins (Compliance → **Assistant** tab) — Role-Scoped Compliance AI Chat. **Deliberately NOT service-role**: builds its data client with the ANON key + the caller's forwarded JWT so every `*_in_scope` RPC runs under the caller and RLS/scope apply. Secrets: `ANTHROPIC_API_KEY` + `CHAT_PII_MODE` (default `aggregate`). |
+| `training-portal` | **false** | **candidate** (public `training.html`, no auth header — the opaque token IS the credential). Service-role trust boundary; token-scoped RPCs only; renders + stores the cert to `training-certs`. Never returns answer keys. Deploy with `_shared/cert.ts` alongside. |
+| `training-authoring` | **true** | staff/officer (`training-admin.html` → **AI draft**). **Caller-JWT** data client (ANON + forwarded JWT, NOT service role). Reuses `ANTHROPIC_API_KEY`. Creates a **draft** module version only — never publishes; prompt sees no candidate data. |
+| `certificate-verify` | **false** | **public** (`verify-cert.html`). Rate-limited; service role but ONLY calls `verify_certificate` (minimal whitelist). |
 
 > **Compliance Phase 0 migrations** — apply `sql/22_compliance_sets.sql`,
 > `sql/23_work_ready_gate.sql`, then `sql/24_seed_nhs_rn_set.sql` (after 10–21).
@@ -410,6 +413,79 @@ with these JWT settings:
 > an aggregate-mode note. It reuses the page's `sb.auth.getSession()` +
 > `fetch(SUPABASE_URL + '/functions/v1/compliance-chat')` with the caller's Bearer
 > token; no secrets, no data beyond the caller's scope.
+
+> **Mandatory-Training engine — Round 1 SQL (migrations 47–52).** Apply in order
+> after 46: `sql/47_training_catalogue.sql` (the `training_modules` catalogue + the
+> 1:1 `requirement_code` mirror trigger + `sync_training_requirements()` + demotes
+> the legacy monolithic `mandatory_training` to advisory), `sql/48_training_versions.sql`
+> (immutable, versioned `module_versions` + the server-side `training_questions`
+> answer bank [SELECT is **manager-only**] + the authoring RPCs
+> `save_module_version` / `add_training_question` / `submit_module_for_review` /
+> `approve_module_version` [manager] / `publish_module_version` [manager] + the
+> immutability triggers; widens the `verification_events` event_type/method CHECKs),
+> `sql/49_training_delivery.sql` (assignments, hashed single-use magic-links +
+> sessions, attempts; `assign_training` [returns the RAW token once, stores only
+> sha256], `consume_training_link` / `start_training_attempt` [keys STRIPPED in SQL]
+> / `submit_training_attempt` [grades server-side]), `sql/50_training_records.sql`
+> (`issue_training_record` — the single choke point that mints the cert id + the
+> verified/expiring compliance item hook + `verify_certificate`'s minimal whitelist),
+> `sql/51_training_manual_entry.sql` (`record_manual_training`, **manager-only**),
+> `sql/52_training_seed.sql` (the 14-module clinical catalogue + two fully-authored
+> published seed modules). All additive + idempotent.
+>
+> **Mandatory-Training engine — Round 2 (delivery layer).** Storage + three edge
+> functions + four pages. **All DRAFT — not yet deployed.**
+> - ☐ **Storage — one PRIVATE bucket `training-certs`** (EU/UK region, created at
+>   deploy time like `candidate-docs` — a dashboard/API action, not SQL). Holds the
+>   branded HTML certificates at `<candidate_id>/<certificate_id>.html`; PII-bearing,
+>   so **private + short-TTL (300s) signed URLs only**. The service-role functions
+>   bypass storage RLS for writes; staff read via `createSignedUrl` under their
+>   session — add an officer-read `storage.objects` policy for `training-certs` if you
+>   want staff reads without the service role.
+> - **`training-portal`** (`functions/training-portal/index.ts`, **verify_jwt=false**)
+>   — the passwordless candidate delivery + assessment trust boundary. Called by the
+>   public `training.html` with **no Authorization header**: the opaque magic-link /
+>   session token IS the credential. Runs as **service role** but every action is a
+>   token-scoped SECURITY DEFINER RPC (`consume`→`consume_training_link` after
+>   sha256-hashing the raw link; `start`→`start_training_attempt` [keyless];
+>   `submit`→`submit_training_attempt` [server-graded]; `status`). On a pass it renders
+>   the branded HTML cert via `_shared/cert.ts`, uploads it to `training-certs`, writes
+>   `training_records.certificate_path`, and returns a 300s signed URL. **Never returns
+>   correct answers.** Best-effort per-isolate rate limit + generic errors (no
+>   enumeration). No new secrets (`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` injected).
+> - **`training-authoring`** (`functions/training-authoring/index.ts`,
+>   **verify_jwt=true**, staff/officer) — AI-assisted drafting. Email-domain gate, then
+>   a **caller-JWT** data client (ANON key + forwarded `Authorization`, NOT service
+>   role) so `save_module_version` / `add_training_question` run under the officer's
+>   `is_compliance_officer()` gate. Reuses the `compliance-import` Anthropic stack
+>   (`claude-opus-4-8` + structured `json_schema`) and the existing **`ANTHROPIC_API_KEY`**
+>   secret. Produces a **draft** `module_versions` (`ai_generated=true`, `ai_model`); it
+>   **never** submits/approves/publishes (a human officer reviews, a manager
+>   approves + publishes). The AI prompt is built from the module **subject/brief only —
+>   never any candidate data**.
+> - **`certificate-verify`** (`functions/certificate-verify/index.ts`,
+>   **verify_jwt=false**, public) — GET `?certificate_id=` or POST `{certificate_id}`.
+>   Rate-limited, generic errors. Service role, but its ONLY data path is
+>   `verify_certificate(p_certificate_id)`, whose minimal whitelist (module, subject,
+>   SfH ref, dates, status, initials — **no** name/DOB/score) is passed through
+>   unchanged. Called by the public `verify-cert.html`. No new secrets.
+> - **UI:** `training-admin.html` (new; in the staff topnav) — dark-theme authoring /
+>   approval console (catalogue + KB/question editor + **AI draft** button →
+>   `training-authoring` + the draft→submit→**approve**→**publish** pipeline
+>   [approve/publish + **manual entry** render only for managers] + **assign training**
+>   → magic link). `candidates.html` gains a **Training** card in the slide-over
+>   (per-candidate records with status/score/completion/expiry, cert download via a
+>   `training-certs` signed URL, **Assign training**, and attempt history). Both use the
+>   anon key + officer session; the DB (RLS + RPCs) is the sole authority; no answer
+>   keys leave the server (question SELECT is manager-only).
+> - **Hosting the public pages:** `training.html` (candidate flow) and
+>   `verify-cert.html` (certificate checker) are static, **light** (GOV.UK-style /
+>   neutral), hold **no Supabase key** and talk only to their edge function. Host them
+>   wherever `PUBLIC_SITE_URL` points (they only need the project's Functions base URL,
+>   which is set inline near the top of each file — update the project ref on deploy).
+>   `training-admin.html` builds the magic link as `PUBLIC_SITE_URL/training.html?token=…`
+>   from `location.origin`, so serve `training.html` at the same origin as the staff
+>   pages (or adjust the base).
 
 ---
 
