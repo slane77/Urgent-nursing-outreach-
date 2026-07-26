@@ -16,11 +16,12 @@
 //
 // ============================================================================
 
+// This branch (the Day Webster Compliance Portal) points at the dedicated
+// "Day Webster Hub" Supabase project — SEPARATE from the live outreach project
+// (Urgent Staffing Outreach), which is untouched.
 window.CONFIG = {
-  SUPABASE_URL: 'https://udttpnaenmyxviuiwxqw.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_fDVJY1ZTiBWcTE9cTD7GBw_A6VYda5x',
+  SUPABASE_URL: 'https://eimweiyxjakmaqhzmrcb.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_1TXFAedlSBrNQ0ThSHoKWQ_n_R_EOd_',
 
-  // Public "Prefer to chat?" registration agent. Flip to true on Monday once the
-  // ANTHROPIC_API_KEY secret is set on the chat-intake function.
   CHAT_ENABLED: true
 };
