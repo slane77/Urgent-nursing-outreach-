@@ -60,14 +60,28 @@
 
   <div id="checklistsView" class="card hidden" style="margin-top:14px;">
     <h3 style="margin-top:0">Checklist library</h3>
-    <p class="muted">One reusable template per client form. Upload a <code>.docx</code> containing <code>{tokens}</code>, map each token to a Compliance Passport field, then activate. Editing an active form makes a new version — existing sends keep the version they used.</p>
+    <p class="muted"><strong>AI onboard</strong> a client's own <code>.docx</code>: it detects the answer-blanks, suggests a Compliance Passport field for each, and you confirm — no <code>{tokens}</code> to type. Or take the <strong>manual</strong> path: upload a <code>.docx</code> that already contains <code>{tokens}</code> and map them below. Editing an active form makes a new version — existing sends keep the version they used.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px;">
       <div><label>Client</label><input id="t_client" placeholder="St Elsewhere NHS"/></div>
       <div><label>Form name</label><input id="t_name" placeholder="Agency Worker Checklist"/></div>
-      <div><label>Template .docx</label><input id="t_file" type="file" accept=".docx"/></div>
-      <button class="btn" id="addTemplate">Add template</button>
+      <div><label>Client .docx</label><input id="t_file" type="file" accept=".docx"/></div>
+      <button class="btn" id="onboardTemplate">Onboard with AI</button>
+      <button class="btn secondary" id="addTemplate" title="The file already contains {tokens}">Add pre-tokenized</button>
     </div>
     <div id="tplMsg" class="muted" style="margin-bottom:8px"></div>
+
+    <div id="onboardReview" class="hidden" style="margin:4px 0 16px;border:1px solid var(--hair);border-radius:10px;padding:12px;">
+      <h4 style="margin-top:0" id="obTitle">Mapping review</h4>
+      <p class="muted" id="obLead">Confirm the field each detected blank maps to. Leave one as <em>unmapped</em> to have the client fill it by hand.</p>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <label style="margin:0">Missing policy</label>
+        <select id="ob_policy"><option value="block">block — never send incomplete</option><option value="annotate">annotate — send with «outstanding» markers</option></select>
+        <button class="btn sm" id="saveOnboard">Save template</button>
+        <button class="btn sm secondary" id="cancelOnboard">Cancel</button>
+        <span class="muted" id="obMsg"></span>
+      </div>
+      <table><thead><tr><th>Detected blank</th><th>Passport field</th><th>Token</th><th>Transform</th><th>Req</th><th>Static</th></tr></thead><tbody id="obRows"></tbody></table>
+    </div>
     <table><thead><tr><th>Client</th><th>Form</th><th>Ver</th><th>Status</th><th>Missing policy</th><th></th></tr></thead><tbody id="tplRows"></tbody></table>
 
     <div id="mapEditor" class="hidden" style="margin-top:16px;border-top:1px solid var(--hair);padding-top:12px;">
@@ -215,6 +229,102 @@ $('addTemplate').onclick = async ()=>{
   const { error } = await sb.from('checklist_templates').insert({ client_name:client, name, template_path:path, status:'draft' });
   if(error){ $('tplMsg').textContent='Error: '+error.message; return; }
   $('t_client').value=$('t_name').value=''; $('t_file').value=''; $('tplMsg').textContent='Added as draft ✓ — map the tokens below.'; loadTemplates();
+};
+
+// ---- AI-assisted onboarding (checklist-onboard: detect -> map -> save) ----
+const ONBOARD_FN = window.CONFIG.SUPABASE_URL + '/functions/v1/checklist-onboard';
+const TARGET_OPTS = ['unmapped','static',...PASSPORT_CATALOG];
+let obState = null;
+
+async function fnHeaders(){
+  const { data:{ session } } = await sb.auth.getSession();
+  return { 'Content-Type':'application/json', 'apikey':window.CONFIG.SUPABASE_ANON_KEY, 'Authorization':'Bearer '+(session?.access_token??'') };
+}
+
+$('onboardTemplate').onclick = async ()=>{
+  const client=$('t_client').value.trim(), name=$('t_name').value.trim(), file=$('t_file').files[0];
+  if(!client||!name||!file){ $('tplMsg').textContent='Client, form name and a .docx are all required.'; return; }
+  if(!/\.docx$/i.test(file.name)){ $('tplMsg').textContent='Template must be a .docx.'; return; }
+  $('tplMsg').textContent='Uploading original…';
+  const original_path = client.replace(/[^a-zA-Z0-9._-]/g,'_')+'/orig-'+Date.now()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+  const { error:upErr } = await sb.storage.from('checklist-templates').upload(original_path,file,{upsert:false});
+  if(upErr){ $('tplMsg').textContent='Upload error: '+upErr.message; return; }
+  try {
+    const headers = await fnHeaders();
+    $('tplMsg').textContent='Detecting answer-blanks…';
+    const dRes = await fetch(ONBOARD_FN,{ method:'POST', headers, body:JSON.stringify({ mode:'detect', template_path:original_path }) });
+    const det = await dRes.json();
+    if(det.error){ $('tplMsg').textContent='Detect error: '+det.error; return; }
+    const blanks = det.blanks||[];
+    if(!blanks.length){ $('tplMsg').textContent='No answer-blanks detected — use the manual token path instead.'; return; }
+    $('tplMsg').textContent='Mapping '+blanks.length+' blank(s) with AI…';
+    const mRes = await fetch(ONBOARD_FN,{ method:'POST', headers, body:JSON.stringify({ mode:'map', blanks }) });
+    const mp = await mRes.json();
+    if(mp.error){ $('tplMsg').textContent='Map error: '+mp.error; return; }
+    const byId = {}; (mp.mappings||[]).forEach(m=>byId[m.id]=m);
+    obState = { client, name, original_path, blanks };
+    renderOnboardRows(blanks, byId);
+    $('tplMsg').textContent='Detected '+blanks.length+' blank(s) — review the AI mapping below.';
+  } catch(e){ $('tplMsg').textContent='Onboarding error: '+e; }
+};
+
+function renderOnboardRows(blanks, byId){
+  $('obTitle').textContent = `Mapping review — ${obState.client} · ${obState.name}`;
+  $('obRows').innerHTML = blanks.map((b,i)=>{
+    const sug = byId[b.id]||{ target:'unmapped', transform:'', static_value:'' };
+    const fieldOpts = TARGET_OPTS.map(k=>{
+      const lbl = k==='unmapped'?'— unmapped (client fills) —':(k==='static'?'— static constant —':k);
+      return `<option value="${k}" ${k===sug.target?'selected':''}>${lbl}</option>`;
+    }).join('');
+    const trOpts = TRANSFORMS.map(x=>`<option value="${x}" ${x===(sug.transform||'')?'selected':''}>${x||'none'}</option>`).join('');
+    return `<tr data-idx="${i}">
+      <td><strong>${esc(b.label)||'<span class="muted">(no label)</span>'}</strong><br><span class="muted">${esc(b.kind)} · ${esc(b.suggested_token)}</span></td>
+      <td><select class="ob_field">${fieldOpts}</select></td>
+      <td><input class="ob_token" value="${esc(b.suggested_token)}" placeholder="token"/></td>
+      <td><select class="ob_transform">${trOpts}</select></td>
+      <td style="text-align:center"><input type="checkbox" class="ob_required"/></td>
+      <td><input class="ob_static" value="${esc(sug.static_value)}" placeholder="constant"/></td>
+    </tr>`;
+  }).join('');
+  $('obRows').querySelectorAll('tr').forEach(tr=>{
+    const mark=()=>{ const t=tr.querySelector('.ob_field').value, req=tr.querySelector('.ob_required').checked; tr.style.background=(req&&t==='unmapped')?'rgba(220,38,38,.12)':''; };
+    tr.querySelector('.ob_field').onchange=mark; tr.querySelector('.ob_required').onchange=mark; mark();
+  });
+  $('onboardReview').classList.remove('hidden');
+  $('obMsg').textContent='';
+  $('onboardReview').scrollIntoView({behavior:'smooth'});
+}
+
+function collectOnboardMappings(){
+  return [...$('obRows').querySelectorAll('tr')].map(tr=>{
+    const i=+tr.dataset.idx, b=obState.blanks[i];
+    const target=tr.querySelector('.ob_field').value;
+    const token=tr.querySelector('.ob_token').value.trim()||b.suggested_token;
+    const transform=tr.querySelector('.ob_transform').value||null;
+    return { token, target, transform, required:tr.querySelector('.ob_required').checked,
+      static:tr.querySelector('.ob_static').value, leave_blank:target==='unmapped', kind:b.kind, anchor:b.anchor };
+  });
+}
+
+$('cancelOnboard').onclick = ()=>{ $('onboardReview').classList.add('hidden'); obState=null; };
+
+$('saveOnboard').onclick = async ()=>{
+  if(!obState) return;
+  const reqUnmapped = collectOnboardMappings().filter(m=>m.required && m.leave_blank);
+  if(reqUnmapped.length && !confirm(reqUnmapped.length+' required blank(s) are still unmapped and will be left for the client to fill. Save anyway?')) return;
+  $('obMsg').textContent='Saving template…';
+  try {
+    const headers = await fnHeaders();
+    const res = await fetch(ONBOARD_FN,{ method:'POST', headers, body:JSON.stringify({
+      mode:'save', client_name:obState.client, name:obState.name, original_path:obState.original_path,
+      mappings:collectOnboardMappings(), missing_policy:$('ob_policy').value }) });
+    const out = await res.json();
+    if(out.error){ $('obMsg').textContent='Error: '+out.error; return; }
+    $('obMsg').textContent=`Saved as draft ✓ — ${out.tokens} token(s) written. Activate it below when ready.`;
+    $('t_client').value=$('t_name').value=''; $('t_file').value='';
+    $('onboardReview').classList.add('hidden'); obState=null;
+    loadTemplates();
+  } catch(e){ $('obMsg').textContent='Error: '+e; }
 };
 
 function editTemplate(id){

@@ -254,9 +254,9 @@ async function openCandidate(id) {
       <div id="clStatus" class="muted" style="margin-top:6px"></div>
       <div id="clReview" style="margin-top:8px"></div>
       <div style="margin-top:12px; border-top:1px solid var(--hair); padding-top:10px;">
-        <label>Add a new client form (.docx with <code>{tokens}</code>)</label>
+        <label>Onboard a new client form (their own <code>.docx</code> — no tokens needed)</label>
         <div id="clDrop" style="border:1px dashed var(--hair); border-radius:10px; padding:14px; text-align:center; cursor:pointer;">
-          Drop a <strong>.docx</strong> here or click to choose — then <a href="admin.html" target="_blank">map it in Admin</a>.
+          Drop a <strong>.docx</strong> here or click to choose — it uploads, then <a href="admin.html" target="_blank">AI-onboard it in Admin</a> (detect &rarr; map &rarr; save).
           <input type="file" id="clFile" accept=".docx" style="display:none" />
         </div>
         <div id="clUploadMsg" class="muted" style="margin-top:6px"></div>
@@ -561,14 +561,16 @@ async function downloadOutput(path) {
 }
 
 async function uploadTemplate(file) {
+  // Minimal hand-off: stash the raw client form in the templates bucket's inbox,
+  // then send the officer to the Admin → Checklist library to run the AI onboarding
+  // (detect → map → save). We do NOT create a half-mapped draft here — the
+  // checklist-onboard `save` mode writes the template row once mapping is confirmed.
   if (!/\.docx$/i.test(file.name)) { $('clUploadMsg').textContent = 'Please choose a .docx file.'; return; }
   $('clUploadMsg').textContent = 'Uploading…';
   const path = 'inbox/' + Date.now() + '-' + file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
   const { error:upErr } = await sb.storage.from('checklist-templates').upload(path, file, { upsert:false });
   if (upErr) { $('clUploadMsg').textContent = 'Upload error: ' + upErr.message; return; }
-  const { error:insErr } = await sb.from('checklist_templates').insert({ client_name:'(new — set in Admin)', name:file.name.replace(/\.docx$/i,''), template_path:path, status:'draft' });
-  $('clUploadMsg').innerHTML = insErr ? ('Saved file, but could not create draft: ' + esc(insErr.message))
-    : 'Uploaded ✓ — now <a href="admin.html" target="_blank">map the tokens in Admin</a>.';
+  $('clUploadMsg').innerHTML = 'Uploaded ✓ — now <a href="admin.html" target="_blank">AI-onboard it in Admin → Checklist library</a> (drop the same file to detect &amp; map its blanks).';
 }
 
 // ---- Review queue ----

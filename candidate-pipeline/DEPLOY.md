@@ -104,6 +104,7 @@ with these JWT settings:
 | `booking-breach` | **false** | external booking system / officer (Bearer `WORK_READY_TOKEN`) — records a confirmed non-compliant booking + alerts; returns 401 until the token is set |
 | `verification` | **false** | officers (`mode=check`, their JWT) + cron (`mode=drain`/`mode=sweep`, `?secret=CRON_SECRET`) + automation (Bearer `VERIFICATION_TOKEN`). Deploy with the `adapters/` folder alongside `index.ts`. |
 | `checklist-fill` | **true** | officers (candidate panel) — Client Checklist Auto-Fill; resolves the passport (service role) + merges the client `.docx`. No new secrets. |
+| `checklist-onboard` | **true** | officers (`admin.html` → **Checklist library** → *Onboard with AI*) — turns a raw client `.docx` into a tokenized template + field-map. Modes `detect`/`map`/`save`. Reuses **`ANTHROPIC_API_KEY`** (no new secret). The AI sees ONLY the blank template's label/context text — never candidate data. `save` writes `checklist_templates` with a **caller-JWT** data client (officer create/edit RLS), not the service role. |
 | `compliance-chat` | **true** | officers/managers/admins (Compliance → **Assistant** tab) — Role-Scoped Compliance AI Chat. **Deliberately NOT service-role**: builds its data client with the ANON key + the caller's forwarded JWT so every `*_in_scope` RPC runs under the caller and RLS/scope apply. Secrets: `ANTHROPIC_API_KEY` + `CHAT_PII_MODE` (default `aggregate`). |
 | `training-portal` | **false** | **candidate** (public `training.html`, no auth header — the opaque token IS the credential). Service-role trust boundary; token-scoped RPCs only; renders + stores the cert to `training-certs`. Never returns answer keys. Deploy with `_shared/cert.ts` alongside. |
 | `training-authoring` | **true** | staff/officer (`training-admin.html` → **AI draft**). **Caller-JWT** data client (ANON + forwarded JWT, NOT service role). Reuses `ANTHROPIC_API_KEY`. Creates a **draft** module version only — never publishes; prompt sees no candidate data. |
@@ -345,17 +346,44 @@ with these JWT settings:
 > and returns a 300s signed URL. Fail-closed: auth fail 401; any resolver/render/
 > upload error 5xx and nothing recorded (`record_checklist_fill` runs only after a
 > successful upload). No new secrets are needed (`SUPABASE_URL` /
-> `SUPABASE_SERVICE_ROLE_KEY` are injected). **Phase 2** `checklist-onboard` (the AI
-> auto-tokenizer) will reuse the existing **`ANTHROPIC_API_KEY`** secret.
+> `SUPABASE_SERVICE_ROLE_KEY` are injected).
+>
+> **`checklist-onboard` edge function** (`functions/checklist-onboard/index.ts`,
+> **verify_jwt=true**, officers — Phase 2, the AI auto-tokenizer). Three modes:
+> **`detect`** downloads the raw client `.docx` from `checklist-templates`, unzips
+> (`npm:pizzip`) and walks `word/document.xml` to find answer-blanks by four signals
+> in priority order — content controls/form fields (`<w:sdt>`/`<w:fldSimple>`/legacy
+> `FORMTEXT`), an empty `<w:tc>` cell adjacent to a label cell, underscore/dotted-leader
+> runs, and a colon-terminated label followed by a blank — returning each with a
+> STABLE positional anchor + a suggested token. **`map`** reuses the Anthropic stack
+> (`claude-opus-4-8` + structured `json_schema`) to map each blank to a passport field
+> key from the CLOSED vocabulary (enum-constrained + re-validated server-side, same
+> closed-target trick as `compliance-import`'s `KNOWN_CODES`), `static`, or `unmapped`;
+> **the prompt carries ONLY the blank labels/context — never candidate data** (it is a
+> blank client form). **`save`** re-walks the ORIGINAL doc and splices a docxtemplater
+> `{token}` at each confirmed anchor as a **single contiguous `<w:r>` run** (sidesteps
+> the split-run failure), leaves all surrounding XML/branding untouched, uploads the
+> tokenized `.docx` next to the untouched original, and INSERT/UPDATEs the
+> `checklist_templates` row (`status='draft'`, with the `field_map`) using a
+> **caller-JWT data client** (ANON key + forwarded JWT) so the officer create/edit RLS
+> applies — NOT the service role for that write. Reuses the existing
+> **`ANTHROPIC_API_KEY`** secret (no new secret). Fail-closed: auth fail 401; any
+> parse/AI/storage/RLS error 4xx/5xx with a generic message and nothing partial left.
 >
 > **UI:** `candidates.html` gains a **Client checklists** card in the candidate
 > slide-over (active-template dropdown → Generate/preview with provenance pills →
 > Download real fill → Mark as sent, disabled while `needs_attention` → fill
-> History; plus a drag-drop stub that uploads a new `.docx` and links to Admin).
-> `admin.html` gains a **Checklist library** tab (upload templates, the token→field
-> map editor with the passport vocabulary + transform + required + static + the
-> per-template `missing_policy`, activate/retire/new-version). All reads run under
-> the officer session + RLS; no secrets in the pages.
+> History; plus a drag-drop stub that uploads a new `.docx` to the inbox and hands off
+> to the Admin AI onboarding).
+> `admin.html` gains a **Checklist library** tab: **Onboard with AI** (drag-drop a raw
+> client `.docx` → `detect` → `map` → a **mapping review** table where each detected
+> blank shows its label, the AI-suggested passport field, a dropdown of the full
+> passport catalog to correct — or `static`/`unmapped` — plus transform/required/static,
+> with unmapped-but-required blanks flagged → **Save template** → `save`); the manual
+> path (upload a pre-tokenized `.docx`) and the token→field map editor
+> (passport vocabulary + transform + required + static + per-template `missing_policy`,
+> activate/retire/new-version) still work. All reads run under the officer session +
+> RLS; no secrets in the pages.
 >
 > **Data protection (UK GDPR):** generated checklists carry special-category-adjacent
 > PII (NI number, DOB, DBS number, address). Keep both buckets **private, EU/UK

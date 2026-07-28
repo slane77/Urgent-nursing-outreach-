@@ -17,11 +17,11 @@
 // ============================================================================
 
 // This branch (the Day Webster Compliance Portal) points at the dedicated
-// "Day Webster Hub" Supabase project — SEPARATE from the live outreach project
+// "Numa" Supabase project — SEPARATE from the live outreach project
 // (Urgent Staffing Outreach), which is untouched.
 window.CONFIG = {
-  SUPABASE_URL: 'https://eimweiyxjakmaqhzmrcb.supabase.co',
-  SUPABASE_ANON_KEY: 'sb_publishable_1TXFAedlSBrNQ0ThSHoKWQ_n_R_EOd_',
+  SUPABASE_URL: 'https://heugpopauuhkrimdfrep.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_9ehpkWFt9wtqVf3DfkMuEA_7ZTK3qd9',
 
   CHAT_ENABLED: true
 };
