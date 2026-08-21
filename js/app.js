@@ -70,6 +70,22 @@ const state = {
   careHomeRunning: false,
   careHomeResult: null,
   userProfile: null,
+  // Candidates (locked-down)
+  candSearch: '',
+  candStatusFilter: 'all',
+  candCountyFilter: '',
+  candPage: 1,
+  candRows: [],
+  candTotal: 0,
+  candCounties: [],
+  candCounts: null,
+  candLoading: false,
+  candSendMode: false,
+  candSendIds: null,
+  candSending: false,
+  candSendResult: null,
+  candSendProgress: null,
+  candTemplateId: null,
   senderEmail: '',
   senderName: '',
   senderSaving: false,
@@ -738,6 +754,7 @@ function renderAppShell() {
       <div class="tab ${state.view === 'database' ? 'active' : ''}" data-view="database">Database</div>
       <div class="tab ${state.view === 'templates' ? 'active' : ''}" data-view="templates">Templates</div>
       <div class="tab ${state.view === 'compose' ? 'active' : ''}" data-view="compose">Compose</div>
+      ${candidateAccess() ? `<div class="tab ${state.view === 'candidates' ? 'active' : ''}" data-view="candidates">🔒 Candidates</div>` : ''}
       <div class="tab ${state.view === 'settings' ? 'active' : ''}" data-view="settings">Settings</div>
       <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import">⬇ Import</div>
       <div class="tab ${state.view === 'responses' ? 'active' : ''}" data-view="responses">&#x1F4EC; Responses</div>
@@ -747,6 +764,7 @@ function renderAppShell() {
         state.view === 'database' ? renderDatabase() :
         state.view === 'templates' ? renderTemplates() :
         state.view === 'compose' ? renderCompose() :
+        state.view === 'candidates' ? renderCandidates() :
         state.view === 'import' ? renderImport() :
         state.view === 'responses' ? renderResponses() :
         renderSettings()}
@@ -3123,6 +3141,7 @@ function bindEvents() {
       state.page = 1;
       if (state.view === 'dashboard') { loadDashboard(); return; }
       if (state.view === 'database') await loadContactsPage();
+      if (state.view === 'candidates') { state.candSendMode = false; loadCandidatesView(); return; }
       if (state.view === 'compose') { state.composePreviewCounts = null; state.composeBrevoResult = null; }
       if (state.view === 'import') state.importResult = null;
       if (state.view === 'responses') { loadResponsesData(); return; }
@@ -3568,6 +3587,8 @@ function bindEvents() {
     };
   });
   });
+  bindCandidateEvents();
+
     document.querySelectorAll('#sign-out-btn, #sign-out-btn-settings').forEach(b => {
     b.onclick = signOut;
   });
@@ -3931,3 +3952,425 @@ async function exportAllAsCsv() {
       };
     }
   });
+
+
+// ============================================================================
+//  CANDIDATES — locked-down candidate database (DB-level RLS by sector)
+// ============================================================================
+
+function candidateAccess() {
+  var p = state.userProfile;
+  if (!p) return false;
+  if (p.role === 'admin') return true;
+  return Array.isArray(p.candidate_sectors) && p.candidate_sectors.length > 0;
+}
+
+var CAND_STATUS_LABELS = {
+  available: 'Available',
+  processing: 'Processing',
+  dormant: 'Dormant',
+  requires_update: 'Requires Update',
+  do_not_use: 'Do Not Use',
+};
+
+var CAND_SECTOR_LABELS = {
+  practice_nurse_gp: 'Practice Nurses (GP)',
+};
+
+function candSectorLabel(s) { return CAND_SECTOR_LABELS[s] || String(s || '').replace(/_/g, ' '); }
+
+function candApplyFilters(q) {
+  if (state.candStatusFilter && state.candStatusFilter !== 'all') q = q.eq('status', state.candStatusFilter);
+  if (state.candCountyFilter) q = q.eq('county', state.candCountyFilter);
+  var s = (state.candSearch || '').replace(/[%,()]/g, ' ').trim();
+  if (s) q = q.or('first_name.ilike.%' + s + '%,last_name.ilike.%' + s + '%,email.ilike.%' + s + '%,town.ilike.%' + s + '%,county.ilike.%' + s + '%,phone.ilike.%' + s + '%');
+  return q;
+}
+
+async function loadCandidatesPage() {
+  state.candLoading = true;
+  var from = (state.candPage - 1) * state.pageSize;
+  var q = sb.from('candidates').select('*', { count: 'exact' });
+  q = candApplyFilters(q);
+  q = q.order('last_name', { ascending: true, nullsFirst: false }).order('first_name', { ascending: true }).range(from, from + state.pageSize - 1);
+  var res = await q;
+  if (res.error) {
+    toast('Failed to load candidates: ' + res.error.message, 'error');
+    state.candRows = []; state.candTotal = 0;
+  } else {
+    state.candRows = res.data || [];
+    state.candTotal = res.count || 0;
+  }
+  state.candLoading = false;
+}
+
+async function loadCandidateFacets() {
+  var counties = {};
+  var counts = { all: 0, available: 0, processing: 0, dormant: 0, requires_update: 0, do_not_use: 0, with_email: 0 };
+  var PAGE = 1000;
+  for (var f = 0; ; f += PAGE) {
+    var r = await sb.from('candidates').select('county,status,email').range(f, f + PAGE - 1);
+    if (r.error || !r.data || !r.data.length) break;
+    r.data.forEach(function(c) {
+      counts.all++;
+      if (counts[c.status] !== undefined) counts[c.status]++;
+      if (c.email) counts.with_email++;
+      if (c.county) counties[c.county] = (counties[c.county] || 0) + 1;
+    });
+    if (r.data.length < PAGE) break;
+  }
+  state.candCounts = counts;
+  state.candCounties = Object.keys(counties).sort();
+}
+
+async function loadCandidatesView() {
+  if (!state.candCounts) await loadCandidateFacets();
+  await loadCandidatesPage();
+  render();
+}
+
+function renderCandidates() {
+  if (state.candSendMode) return renderCandidateSend();
+
+  var total = state.candTotal || 0;
+  var start = (state.candPage - 1) * state.pageSize;
+  var totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+  var cc = state.candCounts || {};
+
+  var statusTabs = [
+    { k: 'all', l: 'All', c: cc.all },
+    { k: 'available', l: 'Available', c: cc.available },
+    { k: 'processing', l: 'Processing', c: cc.processing },
+    { k: 'dormant', l: 'Dormant', c: cc.dormant },
+    { k: 'requires_update', l: 'Requires Update', c: cc.requires_update },
+    { k: 'do_not_use', l: 'Do Not Use', c: cc.do_not_use },
+  ];
+
+  return `
+    <div class="toolbar" style="margin-bottom:4px;">
+      <h2 class="section-title" style="margin:0;flex:1;">Candidates <span class="muted" style="font-size:12px;font-weight:400;">— restricted access</span></h2>
+      <button class="btn primary" id="cand-email-filtered">✉ Email filtered candidates</button>
+    </div>
+    <p class="muted" style="font-size:12px;margin:0 0 12px;">Practice Nurse candidate database. Only visible to accounts granted candidate access — Do Not Use and unsubscribed candidates are automatically excluded from sends.</p>
+
+    <div class="subtabs">
+      ${statusTabs.map(function(t) {
+        return '<div class="subtab ' + (state.candStatusFilter === t.k ? 'active' : '') + '" data-candstatus="' + t.k + '">' + t.l + (t.c != null ? ' <span class="count">' + Number(t.c).toLocaleString() + '</span>' : '') + '</div>';
+      }).join('')}
+    </div>
+
+    <div class="toolbar">
+      <input class="search" id="cand-search-input" placeholder="Search by name, email, phone, town, county..." value="${esc(state.candSearch)}" />
+      <select class="select" id="cand-county-filter">
+        <option value="">All counties</option>
+        ${state.candCounties.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candCountyFilter === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('')}
+      </select>
+    </div>
+
+    <div class="muted" style="margin-bottom:8px;">
+      ${state.candLoading ? 'Loading...' : 'Showing ' + (total === 0 ? 0 : start + 1) + '–' + Math.min(start + state.pageSize, total) + ' of ' + total.toLocaleString() + ' candidates' + (cc.with_email != null ? ' · ' + Number(cc.with_email).toLocaleString() + ' with email' : '')}
+    </div>
+
+    <div class="table-wrap">
+      ${total === 0 && !state.candLoading ? '<div class="empty">No candidates match your filters.</div>' : `
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="hide-sm">Job Title</th>
+            <th>Email</th>
+            <th class="hide-sm">Phone</th>
+            <th class="hide-sm">Town</th>
+            <th>County</th>
+            <th>Status</th>
+            <th class="hide-sm">Last Emailed</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.candRows.map(function(c) {
+            var name = esc([c.first_name, c.last_name].filter(Boolean).join(' ') || '—');
+            var lastEm = c.last_emailed_at ? esc(String(c.last_emailed_at).slice(0, 10)) : '—';
+            return '<tr>' +
+              '<td><strong>' + name + '</strong></td>' +
+              '<td class="hide-sm ellipsis" title="' + esc(c.job_title || '') + '">' + esc(c.job_title || '—') + '</td>' +
+              '<td class="ellipsis" title="' + esc(c.email || '') + '">' + (c.email ? esc(c.email) : '<span class="muted">no email</span>') + '</td>' +
+              '<td class="hide-sm">' + esc(c.phone || '—') + '</td>' +
+              '<td class="hide-sm">' + esc(c.town || '—') + '</td>' +
+              '<td>' + esc(c.county || '—') + '</td>' +
+              '<td><select class="select cand-status-sel" data-cand-id="' + esc(c.id) + '" style="font-size:12px;padding:3px 6px;">' +
+                Object.keys(CAND_STATUS_LABELS).map(function(k) { return '<option value="' + k + '" ' + (c.status === k ? 'selected' : '') + '>' + CAND_STATUS_LABELS[k] + '</option>'; }).join('') +
+              '</select></td>' +
+              '<td class="hide-sm">' + lastEm + '</td>' +
+              '<td><button class="btn small" data-cand-notes="' + esc(c.id) + '" title="' + esc(c.notes || 'Add notes') + '">' + (c.notes ? '📝' : '＋') + '</button></td>' +
+            '</tr>';
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="pagination">
+        <span class="muted">Page ${state.candPage} of ${totalPages}</span>
+        <div>
+          <button class="page-btn" data-candpage="1" ${state.candPage === 1 ? 'disabled' : ''}>‹‹</button>
+          <button class="page-btn" data-candpage="${state.candPage - 1}" ${state.candPage === 1 ? 'disabled' : ''}>‹ Prev</button>
+          <button class="page-btn" data-candpage="${state.candPage + 1}" ${state.candPage === totalPages ? 'disabled' : ''}>Next ›</button>
+          <button class="page-btn" data-candpage="${totalPages}" ${state.candPage === totalPages ? 'disabled' : ''}>››</button>
+        </div>
+      </div>
+      `}
+    </div>
+  `;
+}
+
+function renderCandidateSend() {
+  var template = state.templates.find(function(t) { return t.id === state.candTemplateId; });
+  var n = (state.candSendIds || []).length;
+  var prog = state.candSendProgress;
+
+  return `
+    <div class="compose-step brevo-panel">
+      <div class="brevo-panel-header">
+        <div>
+          <h3 style="margin:0 0 4px;">✉ Email Candidates — ${n.toLocaleString()} recipients</h3>
+          <p class="muted" style="margin:0;font-size:12px;">Matching your Candidates filters, with a valid email. Do Not Use &amp; unsubscribed are excluded. Sends from <strong>${esc(state.senderEmail || (state.user && state.user.email) || 'your address')}</strong> via Brevo in batches of 250 with 5-minute gaps.</p>
+        </div>
+        <button class="btn small" id="cand-send-back" ${state.candSending ? 'disabled' : ''}>← Back to Candidates</button>
+      </div>
+
+      <div style="margin-top:14px;">
+        <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Template</label>
+        <select class="select" id="cand-template-picker" style="max-width:380px;" ${state.candSending ? 'disabled' : ''}>
+          <option value="">— Select a template —</option>
+          ${state.templates.map(function(t) { return '<option value="' + esc(t.id) + '" ' + (state.candTemplateId === t.id ? 'selected' : '') + '>' + esc(t.name) + '</option>'; }).join('')}
+        </select>
+        ${template ? '<div style="margin-top:10px;background:var(--grey-50);padding:10px;border-radius:6px;font-size:12px;"><strong>Subject:</strong> ' + esc(template.subject) + '</div>' : ''}
+        <p class="muted" style="font-size:11px;margin-top:8px;">Tokens available: {{FirstName}}, {{LastName}}, {{Name}}, {{JobTitle}}, {{Town}}, {{Region}} (county), {{SenderName}}.</p>
+      </div>
+
+      <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <button class="btn primary" id="cand-send-btn" ${!template || state.candSending || n === 0 ? 'disabled' : ''}>
+          ${state.candSending ? '<span class="spinner-inline"></span> Sending…' : icon('mail') + '&nbsp;Send ' + n.toLocaleString() + ' Emails via Brevo'}
+        </button>
+        ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
+      </div>
+
+      ${prog ? `
+        <div class="import-progress" style="margin-top:12px;">
+          <div class="progress-bar"><div class="fill" style="width:${prog.total ? (prog.done / prog.total * 100).toFixed(1) : 0}%;"></div></div>
+          <p class="muted" style="margin-top:6px;font-size:12px;">
+            Batch ${prog.batch} of ${prog.batches} · ${prog.done.toLocaleString()} / ${prog.total.toLocaleString()} processed
+            ${prog.waitSeconds ? ' · next batch in ' + Math.floor(prog.waitSeconds / 60) + ':' + String(prog.waitSeconds % 60).padStart(2, '0') + ' (keep this tab open)' : ''}
+          </p>
+        </div>` : ''}
+
+      ${state.candSendResult && !state.candSending ? `
+      <div class="import-result ${state.candSendResult.error ? 'err' : 'ok'}" style="margin-top:12px;">
+        ${state.candSendResult.error
+          ? '<p style="color:#DC2626;font-size:13px;">✕ ' + esc(state.candSendResult.error) + '</p>'
+          : '<div class="import-result-stats">' +
+              '<div class="import-stat"><div class="import-stat-val">' + (state.candSendResult.sent || 0) + '</div><div class="import-stat-lbl">Sent</div></div>' +
+              '<div class="import-stat"><div class="import-stat-val">' + (state.candSendResult.failed || 0) + '</div><div class="import-stat-lbl">Failed/Skipped</div></div>' +
+              '<div class="import-stat"><div class="import-stat-val">' + (state.candSendResult.total || 0) + '</div><div class="import-stat-lbl">Total</div></div>' +
+            '</div>' +
+            '<p class="muted" style="margin-top:8px;font-size:12px;">✓ Done — each sent candidate stamped with a last-emailed date.</p>'}
+      </div>` : ''}
+    </div>
+  `;
+}
+
+async function buildCandidateSendIds() {
+  var PAGE = 1000;
+  var ids = [];
+  for (var f = 0; ; f += PAGE) {
+    var q = sb.from('candidates').select('id,email').neq('status', 'do_not_use').eq('unsubscribed', false).not('email', 'is', null);
+    q = candApplyFilters(q);
+    q = q.order('id', { ascending: true }).range(f, f + PAGE - 1);
+    var r = await q;
+    if (r.error) { toast('Failed to load candidates: ' + r.error.message, 'error'); break; }
+    if (!r.data || !r.data.length) break;
+    r.data.forEach(function(c) { if (c.email && c.email.indexOf('@') > -1) ids.push(c.id); });
+    if (r.data.length < PAGE) break;
+  }
+  return ids;
+}
+
+async function startCandidateSend() {
+  var ids = state.candSendIds || [];
+  var template = state.templates.find(function(t) { return t.id === state.candTemplateId; });
+  if (!template) return toast('Select a template first');
+  if (!ids.length) return toast('No candidates to send to');
+
+  var CHUNK_SIZE = 250;
+  var numBatches = Math.ceil(ids.length / CHUNK_SIZE);
+  var estMins = numBatches > 1 ? (numBatches - 1) * 5 : 0;
+  var msg = 'Send "' + (template.name || 'this template') + '" to ' + ids.length + ' candidate' + (ids.length === 1 ? '' : 's') + '.\n\nFrom: ' + (state.senderEmail || (state.user && state.user.email) || 'your signed-in address');
+  if (numBatches > 1) msg += '\n\n' + numBatches + ' batches of up to ' + CHUNK_SIZE + ', 5-min gaps (~' + estMins + ' min). Keep this tab open until it finishes.';
+  msg += '\n\nContinue?';
+  if (!confirm(msg)) return;
+
+  state.candSending = true;
+  state.candSendResult = null;
+  state.candSendProgress = { done: 0, total: ids.length, batch: 0, batches: numBatches, waitSeconds: 0 };
+  render();
+
+  var sent = 0, failed = 0, total = 0;
+  try {
+    var stamp = 'cand_batch_' + Date.now();
+    for (var i = 0; i < ids.length; i += CHUNK_SIZE) {
+      var chunk = ids.slice(i, i + CHUNK_SIZE);
+      var batchNo = Math.floor(i / CHUNK_SIZE) + 1;
+      state.candSendProgress.batch = batchNo;
+      state.candSendProgress.waitSeconds = 0;
+      render();
+
+      var sess = await sb.auth.getSession();
+      var token = sess.data.session && sess.data.session.access_token;
+      if (!token) throw new Error('Not authenticated — please sign in again');
+
+      var d = {};
+      try {
+        var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ audience: 'candidates', templateId: template.id, candidateIds: chunk, batchId: stamp + '_' + batchNo }),
+        });
+        d = await res.json();
+      } catch (err) {
+        d = { error: err.message };
+      }
+
+      if (d && typeof d.sent === 'number') {
+        sent += d.sent; failed += (d.failed || 0); total += (d.total || chunk.length);
+      } else {
+        failed += chunk.length; total += chunk.length;
+        if (d && d.error) { state.candSendResult = { error: d.error, sent: sent, failed: failed, total: total }; break; }
+      }
+
+      state.candSendProgress.done = Math.min(i + CHUNK_SIZE, ids.length);
+      render();
+
+      if (i + CHUNK_SIZE < ids.length) {
+        for (var secs = 300; secs > 0; secs--) {
+          state.candSendProgress.waitSeconds = secs;
+          render();
+          await new Promise(function(r) { setTimeout(r, 1000); });
+        }
+        state.candSendProgress.waitSeconds = 0;
+        render();
+      }
+    }
+
+    if (!state.candSendResult) state.candSendResult = { sent: sent, failed: failed, total: total };
+    if (sent > 0) toast(sent + ' candidate emails sent via Brevo ✓');
+    await loadCandidatesPage();
+  } catch (e) {
+    state.candSendResult = { error: e.message, sent: sent, failed: failed, total: total };
+  }
+
+  state.candSending = false;
+  state.candSendProgress = null;
+  render();
+}
+
+async function updateCandidate(id, patch) {
+  var res = await sb.from('candidates').update(patch).eq('id', id);
+  if (res.error) { toast('Update failed: ' + res.error.message, 'error'); return false; }
+  return true;
+}
+
+function bindCandidateEvents() {
+  if (state.view !== 'candidates') return;
+
+  document.querySelectorAll('[data-candstatus]').forEach(function(t) {
+    t.onclick = async function() {
+      state.candStatusFilter = t.dataset.candstatus;
+      state.candPage = 1;
+      await loadCandidatesPage();
+      render();
+    };
+  });
+
+  var srch = document.getElementById('cand-search-input');
+  if (srch) {
+    srch.oninput = function(e) {
+      state.candSearch = e.target.value;
+      clearTimeout(state._candSearchT);
+      state._candSearchT = setTimeout(async function() {
+        state.candPage = 1;
+        await loadCandidatesPage();
+        render();
+        var el = document.getElementById('cand-search-input');
+        if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+      }, 350);
+    };
+  }
+
+  var county = document.getElementById('cand-county-filter');
+  if (county) county.onchange = async function(e) {
+    state.candCountyFilter = e.target.value;
+    state.candPage = 1;
+    await loadCandidatesPage();
+    render();
+  };
+
+  document.querySelectorAll('[data-candpage]').forEach(function(b) {
+    b.onclick = async function() {
+      var p = parseInt(b.dataset.candpage, 10);
+      if (!p || p < 1) return;
+      state.candPage = p;
+      await loadCandidatesPage();
+      render();
+    };
+  });
+
+  document.querySelectorAll('.cand-status-sel').forEach(function(sel) {
+    sel.onchange = async function(e) {
+      var id = sel.dataset.candId;
+      var ok = await updateCandidate(id, { status: e.target.value });
+      if (ok) {
+        toast('Status updated');
+        state.candCounts = null;
+        await loadCandidateFacets();
+        await loadCandidatesPage();
+        render();
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-cand-notes]').forEach(function(btn) {
+    btn.onclick = async function() {
+      var id = btn.dataset.candNotes;
+      var row = state.candRows.find(function(c) { return c.id === id; });
+      var current = (row && row.notes) || '';
+      var val = prompt('Notes for ' + ((row && [row.first_name, row.last_name].filter(Boolean).join(' ')) || 'candidate') + ':', current);
+      if (val === null) return;
+      var ok = await updateCandidate(id, { notes: val });
+      if (ok) { toast('Notes saved'); await loadCandidatesPage(); render(); }
+    };
+  });
+
+  var emailBtn = document.getElementById('cand-email-filtered');
+  if (emailBtn) emailBtn.onclick = async function() {
+    emailBtn.disabled = true;
+    emailBtn.textContent = 'Loading…';
+    var ids = await buildCandidateSendIds();
+    if (!ids.length) { toast('No emailable candidates match your filters', 'error'); render(); return; }
+    state.candSendIds = ids;
+    state.candSendMode = true;
+    state.candSendResult = null;
+    render();
+  };
+
+  var backBtn = document.getElementById('cand-send-back');
+  if (backBtn) backBtn.onclick = function() {
+    state.candSendMode = false;
+    state.candSendIds = null;
+    state.candSendResult = null;
+    render();
+  };
+
+  var tplPick = document.getElementById('cand-template-picker');
+  if (tplPick) tplPick.onchange = function(e) { state.candTemplateId = e.target.value || null; render(); };
+
+  var sendBtn = document.getElementById('cand-send-btn');
+  if (sendBtn) sendBtn.onclick = startCandidateSend;
+}
