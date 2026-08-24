@@ -78,6 +78,10 @@ const state = {
   candRows: [],
   candTotal: 0,
   candCounties: [],
+  candSector: null,
+  candSectors: [],
+  candSpecialtyFilter: '',
+  candSpecialties: [],
   candCounts: null,
   candLoading: false,
   candSendMode: false,
@@ -3975,15 +3979,31 @@ var CAND_STATUS_LABELS = {
 
 var CAND_SECTOR_LABELS = {
   practice_nurse_gp: 'Practice Nurses (GP)',
+  nursing_urgent: 'Nurses & HCAs (Urgent)',
 };
+
+function candCurrentSector() { return state.candSector || (state.candSectors.length === 1 ? state.candSectors[0] : null); }
+
+function candFilterSummary() {
+  var bits = [];
+  var sec = candCurrentSector();
+  if (sec) bits.push(candSectorLabel(sec));
+  if (state.candSpecialtyFilter) bits.push(state.candSpecialtyFilter);
+  if (state.candCountyFilter) bits.push(state.candCountyFilter);
+  bits.push(state.candStatusFilter && state.candStatusFilter !== 'all' ? (CAND_STATUS_LABELS[state.candStatusFilter] || state.candStatusFilter) : 'All statuses');
+  if ((state.candSearch || '').trim()) bits.push('search "' + state.candSearch.trim() + '"');
+  return bits.join(' · ');
+}
 
 function candSectorLabel(s) { return CAND_SECTOR_LABELS[s] || String(s || '').replace(/_/g, ' '); }
 
 function candApplyFilters(q) {
+  if (state.candSector) q = q.eq('sector', state.candSector);
+  if (state.candSpecialtyFilter) q = q.eq('specialty', state.candSpecialtyFilter);
   if (state.candStatusFilter && state.candStatusFilter !== 'all') q = q.eq('status', state.candStatusFilter);
   if (state.candCountyFilter) q = q.eq('county', state.candCountyFilter);
   var s = (state.candSearch || '').replace(/[%,()]/g, ' ').trim();
-  if (s) q = q.or('first_name.ilike.%' + s + '%,last_name.ilike.%' + s + '%,email.ilike.%' + s + '%,town.ilike.%' + s + '%,county.ilike.%' + s + '%,phone.ilike.%' + s + '%');
+  if (s) q = q.or('first_name.ilike.%' + s + '%,last_name.ilike.%' + s + '%,email.ilike.%' + s + '%,town.ilike.%' + s + '%,county.ilike.%' + s + '%,phone.ilike.%' + s + '%,job_title.ilike.%' + s + '%');
   return q;
 }
 
@@ -4005,26 +4025,27 @@ async function loadCandidatesPage() {
 }
 
 async function loadCandidateFacets() {
-  var counties = {};
-  var counts = { all: 0, available: 0, processing: 0, dormant: 0, requires_update: 0, do_not_use: 0, with_email: 0 };
-  var PAGE = 1000;
-  for (var f = 0; ; f += PAGE) {
-    var r = await sb.from('candidates').select('county,status,email').range(f, f + PAGE - 1);
-    if (r.error || !r.data || !r.data.length) break;
-    r.data.forEach(function(c) {
-      counts.all++;
-      if (counts[c.status] !== undefined) counts[c.status]++;
-      if (c.email) counts.with_email++;
-      if (c.county) counties[c.county] = (counties[c.county] || 0) + 1;
-    });
-    if (r.data.length < PAGE) break;
+  var empty = { all: 0, available: 0, processing: 0, dormant: 0, requires_update: 0, do_not_use: 0, with_email: 0 };
+  var r = await sb.rpc('candidate_facets', { p_sector: state.candSector || null });
+  if (r.error || !r.data) {
+    toast('Failed to load candidate counts: ' + (r.error ? r.error.message : 'no data'), 'error');
+    state.candCounts = empty; state.candCounties = []; state.candSpecialties = []; state.candSectors = [];
+    return;
   }
-  state.candCounts = counts;
-  state.candCounties = Object.keys(counties).sort();
+  var d = r.data;
+  state.candCounts = d.counts || empty;
+  state.candCounties = d.counties || [];
+  state.candSpecialties = d.specialties || [];
+  state.candSectors = (d.sectors || []).map(function(x) { return x.sector; }).filter(Boolean);
 }
 
 async function loadCandidatesView() {
   if (!state.candCounts) await loadCandidateFacets();
+  // Users who can see more than one sector (admins) work one sector at a time.
+  if (!state.candSector && state.candSectors.length > 1) {
+    state.candSector = state.candSectors[0];
+    await loadCandidateFacets();
+  }
   await loadCandidatesPage();
   render();
 }
@@ -4048,10 +4069,13 @@ function renderCandidates() {
 
   return `
     <div class="toolbar" style="margin-bottom:4px;">
-      <h2 class="section-title" style="margin:0;flex:1;">Candidates <span class="muted" style="font-size:12px;font-weight:400;">— restricted access</span></h2>
+      <h2 class="section-title" style="margin:0;flex:1;">Candidates${candCurrentSector() && state.candSectors.length < 2 ? ' · ' + esc(candSectorLabel(candCurrentSector())) : ''} <span class="muted" style="font-size:12px;font-weight:400;">— restricted access</span></h2>
+      ${state.candSectors.length > 1 ? `<select class="select" id="cand-sector-filter" title="Candidate list">
+        ${state.candSectors.map(function(s) { return '<option value="' + esc(s) + '" ' + (state.candSector === s ? 'selected' : '') + '>' + esc(candSectorLabel(s)) + '</option>'; }).join('')}
+      </select>` : ''}
       <button class="btn primary" id="cand-email-filtered">✉ Email filtered candidates</button>
     </div>
-    <p class="muted" style="font-size:12px;margin:0 0 12px;">Practice Nurse candidate database. Only visible to accounts granted candidate access — Do Not Use and unsubscribed candidates are automatically excluded from sends.</p>
+    <p class="muted" style="font-size:12px;margin:0 0 12px;">${esc(candSectorLabel(candCurrentSector()) || 'Candidate')} database. Only visible to accounts granted access to this list — Do Not Use and unsubscribed candidates are automatically excluded from sends.</p>
 
     <div class="subtabs">
       ${statusTabs.map(function(t) {
@@ -4060,7 +4084,11 @@ function renderCandidates() {
     </div>
 
     <div class="toolbar">
-      <input class="search" id="cand-search-input" placeholder="Search by name, email, phone, town, county..." value="${esc(state.candSearch)}" />
+      <input class="search" id="cand-search-input" placeholder="Search by name, email, phone, job title, town, county..." value="${esc(state.candSearch)}" />
+      ${state.candSpecialties.length ? `<select class="select" id="cand-specialty-filter">
+        <option value="">All specialties</option>
+        ${state.candSpecialties.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candSpecialtyFilter === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('')}
+      </select>` : ''}
       <select class="select" id="cand-county-filter">
         <option value="">All counties</option>
         ${state.candCounties.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candCountyFilter === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('')}
@@ -4093,7 +4121,7 @@ function renderCandidates() {
             var lastEm = c.last_emailed_at ? esc(String(c.last_emailed_at).slice(0, 10)) : '—';
             return '<tr>' +
               '<td><strong>' + name + '</strong></td>' +
-              '<td class="hide-sm ellipsis" title="' + esc(c.job_title || '') + '">' + esc(c.job_title || '—') + '</td>' +
+              '<td class="hide-sm ellipsis" title="' + esc([c.job_title, c.specialty].filter(Boolean).join(' — ')) + '">' + esc(c.job_title || c.specialty || '—') + '</td>' +
               '<td class="ellipsis" title="' + esc(c.email || '') + '">' + (c.email ? esc(c.email) : '<span class="muted">no email</span>') + '</td>' +
               '<td class="hide-sm">' + esc(c.phone || '—') + '</td>' +
               '<td class="hide-sm">' + esc(c.town || '—') + '</td>' +
@@ -4131,7 +4159,7 @@ function renderCandidateSend() {
       <div class="brevo-panel-header">
         <div>
           <h3 style="margin:0 0 4px;">✉ Email Candidates — ${n.toLocaleString()} recipients</h3>
-          <p class="muted" style="margin:0;font-size:12px;">Matching your Candidates filters, with a valid email. Do Not Use &amp; unsubscribed are excluded. Sends from <strong>${esc(state.senderEmail || (state.user && state.user.email) || 'your address')}</strong> via Brevo in batches of 250 with 5-minute gaps.</p>
+          <p class="muted" style="margin:0;font-size:12px;"><strong>${esc(candFilterSummary())}</strong> — with a valid email. Do Not Use &amp; unsubscribed are excluded. Sends from <strong>${esc(state.senderEmail || (state.user && state.user.email) || 'your address')}</strong> via Brevo in batches of 250 with 5-minute gaps.</p>
         </div>
         <button class="btn small" id="cand-send-back" ${state.candSending ? 'disabled' : ''}>← Back to Candidates</button>
       </div>
@@ -4143,7 +4171,7 @@ function renderCandidateSend() {
           ${state.templates.map(function(t) { return '<option value="' + esc(t.id) + '" ' + (state.candTemplateId === t.id ? 'selected' : '') + '>' + esc(t.name) + '</option>'; }).join('')}
         </select>
         ${template ? '<div style="margin-top:10px;background:var(--grey-50);padding:10px;border-radius:6px;font-size:12px;"><strong>Subject:</strong> ' + esc(template.subject) + '</div>' : ''}
-        <p class="muted" style="font-size:11px;margin-top:8px;">Tokens available: {{FirstName}}, {{LastName}}, {{Name}}, {{JobTitle}}, {{Town}}, {{Region}} (county), {{SenderName}}.</p>
+        <p class="muted" style="font-size:11px;margin-top:8px;">Tokens available: {{FirstName}}, {{LastName}}, {{Name}}, {{JobTitle}}, {{Specialty}}, {{Town}}, {{Region}} (county), {{SenderName}}.</p>
       </div>
 
       <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -4303,6 +4331,28 @@ function bindCandidateEvents() {
       }, 350);
     };
   }
+
+  var sectorSel = document.getElementById('cand-sector-filter');
+  if (sectorSel) sectorSel.onchange = async function(e) {
+    state.candSector = e.target.value || null;
+    state.candPage = 1;
+    state.candStatusFilter = 'all';
+    state.candCountyFilter = '';
+    state.candSpecialtyFilter = '';
+    state.candSearch = '';
+    state.candCounts = null;
+    await loadCandidateFacets();
+    await loadCandidatesPage();
+    render();
+  };
+
+  var specialty = document.getElementById('cand-specialty-filter');
+  if (specialty) specialty.onchange = async function(e) {
+    state.candSpecialtyFilter = e.target.value;
+    state.candPage = 1;
+    await loadCandidatesPage();
+    render();
+  };
 
   var county = document.getElementById('cand-county-filter');
   if (county) county.onchange = async function(e) {
