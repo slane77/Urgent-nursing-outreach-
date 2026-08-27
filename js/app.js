@@ -105,6 +105,9 @@ const state = {
   candDropParsing: false,
   candDropError: null,
   candDropResult: null,
+  candDropPasteOpen: false,
+  candDropPasteText: '',
+  candSendJobDetails: null,
   senderEmail: '',
   senderName: '',
   senderSaving: false,
@@ -4255,6 +4258,34 @@ async function handleJobEmailFile(file) {
   render();
 }
 
+async function handleJobEmailPaste(text) {
+  if (!text || !text.trim()) { toast('Paste the email text first', 'error'); return; }
+  state.candDropParsing = true;
+  state.candDropError = null;
+  state.candDropResult = null;
+  render();
+
+  try {
+    var sess = await sb.auth.getSession();
+    var token = sess.data.session && sess.data.session.access_token;
+    if (!token) throw new Error('Not authenticated — please sign in again');
+
+    var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/extract-job-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ text: text }),
+    });
+    var data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Failed to read that email');
+
+    state.candDropResult = data;
+  } catch (e) {
+    state.candDropError = e.message || String(e);
+  }
+  state.candDropParsing = false;
+  render();
+}
+
 var JOB_FIELD_LABELS = {
   postcode: 'Postcode', town_or_location: 'Town / Location', job_title: 'Job title',
   ward_or_department: 'Ward / Department', days: 'Days', hours: 'Hours',
@@ -4284,6 +4315,17 @@ function renderCandidateEmailDropPanel() {
           <input type="file" id="job-email-file-input" accept=".msg,.eml,.txt" style="display:none;" />
         `}
       </div>
+
+      ${!state.candDropParsing ? `
+      <div style="margin-top:10px;">
+        <button class="btn small" id="job-email-paste-toggle" type="button">${state.candDropPasteOpen ? '▾' : '▸'} Drag-and-drop not working? Paste the email text instead</button>
+        ${state.candDropPasteOpen ? `
+          <div style="margin-top:8px;">
+            <textarea id="job-email-paste-text" class="select" rows="6" placeholder="Paste the job email here (subject + body, or just the body text)" style="width:100%;resize:vertical;font-family:inherit;">${esc(state.candDropPasteText || '')}</textarea>
+            <button class="btn accent small" id="job-email-paste-submit" style="margin-top:8px;">Extract job details</button>
+          </div>
+        ` : ''}
+      </div>` : ''}
 
       ${state.candDropError ? '<p style="color:#DC2626;font-size:12px;margin-top:10px;">✕ ' + esc(state.candDropError) + '</p>' : ''}
 
@@ -4435,8 +4477,23 @@ function renderCandidateSend() {
           ${state.templates.map(function(t) { return '<option value="' + esc(t.id) + '" ' + (state.candTemplateId === t.id ? 'selected' : '') + '>' + esc(t.name) + '</option>'; }).join('')}
         </select>
         ${template ? '<div style="margin-top:10px;background:var(--grey-50);padding:10px;border-radius:6px;font-size:12px;"><strong>Subject:</strong> ' + esc(template.subject) + '</div>' : ''}
-        <p class="muted" style="font-size:11px;margin-top:8px;">Tokens available: {{FirstName}}, {{LastName}}, {{Name}}, {{JobTitle}}, {{Specialty}}, {{Town}}, {{Region}} (county), {{SenderName}}.</p>
+        <p class="muted" style="font-size:11px;margin-top:8px;">Tokens available: {{FirstName}}, {{LastName}}, {{Name}}, {{JobTitle}}, {{Specialty}}, {{Town}}, {{Region}} (county), {{SenderName}}${state.candSendJobDetails ? ', {{JobSummary}}, {{JobPostcode}}, {{JobTown}}, {{JobWard}}, {{JobDays}}, {{JobHours}}, {{JobRate}}, {{JobStartDate}}, {{JobNotes}}' : ''}.</p>
       </div>
+
+      ${state.candSendJobDetails ? `
+      <div style="margin-top:14px;background:var(--green-light);border:1px solid var(--green);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <strong style="font-size:12px;">📧 Job details attached — available as {{JobSummary}} and individual tokens in this send</strong>
+          <button class="btn small" id="cand-send-clear-job">Remove</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          ${Object.keys(JOB_FIELD_LABELS).map(function(key) {
+            var val = state.candSendJobDetails[key] || '';
+            if (!val) return '';
+            return '<div style="font-size:12px;"><span class="muted">' + JOB_FIELD_LABELS[key] + ':</span> ' + esc(val) + '</div>';
+          }).join('')}
+        </div>
+      </div>` : ''}
 
       <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
         <button class="btn primary" id="cand-send-btn" ${!template || state.candSending || n === 0 ? 'disabled' : ''}>
@@ -4495,6 +4552,7 @@ async function startCandidateSend() {
   var numBatches = Math.ceil(ids.length / CHUNK_SIZE);
   var estMins = numBatches > 1 ? (numBatches - 1) * 5 : 0;
   var msg = 'Send "' + (template.name || 'this template') + '" to ' + ids.length + ' candidate' + (ids.length === 1 ? '' : 's') + '.\n\nFrom: ' + (state.senderEmail || (state.user && state.user.email) || 'your signed-in address');
+  if (state.candSendJobDetails) msg += '\n\nJob details will be included: ' + [state.candSendJobDetails.job_title, state.candSendJobDetails.ward_or_department, state.candSendJobDetails.days, state.candSendJobDetails.hours].filter(Boolean).join(' · ');
   if (numBatches > 1) msg += '\n\n' + numBatches + ' batches of up to ' + CHUNK_SIZE + ', 5-min gaps (~' + estMins + ' min). Keep this tab open until it finishes.';
   msg += '\n\nContinue?';
   if (!confirm(msg)) return;
@@ -4523,7 +4581,7 @@ async function startCandidateSend() {
         var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ audience: 'candidates', templateId: template.id, candidateIds: chunk, batchId: stamp + '_' + batchNo }),
+          body: JSON.stringify({ audience: 'candidates', templateId: template.id, candidateIds: chunk, batchId: stamp + '_' + batchNo, jobDetails: state.candSendJobDetails || null }),
         });
         d = await res.json();
       } catch (err) {
@@ -4667,6 +4725,7 @@ function bindCandidateEvents() {
     state.candRadiusMode = true;
     state.candRadiusResults = null;
     state.candRadiusError = null;
+    state.candSendJobDetails = null;
     render();
   };
 
@@ -4715,6 +4774,18 @@ function bindCandidateEvents() {
     };
   }
 
+  var pasteToggle = document.getElementById('job-email-paste-toggle');
+  if (pasteToggle) pasteToggle.onclick = function() {
+    state.candDropPasteOpen = !state.candDropPasteOpen;
+    render();
+  };
+
+  var pasteTextarea = document.getElementById('job-email-paste-text');
+  if (pasteTextarea) pasteTextarea.oninput = function(e) { state.candDropPasteText = e.target.value; };
+
+  var pasteSubmit = document.getElementById('job-email-paste-submit');
+  if (pasteSubmit) pasteSubmit.onclick = function() { handleJobEmailPaste(state.candDropPasteText); };
+
   document.querySelectorAll('.job-field-input').forEach(function(inp) {
     inp.oninput = function() {
       if (!state.candDropResult) return;
@@ -4727,6 +4798,7 @@ function bindCandidateEvents() {
   if (jobFindBtn) jobFindBtn.onclick = function() {
     var ex = state.candDropResult && state.candDropResult.extracted;
     if (!ex || !ex.postcode) return;
+    state.candSendJobDetails = Object.assign({}, ex);
     state.candDropMode = false;
     state.candRadiusMode = true;
     state.candRadiusPostcode = ex.postcode;
@@ -4795,6 +4867,7 @@ function bindCandidateEvents() {
     state.candSendMode = true;
     state.candSendResult = null;
     state.candSendSourceLabel = null;
+    state.candSendJobDetails = null;
     render();
   };
 
@@ -4804,6 +4877,13 @@ function bindCandidateEvents() {
     state.candSendIds = null;
     state.candSendResult = null;
     state.candSendSourceLabel = null;
+    state.candSendJobDetails = null;
+    render();
+  };
+
+  var clearJobBtn = document.getElementById('cand-send-clear-job');
+  if (clearJobBtn) clearJobBtn.onclick = function() {
+    state.candSendJobDetails = null;
     render();
   };
 
