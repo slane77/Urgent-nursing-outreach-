@@ -4332,6 +4332,11 @@ function renderCandidateEmailDropPanel() {
       ${result ? `
         <div style="margin-top:16px;">
           <p class="muted" style="font-size:12px;margin-bottom:10px;"><strong>${esc(result.subject || '(no subject)')}</strong> — from ${esc(result.senderName || result.senderEmail || 'unknown sender')}</p>
+          ${result.usedContactAddress && result.matchedContact ? `
+            <p style="font-size:12px;margin-bottom:10px;background:var(--green-light);border:1px solid var(--green);border-radius:6px;padding:8px 10px;">
+              📍 No postcode was in the email — matched the sender to <strong>${esc(result.matchedContact.org || 'a known contact')}</strong> on file and used their address (${esc(result.matchedContact.postcode)}${result.matchedContact.town ? ', ' + esc(result.matchedContact.town) : ''}). Double-check this is the right site before sending.
+            </p>
+          ` : ''}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             ${Object.keys(JOB_FIELD_LABELS).map(function(key) {
               var val = (ex && ex[key] != null) ? ex[key] : '';
@@ -4344,7 +4349,7 @@ function renderCandidateEmailDropPanel() {
           </div>
           <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
             <button class="btn accent" id="job-drop-find-candidates" ${ex && ex.postcode ? '' : 'disabled'}>${icon('search')}&nbsp;Find candidates near this job</button>
-            ${!(ex && ex.postcode) ? '<span class="muted" style="font-size:12px;">No postcode was found in this email — you can type one into the field above, or search by town manually on the Candidates tab.</span>' : ''}
+            ${!(ex && ex.postcode) ? '<span class="muted" style="font-size:12px;">No postcode was found in this email, and the sender isn\'t a known contact on file — you can type one into the field above, or search by town manually on the Candidates tab.</span>' : ''}
           </div>
         </div>
       ` : ''}
