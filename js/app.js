@@ -4136,7 +4136,6 @@ async function runCandidateRadiusSearch() {
 }
 
 function renderCandidateRadiusPanel() {
-  var radii = [5, 10, 15, 20, 25, 40];
   var results = state.candRadiusResults;
   var sel = state.candRadiusSelected || new Set();
 
@@ -4145,7 +4144,7 @@ function renderCandidateRadiusPanel() {
       <div class="brevo-panel-header">
         <div>
           <h3 style="margin:0 0 4px;">📍 Job radius match</h3>
-          <p class="muted" style="margin:0;font-size:12px;">Paste the job postcode from a client email, pick a radius, and find nearby candidates to email.</p>
+          <p class="muted" style="margin:0;font-size:12px;">Paste the job postcode from a client email, set a radius in miles, and find nearby candidates to email. Candidates without a postcode but with a matching town are included too (marked "approx").</p>
         </div>
         <button class="btn small" id="cand-radius-close">← Back to Candidates</button>
       </div>
@@ -4156,12 +4155,8 @@ function renderCandidateRadiusPanel() {
           <input class="select" id="cand-radius-postcode" placeholder="e.g. SE1 9RT" value="${esc(state.candRadiusPostcode)}" style="max-width:180px;" ${state.candRadiusSearching ? 'disabled' : ''} />
         </div>
         <div>
-          <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Radius</label>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;">
-            ${radii.map(function(m) {
-              return '<button type="button" class="btn small ' + (state.candRadiusMiles === m ? 'primary' : '') + '" data-radius-mi="' + m + '" ' + (state.candRadiusSearching ? 'disabled' : '') + '>' + m + 'mi</button>';
-            }).join('')}
-          </div>
+          <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Radius (miles)</label>
+          <input class="select" type="number" min="1" max="200" step="1" id="cand-radius-miles" value="${esc(state.candRadiusMiles)}" style="max-width:90px;" ${state.candRadiusSearching ? 'disabled' : ''} />
         </div>
         <button class="btn accent" id="cand-radius-search" ${state.candRadiusSearching ? 'disabled' : ''}>
           ${state.candRadiusSearching ? '<span class="spinner-inline"></span> Searching…' : icon('search') + '&nbsp;Find candidates'}
@@ -4171,7 +4166,7 @@ function renderCandidateRadiusPanel() {
       ${state.candRadiusError ? '<p style="color:#DC2626;font-size:12px;margin-top:10px;">✕ ' + esc(state.candRadiusError) + '</p>' : ''}
 
       ${results ? (results.length === 0 ? `
-        <p class="muted" style="margin-top:14px;font-size:13px;">No candidates with a geocoded postcode fall within ${state.candRadiusMiles} miles of ${esc(state.candRadiusOrigin.postcode)}. Try a wider radius.</p>
+        <p class="muted" style="margin-top:14px;font-size:13px;">No candidates fall within ${state.candRadiusMiles} miles of ${esc(state.candRadiusOrigin.postcode)}. Try a wider radius.</p>
       ` : `
         <div style="margin-top:16px;">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
@@ -4189,6 +4184,7 @@ function renderCandidateRadiusPanel() {
               <tbody>
                 ${results.map(function(c) {
                   var name = esc([c.first_name, c.last_name].filter(Boolean).join(' ') || '—');
+                  var approx = c.geo_precision === 'town' ? ' <span class="muted" title="No postcode on file — located by town name, so this distance is approximate" style="font-size:10px;border:1px solid var(--grey-300);border-radius:3px;padding:1px 4px;">approx</span>' : '';
                   return '<tr>' +
                     '<td><input type="checkbox" class="cand-radius-row-cb" data-radius-id="' + esc(c.id) + '" ' + (sel.has(c.id) ? 'checked' : '') + ' /></td>' +
                     '<td><strong>' + name + '</strong></td>' +
@@ -4196,7 +4192,7 @@ function renderCandidateRadiusPanel() {
                     '<td class="ellipsis" title="' + esc(c.email || '') + '">' + esc(c.email || '—') + '</td>' +
                     '<td class="hide-sm">' + esc(c.town || '—') + '</td>' +
                     '<td>' + esc(c.postcode || '—') + '</td>' +
-                    '<td>' + Number(c.distance_miles).toFixed(1) + 'mi</td>' +
+                    '<td>' + Number(c.distance_miles).toFixed(1) + 'mi' + approx + '</td>' +
                   '</tr>';
                 }).join('')}
               </tbody>
@@ -4578,9 +4574,11 @@ function bindCandidateEvents() {
     radiusPcInput.onkeydown = function(e) { if (e.key === 'Enter') runCandidateRadiusSearch(); };
   }
 
-  document.querySelectorAll('[data-radius-mi]').forEach(function(btn) {
-    btn.onclick = function() { state.candRadiusMiles = Number(btn.dataset.radiusMi); render(); };
-  });
+  var radiusMilesInput = document.getElementById('cand-radius-miles');
+  if (radiusMilesInput) {
+    radiusMilesInput.oninput = function(e) { state.candRadiusMiles = Math.max(1, Math.min(200, Number(e.target.value) || 1)); };
+    radiusMilesInput.onkeydown = function(e) { if (e.key === 'Enter') runCandidateRadiusSearch(); };
+  }
 
   var radiusSearchBtn = document.getElementById('cand-radius-search');
   if (radiusSearchBtn) radiusSearchBtn.onclick = runCandidateRadiusSearch;
