@@ -90,6 +90,16 @@ const state = {
   candSendResult: null,
   candSendProgress: null,
   candTemplateId: null,
+  // Job-postcode radius match
+  candRadiusMode: false,
+  candRadiusPostcode: '',
+  candRadiusMiles: 15,
+  candRadiusSearching: false,
+  candRadiusError: null,
+  candRadiusOrigin: null,
+  candRadiusResults: null,
+  candRadiusSelected: null,
+  candSendSourceLabel: null,
   senderEmail: '',
   senderName: '',
   senderSaving: false,
@@ -4073,8 +4083,134 @@ async function loadCandidatesView() {
   render();
 }
 
+// Job-postcode radius match — geocodes a job postcode client-side via the
+// free postcodes.io API, then asks Postgres (candidates_within_radius RPC)
+// which candidates in the current sector fall inside that radius.
+async function geocodePostcodeForRadius(pc) {
+  var clean = (pc || '').trim();
+  if (!clean) return null;
+  var res = await fetch('https://api.postcodes.io/postcodes/' + encodeURIComponent(clean));
+  var d = await res.json();
+  if (d && d.status === 200 && d.result) return { lat: d.result.latitude, lng: d.result.longitude, postcode: d.result.postcode };
+  return null;
+}
+
+async function runCandidateRadiusSearch() {
+  state.candRadiusError = null;
+  var pc = (state.candRadiusPostcode || '').trim();
+  if (!pc) { state.candRadiusError = 'Enter a postcode first'; render(); return; }
+
+  state.candRadiusSearching = true;
+  state.candRadiusResults = null;
+  render();
+
+  var origin = null;
+  try { origin = await geocodePostcodeForRadius(pc); } catch (e) { origin = null; }
+
+  if (!origin) {
+    state.candRadiusSearching = false;
+    state.candRadiusError = 'Couldn\'t find that postcode — double-check it and try again';
+    render();
+    return;
+  }
+
+  state.candRadiusOrigin = origin;
+
+  var r = await sb.rpc('candidates_within_radius', {
+    p_lat: origin.lat,
+    p_lng: origin.lng,
+    p_radius_miles: state.candRadiusMiles,
+    p_sector: candCurrentSector() || 'nursing_urgent',
+  });
+
+  state.candRadiusSearching = false;
+  if (r.error) {
+    state.candRadiusError = 'Search failed: ' + r.error.message;
+    render();
+    return;
+  }
+
+  state.candRadiusResults = r.data || [];
+  state.candRadiusSelected = new Set(state.candRadiusResults.map(function(c) { return c.id; })); // select all by default
+  render();
+}
+
+function renderCandidateRadiusPanel() {
+  var radii = [5, 10, 15, 20, 25, 40];
+  var results = state.candRadiusResults;
+  var sel = state.candRadiusSelected || new Set();
+
+  return `
+    <div class="compose-step brevo-panel" style="margin-bottom:14px;">
+      <div class="brevo-panel-header">
+        <div>
+          <h3 style="margin:0 0 4px;">📍 Job radius match</h3>
+          <p class="muted" style="margin:0;font-size:12px;">Paste the job postcode from a client email, pick a radius, and find nearby candidates to email.</p>
+        </div>
+        <button class="btn small" id="cand-radius-close">← Back to Candidates</button>
+      </div>
+
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Job postcode</label>
+          <input class="select" id="cand-radius-postcode" placeholder="e.g. SE1 9RT" value="${esc(state.candRadiusPostcode)}" style="max-width:180px;" ${state.candRadiusSearching ? 'disabled' : ''} />
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Radius</label>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            ${radii.map(function(m) {
+              return '<button type="button" class="btn small ' + (state.candRadiusMiles === m ? 'primary' : '') + '" data-radius-mi="' + m + '" ' + (state.candRadiusSearching ? 'disabled' : '') + '>' + m + 'mi</button>';
+            }).join('')}
+          </div>
+        </div>
+        <button class="btn accent" id="cand-radius-search" ${state.candRadiusSearching ? 'disabled' : ''}>
+          ${state.candRadiusSearching ? '<span class="spinner-inline"></span> Searching…' : icon('search') + '&nbsp;Find candidates'}
+        </button>
+      </div>
+
+      ${state.candRadiusError ? '<p style="color:#DC2626;font-size:12px;margin-top:10px;">✕ ' + esc(state.candRadiusError) + '</p>' : ''}
+
+      ${results ? (results.length === 0 ? `
+        <p class="muted" style="margin-top:14px;font-size:13px;">No candidates with a geocoded postcode fall within ${state.candRadiusMiles} miles of ${esc(state.candRadiusOrigin.postcode)}. Try a wider radius.</p>
+      ` : `
+        <div style="margin-top:16px;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
+            <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="cand-radius-select-all" ${sel.size === results.length ? 'checked' : ''} />
+              <strong>${sel.size}</strong> of ${results.length} selected — within ${state.candRadiusMiles}mi of ${esc(state.candRadiusOrigin.postcode)}
+            </label>
+            <button class="btn primary small" id="cand-radius-email-selected" ${sel.size === 0 ? 'disabled' : ''}>✉ Email ${sel.size} selected candidate${sel.size === 1 ? '' : 's'}</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr><th></th><th>Name</th><th class="hide-sm">Job Title</th><th>Email</th><th class="hide-sm">Town</th><th>Postcode</th><th>Distance</th></tr>
+              </thead>
+              <tbody>
+                ${results.map(function(c) {
+                  var name = esc([c.first_name, c.last_name].filter(Boolean).join(' ') || '—');
+                  return '<tr>' +
+                    '<td><input type="checkbox" class="cand-radius-row-cb" data-radius-id="' + esc(c.id) + '" ' + (sel.has(c.id) ? 'checked' : '') + ' /></td>' +
+                    '<td><strong>' + name + '</strong></td>' +
+                    '<td class="hide-sm">' + esc(c.job_title || c.specialty || '—') + '</td>' +
+                    '<td class="ellipsis" title="' + esc(c.email || '') + '">' + esc(c.email || '—') + '</td>' +
+                    '<td class="hide-sm">' + esc(c.town || '—') + '</td>' +
+                    '<td>' + esc(c.postcode || '—') + '</td>' +
+                    '<td>' + Number(c.distance_miles).toFixed(1) + 'mi</td>' +
+                  '</tr>';
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `) : ''}
+    </div>
+  `;
+}
+
 function renderCandidates() {
   if (state.candSendMode) return renderCandidateSend();
+  if (state.candRadiusMode) return renderCandidateRadiusPanel();
 
   var total = state.candTotal || 0;
   var start = (state.candPage - 1) * state.pageSize;
@@ -4096,6 +4232,7 @@ function renderCandidates() {
       ${state.candSectors.length > 1 ? `<select class="select" id="cand-sector-filter" title="Candidate list">
         ${state.candSectors.map(function(s) { return '<option value="' + esc(s) + '" ' + (state.candSector === s ? 'selected' : '') + '>' + esc(candSectorLabel(s)) + '</option>'; }).join('')}
       </select>` : ''}
+      <button class="btn small" id="cand-radius-open">📍 Job radius match</button>
       <button class="btn primary" id="cand-email-filtered">✉ Email filtered candidates</button>
     </div>
     <p class="muted" style="font-size:12px;margin:0 0 12px;">${esc(candSectorLabel(candCurrentSector()) || 'Candidate')} database. Only visible to accounts granted access to this list — Do Not Use and unsubscribed candidates are automatically excluded from sends.</p>
@@ -4182,7 +4319,7 @@ function renderCandidateSend() {
       <div class="brevo-panel-header">
         <div>
           <h3 style="margin:0 0 4px;">✉ Email Candidates — ${n.toLocaleString()} recipients</h3>
-          <p class="muted" style="margin:0;font-size:12px;"><strong>${esc(candFilterSummary())}</strong> — with a valid email. Do Not Use &amp; unsubscribed are excluded. Sends from <strong>${esc(state.senderEmail || (state.user && state.user.email) || 'your address')}</strong> via Brevo in batches of 250 with 5-minute gaps.</p>
+          <p class="muted" style="margin:0;font-size:12px;"><strong>${esc(state.candSendSourceLabel || candFilterSummary())}</strong> — with a valid email. Do Not Use &amp; unsubscribed are excluded. Sends from <strong>${esc(state.senderEmail || (state.user && state.user.email) || 'your address')}</strong> via Brevo in batches of 250 with 5-minute gaps.</p>
         </div>
         <button class="btn small" id="cand-send-back" ${state.candSending ? 'disabled' : ''}>← Back to Candidates</button>
       </div>
@@ -4421,6 +4558,61 @@ function bindCandidateEvents() {
     };
   });
 
+  var radiusOpenBtn = document.getElementById('cand-radius-open');
+  if (radiusOpenBtn) radiusOpenBtn.onclick = function() {
+    state.candRadiusMode = true;
+    state.candRadiusResults = null;
+    state.candRadiusError = null;
+    render();
+  };
+
+  var radiusCloseBtn = document.getElementById('cand-radius-close');
+  if (radiusCloseBtn) radiusCloseBtn.onclick = function() {
+    state.candRadiusMode = false;
+    render();
+  };
+
+  var radiusPcInput = document.getElementById('cand-radius-postcode');
+  if (radiusPcInput) {
+    radiusPcInput.oninput = function(e) { state.candRadiusPostcode = e.target.value; };
+    radiusPcInput.onkeydown = function(e) { if (e.key === 'Enter') runCandidateRadiusSearch(); };
+  }
+
+  document.querySelectorAll('[data-radius-mi]').forEach(function(btn) {
+    btn.onclick = function() { state.candRadiusMiles = Number(btn.dataset.radiusMi); render(); };
+  });
+
+  var radiusSearchBtn = document.getElementById('cand-radius-search');
+  if (radiusSearchBtn) radiusSearchBtn.onclick = runCandidateRadiusSearch;
+
+  var radiusSelectAll = document.getElementById('cand-radius-select-all');
+  if (radiusSelectAll) radiusSelectAll.onchange = function(e) {
+    if (e.target.checked) state.candRadiusSelected = new Set((state.candRadiusResults || []).map(function(c) { return c.id; }));
+    else state.candRadiusSelected = new Set();
+    render();
+  };
+
+  document.querySelectorAll('.cand-radius-row-cb').forEach(function(cb) {
+    cb.onchange = function() {
+      var id = cb.dataset.radiusId;
+      if (!state.candRadiusSelected) state.candRadiusSelected = new Set();
+      if (cb.checked) state.candRadiusSelected.add(id); else state.candRadiusSelected.delete(id);
+      render();
+    };
+  });
+
+  var radiusEmailBtn = document.getElementById('cand-radius-email-selected');
+  if (radiusEmailBtn) radiusEmailBtn.onclick = function() {
+    var ids = Array.from(state.candRadiusSelected || []);
+    if (!ids.length) return;
+    state.candRadiusMode = false;
+    state.candSendIds = ids;
+    state.candSendMode = true;
+    state.candSendResult = null;
+    state.candSendSourceLabel = 'Within ' + state.candRadiusMiles + ' miles of ' + state.candRadiusOrigin.postcode;
+    render();
+  };
+
   var emailBtn = document.getElementById('cand-email-filtered');
   if (emailBtn) emailBtn.onclick = async function() {
     emailBtn.disabled = true;
@@ -4430,6 +4622,7 @@ function bindCandidateEvents() {
     state.candSendIds = ids;
     state.candSendMode = true;
     state.candSendResult = null;
+    state.candSendSourceLabel = null;
     render();
   };
 
@@ -4438,6 +4631,7 @@ function bindCandidateEvents() {
     state.candSendMode = false;
     state.candSendIds = null;
     state.candSendResult = null;
+    state.candSendSourceLabel = null;
     render();
   };
 
