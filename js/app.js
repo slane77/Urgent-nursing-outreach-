@@ -100,6 +100,11 @@ const state = {
   candRadiusResults: null,
   candRadiusSelected: null,
   candSendSourceLabel: null,
+  // Job-email drag-and-drop
+  candDropMode: false,
+  candDropParsing: false,
+  candDropError: null,
+  candDropResult: null,
   senderEmail: '',
   senderName: '',
   senderSaving: false,
@@ -4204,9 +4209,111 @@ function renderCandidateRadiusPanel() {
   `;
 }
 
+// Job-email drag-and-drop — parses a dropped Outlook .msg (or plain .eml/text)
+// via the extract-job-email edge function (server-side MsgReader + Claude
+// extraction), then lets the recruiter jump straight into the radius search
+// with the job's postcode pre-filled.
+function fileToBase64(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      var result = reader.result; // data:*/*;base64,XXXX
+      var comma = result.indexOf(',');
+      resolve(comma > -1 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleJobEmailFile(file) {
+  if (!file) return;
+  state.candDropParsing = true;
+  state.candDropError = null;
+  state.candDropResult = null;
+  render();
+
+  try {
+    var base64 = await fileToBase64(file);
+    var sess = await sb.auth.getSession();
+    var token = sess.data.session && sess.data.session.access_token;
+    if (!token) throw new Error('Not authenticated — please sign in again');
+
+    var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/extract-job-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ fileBase64: base64, fileName: file.name }),
+    });
+    var data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Failed to read that email');
+
+    state.candDropResult = data;
+  } catch (e) {
+    state.candDropError = e.message || String(e);
+  }
+  state.candDropParsing = false;
+  render();
+}
+
+var JOB_FIELD_LABELS = {
+  postcode: 'Postcode', town_or_location: 'Town / Location', job_title: 'Job title',
+  ward_or_department: 'Ward / Department', days: 'Days', hours: 'Hours',
+  rate: 'Rate', start_date: 'Start date', notes: 'Notes',
+};
+
+function renderCandidateEmailDropPanel() {
+  var result = state.candDropResult;
+  var ex = (result && result.extracted) || null;
+
+  return `
+    <div class="compose-step brevo-panel" style="margin-bottom:14px;">
+      <div class="brevo-panel-header">
+        <div>
+          <h3 style="margin:0 0 4px;">📧 Job email → find candidates</h3>
+          <p class="muted" style="margin:0;font-size:12px;">Drag a client's job email out of Outlook and drop it below (or choose a file). We'll pull out the postcode and job details automatically.</p>
+        </div>
+        <button class="btn small" id="cand-drop-close">← Back to Candidates</button>
+      </div>
+
+      <div id="job-email-dropzone" style="margin-top:14px;border:2px dashed var(--grey-300);border-radius:10px;padding:28px;text-align:center;transition:all 0.15s;">
+        ${state.candDropParsing ? `
+          <div><span class="spinner-inline"></span> <span class="muted">Reading the email and pulling out job details…</span></div>
+        ` : `
+          <div class="muted" style="margin-bottom:10px;">📥 Drop the email here</div>
+          <button class="btn small" id="job-email-pick-btn" type="button">Or choose a file…</button>
+          <input type="file" id="job-email-file-input" accept=".msg,.eml,.txt" style="display:none;" />
+        `}
+      </div>
+
+      ${state.candDropError ? '<p style="color:#DC2626;font-size:12px;margin-top:10px;">✕ ' + esc(state.candDropError) + '</p>' : ''}
+
+      ${result ? `
+        <div style="margin-top:16px;">
+          <p class="muted" style="font-size:12px;margin-bottom:10px;"><strong>${esc(result.subject || '(no subject)')}</strong> — from ${esc(result.senderName || result.senderEmail || 'unknown sender')}</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            ${Object.keys(JOB_FIELD_LABELS).map(function(key) {
+              var val = (ex && ex[key] != null) ? ex[key] : '';
+              var wide = key === 'notes';
+              return '<div style="' + (wide ? 'grid-column:1 / -1;' : '') + '">' +
+                '<label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">' + JOB_FIELD_LABELS[key] + '</label>' +
+                '<input class="select job-field-input" data-job-field="' + key + '" value="' + esc(val) + '" style="width:100%;" />' +
+              '</div>';
+            }).join('')}
+          </div>
+          <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn accent" id="job-drop-find-candidates" ${ex && ex.postcode ? '' : 'disabled'}>${icon('search')}&nbsp;Find candidates near this job</button>
+            ${!(ex && ex.postcode) ? '<span class="muted" style="font-size:12px;">No postcode was found in this email — you can type one into the field above, or search by town manually on the Candidates tab.</span>' : ''}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
 function renderCandidates() {
   if (state.candSendMode) return renderCandidateSend();
   if (state.candRadiusMode) return renderCandidateRadiusPanel();
+  if (state.candDropMode) return renderCandidateEmailDropPanel();
 
   var total = state.candTotal || 0;
   var start = (state.candPage - 1) * state.pageSize;
@@ -4229,6 +4336,7 @@ function renderCandidates() {
         ${state.candSectors.map(function(s) { return '<option value="' + esc(s) + '" ' + (state.candSector === s ? 'selected' : '') + '>' + esc(candSectorLabel(s)) + '</option>'; }).join('')}
       </select>` : ''}
       <button class="btn small" id="cand-radius-open">📍 Job radius match</button>
+      <button class="btn small" id="cand-drop-open">📧 Job email</button>
       <button class="btn primary" id="cand-email-filtered">✉ Email filtered candidates</button>
     </div>
     <p class="muted" style="font-size:12px;margin:0 0 12px;">${esc(candSectorLabel(candCurrentSector()) || 'Candidate')} database. Only visible to accounts granted access to this list — Do Not Use and unsubscribed candidates are automatically excluded from sends.</p>
@@ -4560,6 +4668,72 @@ function bindCandidateEvents() {
     state.candRadiusResults = null;
     state.candRadiusError = null;
     render();
+  };
+
+  var dropOpenBtn = document.getElementById('cand-drop-open');
+  if (dropOpenBtn) dropOpenBtn.onclick = function() {
+    state.candDropMode = true;
+    state.candDropResult = null;
+    state.candDropError = null;
+    render();
+  };
+
+  var dropCloseBtn = document.getElementById('cand-drop-close');
+  if (dropCloseBtn) dropCloseBtn.onclick = function() {
+    state.candDropMode = false;
+    render();
+  };
+
+  var dropZone = document.getElementById('job-email-dropzone');
+  if (dropZone) {
+    dropZone.ondragover = function(e) {
+      e.preventDefault();
+      dropZone.style.borderColor = 'var(--green)';
+      dropZone.style.background = 'var(--green-light)';
+    };
+    dropZone.ondragleave = function() {
+      dropZone.style.borderColor = 'var(--grey-300)';
+      dropZone.style.background = '';
+    };
+    dropZone.ondrop = function(e) {
+      e.preventDefault();
+      dropZone.style.borderColor = 'var(--grey-300)';
+      dropZone.style.background = '';
+      var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) handleJobEmailFile(file);
+      else toast('Drop a .msg email file here', 'error');
+    };
+  }
+
+  var jobFilePick = document.getElementById('job-email-pick-btn');
+  var jobFileInput = document.getElementById('job-email-file-input');
+  if (jobFilePick && jobFileInput) {
+    jobFilePick.onclick = function() { jobFileInput.click(); };
+    jobFileInput.onchange = function(e) {
+      var file = e.target.files && e.target.files[0];
+      if (file) handleJobEmailFile(file);
+    };
+  }
+
+  document.querySelectorAll('.job-field-input').forEach(function(inp) {
+    inp.oninput = function() {
+      if (!state.candDropResult) return;
+      if (!state.candDropResult.extracted) state.candDropResult.extracted = {};
+      state.candDropResult.extracted[inp.dataset.jobField] = inp.value;
+    };
+  });
+
+  var jobFindBtn = document.getElementById('job-drop-find-candidates');
+  if (jobFindBtn) jobFindBtn.onclick = function() {
+    var ex = state.candDropResult && state.candDropResult.extracted;
+    if (!ex || !ex.postcode) return;
+    state.candDropMode = false;
+    state.candRadiusMode = true;
+    state.candRadiusPostcode = ex.postcode;
+    state.candRadiusResults = null;
+    state.candRadiusError = null;
+    render();
+    runCandidateRadiusSearch();
   };
 
   var radiusCloseBtn = document.getElementById('cand-radius-close');
