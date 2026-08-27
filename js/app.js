@@ -4759,8 +4759,16 @@ function bindCandidateEvents() {
       dropZone.style.borderColor = 'var(--grey-300)';
       dropZone.style.background = '';
       var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (file) handleJobEmailFile(file);
-      else toast('Drop a .msg email file here', 'error');
+      if (file) { handleJobEmailFile(file); return; }
+      // New Outlook (and some other web-based clients) don't hand over a real
+      // .msg file on drag — they expose the message as HTML or plain text
+      // instead. Catch that and route it through the same paste pipeline
+      // automatically, so dragging still just works without extra clicks.
+      var html = e.dataTransfer && e.dataTransfer.getData && e.dataTransfer.getData('text/html');
+      var plain = e.dataTransfer && e.dataTransfer.getData && e.dataTransfer.getData('text/plain');
+      var text = (html && html.trim()) || (plain && plain.trim());
+      if (text) { handleJobEmailPaste(text); return; }
+      toast("Couldn't read what was dropped — try \"Paste the email text instead\" below", 'error');
     };
   }
 
