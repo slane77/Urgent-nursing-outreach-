@@ -1034,6 +1034,29 @@ function composeSenderFields() {
   return sub ? { source: s, subSource: sub } : { source: s };
 }
 
+// Lightweight per-second progress updates during the 5-minute inter-batch
+// wait. We deliberately do NOT call the full render() here — render()
+// rebuilds the entire app shell and rebinds every event listener, which
+// if called every second for the duration of a multi-hour send (and the
+// user has navigated to a heavy tab like Database or Candidates) causes
+// the whole app to stutter/freeze. These helpers touch only the countdown
+// text node if it's currently on screen, and are safe no-ops otherwise.
+function updateComposeProgressText() {
+  const el = document.getElementById('compose-brevo-progress-text');
+  const p = state.composeBrevoProgress;
+  if (!el || !p) return;
+  el.innerHTML = p.waitSeconds
+    ? 'Batch ' + p.batch + ' of ' + p.batches + ' sent &mdash; next batch in ' + Math.floor(p.waitSeconds/60) + ':' + String(p.waitSeconds%60).padStart(2,'0') + ' (spacing sends to protect deliverability)'
+    : 'Batch ' + p.batch + ' of ' + p.batches + ' &mdash; ' + p.done + ' of ' + p.total + ' processed';
+}
+function updateCandSendProgressText() {
+  const el = document.getElementById('cand-send-progress-text');
+  const p = state.candSendProgress;
+  if (!el || !p) return;
+  el.innerHTML = 'Batch ' + p.batch + ' of ' + p.batches + ' &middot; ' + p.done.toLocaleString() + ' / ' + p.total.toLocaleString() + ' processed' +
+    (p.waitSeconds ? ' &middot; next batch in ' + Math.floor(p.waitSeconds / 60) + ':' + String(p.waitSeconds % 60).padStart(2, '0') + ' (keep this tab open)' : '');
+}
+
 async function sendFilteredViaBrevo() {
   const template = state.templates.find(t => t.id === state.composeTemplateId);
   if (!template) return toast('Select a template first');
@@ -1109,7 +1132,7 @@ async function sendFilteredViaBrevo() {
       if (i + CHUNK_SIZE < ids.length) {
         for (let secs = 300; secs > 0; secs--) {
           state.composeBrevoProgress.waitSeconds = secs;
-          render();
+          updateComposeProgressText();
           await new Promise(r => setTimeout(r, 1000));
         }
         state.composeBrevoProgress.waitSeconds = 0;
@@ -1325,7 +1348,7 @@ function renderCompose() {
       ${state.composeBrevoSending ? `
         <div class="import-progress" style="margin-top:12px;">
           <div class="progress-bar"><div class="fill import-pulse"></div></div>
-          <p class="muted" style="margin-top:6px;font-size:12px;">${state.composeBrevoProgress ? ((state.composeBrevoProgress.waitSeconds ? 'Batch ' + state.composeBrevoProgress.batch + ' of ' + state.composeBrevoProgress.batches + ' sent &mdash; next batch in ' + Math.floor(state.composeBrevoProgress.waitSeconds/60) + ':' + String(state.composeBrevoProgress.waitSeconds%60).padStart(2,'0') + ' (spacing sends to protect deliverability)' : 'Batch ' + state.composeBrevoProgress.batch + ' of ' + state.composeBrevoProgress.batches + ' &mdash; ' + state.composeBrevoProgress.done + ' of ' + state.composeBrevoProgress.total + ' processed')) : 'Sending personalised emails via Brevo&hellip;'}</p>
+          <p class="muted" id="compose-brevo-progress-text" style="margin-top:6px;font-size:12px;">${state.composeBrevoProgress ? ((state.composeBrevoProgress.waitSeconds ? 'Batch ' + state.composeBrevoProgress.batch + ' of ' + state.composeBrevoProgress.batches + ' sent &mdash; next batch in ' + Math.floor(state.composeBrevoProgress.waitSeconds/60) + ':' + String(state.composeBrevoProgress.waitSeconds%60).padStart(2,'0') + ' (spacing sends to protect deliverability)' : 'Batch ' + state.composeBrevoProgress.batch + ' of ' + state.composeBrevoProgress.batches + ' &mdash; ' + state.composeBrevoProgress.done + ' of ' + state.composeBrevoProgress.total + ' processed')) : 'Sending personalised emails via Brevo&hellip;'}</p>
         </div>` : ''}
 
       ${state.composeBrevoResult && !state.composeBrevoSending && !state.composeSelectedIds ? `
@@ -4184,7 +4207,7 @@ function renderCandidateSend() {
       ${prog ? `
         <div class="import-progress" style="margin-top:12px;">
           <div class="progress-bar"><div class="fill" style="width:${prog.total ? (prog.done / prog.total * 100).toFixed(1) : 0}%;"></div></div>
-          <p class="muted" style="margin-top:6px;font-size:12px;">
+          <p class="muted" id="cand-send-progress-text" style="margin-top:6px;font-size:12px;">
             Batch ${prog.batch} of ${prog.batches} · ${prog.done.toLocaleString()} / ${prog.total.toLocaleString()} processed
             ${prog.waitSeconds ? ' · next batch in ' + Math.floor(prog.waitSeconds / 60) + ':' + String(prog.waitSeconds % 60).padStart(2, '0') + ' (keep this tab open)' : ''}
           </p>
@@ -4279,7 +4302,7 @@ async function startCandidateSend() {
       if (i + CHUNK_SIZE < ids.length) {
         for (var secs = 300; secs > 0; secs--) {
           state.candSendProgress.waitSeconds = secs;
-          render();
+          updateCandSendProgressText();
           await new Promise(function(r) { setTimeout(r, 1000); });
         }
         state.candSendProgress.waitSeconds = 0;
