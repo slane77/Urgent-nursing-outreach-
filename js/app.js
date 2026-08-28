@@ -94,6 +94,8 @@ const state = {
   candRadiusMode: false,
   candRadiusPostcode: '',
   candRadiusMiles: 15,
+  candRadiusCategory: '',
+  candDropCategory: '',
   candRadiusSearching: false,
   candRadiusError: null,
   candRadiusOrigin: null,
@@ -105,9 +107,14 @@ const state = {
   candDropParsing: false,
   candDropError: null,
   candDropResult: null,
-  candDropPasteOpen: true,
+  candDropPasteOpen: false,
   candDropPasteText: '',
   candSendJobDetails: null,
+  // Manually add a new candidate
+  candAddMode: false,
+  candAddForm: null,
+  candAddSaving: false,
+  candAddError: null,
   senderEmail: '',
   senderName: '',
   senderSaving: false,
@@ -4129,6 +4136,7 @@ async function runCandidateRadiusSearch() {
     p_lng: origin.lng,
     p_radius_miles: state.candRadiusMiles,
     p_sector: candCurrentSector() || 'nursing_urgent',
+    p_category: (candCurrentSector() === 'practice_nurse_gp' && state.candRadiusCategory) ? state.candRadiusCategory : null,
   });
 
   state.candRadiusSearching = false;
@@ -4166,6 +4174,13 @@ function renderCandidateRadiusPanel() {
           <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Radius (miles)</label>
           <input class="select" type="number" min="1" max="200" step="1" id="cand-radius-miles" value="${esc(state.candRadiusMiles)}" style="max-width:90px;" ${state.candRadiusSearching ? 'disabled' : ''} />
         </div>
+        ${candCurrentSector() === 'practice_nurse_gp' ? `<div>
+          <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Job title</label>
+          <select class="select" id="cand-radius-category" style="max-width:200px;" ${state.candRadiusSearching ? 'disabled' : ''}>
+            <option value="">Any</option>
+            ${CAND_CATEGORIES.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candRadiusCategory === c ? 'selected' : '') + '>' + esc(candCategoryLabel(c)) + '</option>'; }).join('')}
+          </select>
+        </div>` : ''}
         <button class="btn accent" id="cand-radius-search" ${state.candRadiusSearching ? 'disabled' : ''}>
           ${state.candRadiusSearching ? '<span class="spinner-inline"></span> Searching…' : icon('search') + '&nbsp;Find candidates'}
         </button>
@@ -4251,6 +4266,7 @@ async function handleJobEmailFile(file) {
     if (!res.ok || data.error) throw new Error(data.error || 'Failed to read that email');
 
     state.candDropResult = data;
+    await suggestDropCategory(data);
   } catch (e) {
     state.candDropError = e.message || String(e);
   }
@@ -4279,11 +4295,25 @@ async function handleJobEmailPaste(text) {
     if (!res.ok || data.error) throw new Error(data.error || 'Failed to read that email');
 
     state.candDropResult = data;
+    await suggestDropCategory(data);
   } catch (e) {
     state.candDropError = e.message || String(e);
   }
   state.candDropParsing = false;
   render();
+}
+
+// Auto-suggest a job title category from the extracted job title, so Joe doesn't
+// have to pick one by hand for the common case — he can still override it.
+async function suggestDropCategory(data) {
+  state.candDropCategory = '';
+  if (candCurrentSector() !== 'practice_nurse_gp') return;
+  var title = data && data.extracted && data.extracted.job_title;
+  if (!title) return;
+  try {
+    var r = await sb.rpc('suggest_category_for_title', { p_title: title });
+    if (!r.error && r.data) state.candDropCategory = r.data;
+  } catch (e) { /* non-fatal — Joe can pick manually */ }
 }
 
 var JOB_FIELD_LABELS = {
@@ -4301,35 +4331,31 @@ function renderCandidateEmailDropPanel() {
       <div class="brevo-panel-header">
         <div>
           <h3 style="margin:0 0 4px;">📧 Job email → find candidates</h3>
-          <p class="muted" style="margin:0;font-size:12px;">Paste the client's job email below, or drag it in from Outlook. We'll pull out the postcode and job details automatically.</p>
+          <p class="muted" style="margin:0;font-size:12px;">Drag a client's job email out of Outlook and drop it below (or choose a file). We'll pull out the postcode and job details automatically.</p>
         </div>
         <button class="btn small" id="cand-drop-close">← Back to Candidates</button>
       </div>
 
+      <div id="job-email-dropzone" style="margin-top:14px;border:2px dashed var(--grey-300);border-radius:10px;padding:28px;text-align:center;transition:all 0.15s;">
+        ${state.candDropParsing ? `
+          <div><span class="spinner-inline"></span> <span class="muted">Reading the email and pulling out job details…</span></div>
+        ` : `
+          <div class="muted" style="margin-bottom:10px;">📥 Drop the email here</div>
+          <button class="btn small" id="job-email-pick-btn" type="button">Or choose a file…</button>
+          <input type="file" id="job-email-file-input" accept=".msg,.eml,.txt" style="display:none;" />
+        `}
+      </div>
+
       ${!state.candDropParsing ? `
-      <div style="margin-top:14px;">
-        <button class="btn small" id="job-email-paste-toggle" type="button">${state.candDropPasteOpen ? '▾' : '▸'} Paste the email text</button>
+      <div style="margin-top:10px;">
+        <button class="btn small" id="job-email-paste-toggle" type="button">${state.candDropPasteOpen ? '▾' : '▸'} Drag-and-drop not working? Paste the email text instead</button>
         ${state.candDropPasteOpen ? `
           <div style="margin-top:8px;">
-            <p class="muted" style="font-size:11px;margin-bottom:6px;">Open the email in Outlook, click into the message body, press Ctrl+A then Ctrl+C to copy it, then paste it here.</p>
             <textarea id="job-email-paste-text" class="select" rows="6" placeholder="Paste the job email here (subject + body, or just the body text)" style="width:100%;resize:vertical;font-family:inherit;">${esc(state.candDropPasteText || '')}</textarea>
             <button class="btn accent small" id="job-email-paste-submit" style="margin-top:8px;">Extract job details</button>
           </div>
         ` : ''}
       </div>` : ''}
-
-      <div style="margin-top:14px;">
-        <p class="muted" style="font-size:11px;margin-bottom:6px;">Or drag the email in directly (works with classic Outlook desktop — not the new Outlook):</p>
-        <div id="job-email-dropzone" style="border:2px dashed var(--grey-300);border-radius:10px;padding:22px;text-align:center;transition:all 0.15s;">
-          ${state.candDropParsing ? `
-            <div><span class="spinner-inline"></span> <span class="muted">Reading the email and pulling out job details…</span></div>
-          ` : `
-            <div class="muted" style="margin-bottom:10px;">📥 Drop the email here</div>
-            <button class="btn small" id="job-email-pick-btn" type="button">Or choose a file…</button>
-            <input type="file" id="job-email-file-input" accept=".msg,.eml,.txt" style="display:none;" />
-          `}
-        </div>
-      </div>
 
       ${state.candDropError ? '<p style="color:#DC2626;font-size:12px;margin-top:10px;">✕ ' + esc(state.candDropError) + '</p>' : ''}
 
@@ -4338,10 +4364,19 @@ function renderCandidateEmailDropPanel() {
           <p class="muted" style="font-size:12px;margin-bottom:10px;"><strong>${esc(result.subject || '(no subject)')}</strong> — from ${esc(result.senderName || result.senderEmail || 'unknown sender')}</p>
           ${result.usedContactAddress && result.matchedContact ? `
             <p style="font-size:12px;margin-bottom:10px;background:var(--green-light);border:1px solid var(--green);border-radius:6px;padding:8px 10px;">
-              📍 No postcode was in the email — matched the sender to <strong>${esc(result.matchedContact.org || 'a known contact')}</strong> on file and used their address (${esc(result.matchedContact.postcode)}${result.matchedContact.town ? ', ' + esc(result.matchedContact.town) : ''}). Double-check this is the right site before sending.
+              📍 No postcode was in the email — ${result.matchedVia === 'organisation'
+                ? 'matched the practice name mentioned in the email to'
+                : 'matched the sender\'s address to'} <strong>${esc(result.matchedContact.org || 'a known contact')}</strong> on file and used their address (${esc(result.matchedContact.postcode)}${result.matchedContact.town ? ', ' + esc(result.matchedContact.town) : ''})${result.matchedVia === 'organisation' ? ' — this was a name match, not an exact address match, so it\'s worth a quick double-check' : ''}.
             </p>
           ` : ''}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            ${candCurrentSector() === 'practice_nurse_gp' ? `<div>
+              <label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">Job title category</label>
+              <select class="select" id="job-drop-category" style="width:100%;">
+                <option value="">Any</option>
+                ${CAND_CATEGORIES.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candDropCategory === c ? 'selected' : '') + '>' + esc(candCategoryLabel(c)) + '</option>'; }).join('')}
+              </select>
+            </div>` : ''}
             ${Object.keys(JOB_FIELD_LABELS).map(function(key) {
               var val = (ex && ex[key] != null) ? ex[key] : '';
               var wide = key === 'notes';
@@ -4361,10 +4396,149 @@ function renderCandidateEmailDropPanel() {
   `;
 }
 
+// Manually add a new candidate to the database. Covers every field the
+// candidates table actually stores that a recruiter would reasonably fill in
+// by hand (candidate_ref/lat/lng/geocoded_at/normalized_postcode/geo_* are
+// system-managed — geocoding happens automatically right after insert).
+var CAND_ADD_FIELDS = [
+  { key: 'first_name', label: 'First name', required: true },
+  { key: 'last_name', label: 'Last name', required: true },
+  { key: 'email', label: 'Email', required: true },
+  { key: 'phone', label: 'Phone', required: false },
+  { key: 'job_title', label: 'Job title', required: false },
+  { key: 'specialty', label: 'Specialty', required: false },
+  { key: 'town', label: 'Town', required: false },
+  { key: 'county', label: 'County', required: false },
+  { key: 'postcode', label: 'Postcode', required: false },
+  { key: 'notes', label: 'Notes', required: false, wide: true },
+];
+
+function blankCandAddForm() {
+  var f = { status: 'available' };
+  CAND_ADD_FIELDS.forEach(function(fld) { f[fld.key] = ''; });
+  f.sector = candCurrentSector() || (state.candSectors[0] || 'nursing_urgent');
+  f.job_category = f.sector === 'practice_nurse_gp' ? CAND_CATEGORIES[0] : '';
+  return f;
+}
+
+async function submitCandidateAdd() {
+  var f = state.candAddForm;
+  if (!f) return;
+  var missing = CAND_ADD_FIELDS.filter(function(fld) { return fld.required && !String(f[fld.key] || '').trim(); });
+  if (missing.length) { state.candAddError = missing.map(function(m) { return m.label; }).join(', ') + ' — required'; render(); return; }
+  if (f.email && f.email.indexOf('@') === -1) { state.candAddError = 'Enter a valid email address'; render(); return; }
+
+  state.candAddSaving = true;
+  state.candAddError = null;
+  render();
+
+  var row = {
+    first_name: f.first_name.trim(),
+    last_name: f.last_name.trim(),
+    email: f.email.trim(),
+    phone: f.phone.trim() || null,
+    job_title: f.job_title.trim() || null,
+    job_category: f.sector === 'practice_nurse_gp' ? (f.job_category || null) : null,
+    specialty: f.specialty.trim() || null,
+    town: f.town.trim() || null,
+    county: f.county.trim() || null,
+    postcode: f.postcode.trim() || null,
+    notes: f.notes.trim() || null,
+    sector: f.sector,
+    status: f.status,
+    unsubscribed: false,
+  };
+
+  var ins = await sb.from('candidates').insert(row).select('id').single();
+  if (ins.error) {
+    state.candAddError = 'Failed to save: ' + ins.error.message;
+    state.candAddSaving = false;
+    render();
+    return;
+  }
+
+  // Geocode immediately so this candidate shows up in radius searches right away,
+  // rather than waiting for the next bulk geocode pass.
+  if (row.postcode) {
+    try {
+      var geo = await geocodePostcodeForRadius(row.postcode);
+      if (geo) {
+        await sb.from('candidates').update({
+          lat: geo.lat, lng: geo.lng, geocoded_at: new Date().toISOString(),
+          normalized_postcode: row.postcode.toUpperCase().replace(/\s+/g, ''),
+          geo_precision: 'postcode',
+        }).eq('id', ins.data.id);
+      }
+    } catch (e) { /* non-fatal — bulk geocode will pick it up later */ }
+  }
+
+  state.candAddSaving = false;
+  state.candAddMode = false;
+  state.candAddForm = null;
+  state.candCounts = null;
+  toast('Candidate added ✓');
+  await loadCandidateFacets();
+  await loadCandidatesPage();
+  render();
+}
+
+function renderCandidateAddPanel() {
+  var f = state.candAddForm || (state.candAddForm = blankCandAddForm());
+
+  return `
+    <div class="compose-step brevo-panel">
+      <div class="brevo-panel-header">
+        <div>
+          <h3 style="margin:0 0 4px;">➕ Add a candidate</h3>
+          <p class="muted" style="margin:0;font-size:12px;">Adds directly to the database. If a postcode is given, it's geocoded immediately so this candidate shows up in radius searches right away.</p>
+        </div>
+        <button class="btn small" id="cand-add-close">← Back to Candidates</button>
+      </div>
+
+      <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">Sector</label>
+          <select class="select cand-add-input" data-add-field="sector" style="width:100%;">
+            ${state.candSectors.map(function(s) { return '<option value="' + esc(s) + '" ' + (f.sector === s ? 'selected' : '') + '>' + esc(candSectorLabel(s)) + '</option>'; }).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">Status</label>
+          <select class="select cand-add-input" data-add-field="status" style="width:100%;">
+            ${Object.keys(CAND_STATUS_LABELS).map(function(k) { return '<option value="' + k + '" ' + (f.status === k ? 'selected' : '') + '>' + CAND_STATUS_LABELS[k] + '</option>'; }).join('')}
+          </select>
+        </div>
+        ${f.sector === 'practice_nurse_gp' ? `<div>
+          <label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">Job title category</label>
+          <select class="select cand-add-input" data-add-field="job_category" style="width:100%;">
+            ${CAND_CATEGORIES.map(function(c) { return '<option value="' + esc(c) + '" ' + (f.job_category === c ? 'selected' : '') + '>' + esc(candCategoryLabel(c)) + '</option>'; }).join('')}
+          </select>
+        </div>` : ''}
+        ${CAND_ADD_FIELDS.map(function(fld) {
+          var val = f[fld.key] || '';
+          return '<div style="' + (fld.wide ? 'grid-column:1 / -1;' : '') + '">' +
+            '<label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">' + esc(fld.label) + (fld.required ? ' *' : '') + '</label>' +
+            '<input class="select cand-add-input" data-add-field="' + fld.key + '" value="' + esc(val) + '" style="width:100%;" ' + (state.candAddSaving ? 'disabled' : '') + ' />' +
+          '</div>';
+        }).join('')}
+      </div>
+
+      ${state.candAddError ? '<p style="color:#DC2626;font-size:12px;margin-top:12px;">✕ ' + esc(state.candAddError) + '</p>' : ''}
+
+      <div style="margin-top:16px;">
+        <button class="btn accent" id="cand-add-submit" ${state.candAddSaving ? 'disabled' : ''}>
+          ${state.candAddSaving ? '<span class="spinner-inline"></span> Saving…' : icon('mail') + '&nbsp;Add candidate'}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function renderCandidates() {
   if (state.candSendMode) return renderCandidateSend();
   if (state.candRadiusMode) return renderCandidateRadiusPanel();
   if (state.candDropMode) return renderCandidateEmailDropPanel();
+  if (state.candAddMode) return renderCandidateAddPanel();
 
   var total = state.candTotal || 0;
   var start = (state.candPage - 1) * state.pageSize;
@@ -4388,6 +4562,7 @@ function renderCandidates() {
       </select>` : ''}
       <button class="btn small" id="cand-radius-open">📍 Job radius match</button>
       <button class="btn small" id="cand-drop-open">📧 Job email</button>
+      <button class="btn small" id="cand-add-open">➕ Add candidate</button>
       <button class="btn primary" id="cand-email-filtered">✉ Email filtered candidates</button>
     </div>
     <p class="muted" style="font-size:12px;margin:0 0 12px;">${esc(candSectorLabel(candCurrentSector()) || 'Candidate')} database. Only visible to accounts granted access to this list — Do Not Use and unsubscribed candidates are automatically excluded from sends.</p>
@@ -4743,9 +4918,46 @@ function bindCandidateEvents() {
     state.candDropMode = true;
     state.candDropResult = null;
     state.candDropError = null;
-    state.candDropPasteOpen = true; // open by default — drag-and-drop doesn't work on new Outlook, so paste is the reliable path for most people
     render();
   };
+
+  var addOpenBtn = document.getElementById('cand-add-open');
+  if (addOpenBtn) addOpenBtn.onclick = function() {
+    state.candAddMode = true;
+    state.candAddForm = blankCandAddForm();
+    state.candAddError = null;
+    render();
+  };
+
+  var addCloseBtn = document.getElementById('cand-add-close');
+  if (addCloseBtn) addCloseBtn.onclick = function() {
+    state.candAddMode = false;
+    state.candAddForm = null;
+    state.candAddError = null;
+    render();
+  };
+
+  document.querySelectorAll('.cand-add-input').forEach(function(inp) {
+    inp.oninput = function() {
+      if (!state.candAddForm) return;
+      state.candAddForm[inp.dataset.addField] = inp.value;
+    };
+    inp.onchange = function() {
+      if (!state.candAddForm) return;
+      state.candAddForm[inp.dataset.addField] = inp.value;
+      if (inp.dataset.addField === 'sector') {
+        // Job category only applies to practice_nurse_gp — default it in, and
+        // re-render so the dropdown appears/disappears with the sector choice.
+        if (inp.value === 'practice_nurse_gp' && !state.candAddForm.job_category) {
+          state.candAddForm.job_category = CAND_CATEGORIES[0];
+        }
+        render();
+      }
+    };
+  });
+
+  var addSubmitBtn = document.getElementById('cand-add-submit');
+  if (addSubmitBtn) addSubmitBtn.onclick = submitCandidateAdd;
 
   var dropCloseBtn = document.getElementById('cand-drop-close');
   if (dropCloseBtn) dropCloseBtn.onclick = function() {
@@ -4812,6 +5024,9 @@ function bindCandidateEvents() {
     };
   });
 
+  var jobDropCategorySel = document.getElementById('job-drop-category');
+  if (jobDropCategorySel) jobDropCategorySel.onchange = function(e) { state.candDropCategory = e.target.value; };
+
   var jobFindBtn = document.getElementById('job-drop-find-candidates');
   if (jobFindBtn) jobFindBtn.onclick = function() {
     var ex = state.candDropResult && state.candDropResult.extracted;
@@ -4820,6 +5035,7 @@ function bindCandidateEvents() {
     state.candDropMode = false;
     state.candRadiusMode = true;
     state.candRadiusPostcode = ex.postcode;
+    state.candRadiusCategory = state.candDropCategory || '';
     state.candRadiusResults = null;
     state.candRadiusError = null;
     render();
@@ -4843,6 +5059,9 @@ function bindCandidateEvents() {
     radiusMilesInput.oninput = function(e) { state.candRadiusMiles = Math.max(1, Math.min(200, Number(e.target.value) || 1)); };
     radiusMilesInput.onkeydown = function(e) { if (e.key === 'Enter') runCandidateRadiusSearch(); };
   }
+
+  var radiusCategorySel = document.getElementById('cand-radius-category');
+  if (radiusCategorySel) radiusCategorySel.onchange = function(e) { state.candRadiusCategory = e.target.value; };
 
   var radiusSearchBtn = document.getElementById('cand-radius-search');
   if (radiusSearchBtn) radiusSearchBtn.onclick = runCandidateRadiusSearch;
