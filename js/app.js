@@ -81,6 +81,7 @@ const state = {
   candSector: null,
   candSectors: [],
   candSpecialtyFilter: '',
+  candCategoryFilter: '',
   candSpecialties: [],
   candCounts: null,
   candLoading: false,
@@ -115,6 +116,12 @@ const state = {
   candAddForm: null,
   candAddSaving: false,
   candAddError: null,
+  // Edit an existing candidate
+  candEditMode: false,
+  candEditId: null,
+  candEditForm: null,
+  candEditSaving: false,
+  candEditError: null,
   senderEmail: '',
   senderName: '',
   senderSaving: false,
@@ -4026,9 +4033,14 @@ var CAND_STATUS_LABELS = {
 };
 
 var CAND_SECTOR_LABELS = {
-  practice_nurse_gp: 'Practice Nurses (GP)',
+  practice_nurse_gp: 'GP Surgeries',
   nursing_urgent: 'Nurses & HCAs (Urgent)',
 };
+
+// Job categories — only meaningful for the practice_nurse_gp (GP Surgeries) sector, sourced from job_title_category_map.
+var CAND_CATEGORIES = ['Practice Nurses', 'ANP/ENP', 'Assistant / Phlebotomy', 'Doctor', 'Community Nurses', 'Paramedics', 'Administration'];
+var CAND_CATEGORY_LABELS = { 'Doctor': 'GPs' }; // display override — underlying stored value stays 'Doctor'
+function candCategoryLabel(c) { return CAND_CATEGORY_LABELS[c] || c; }
 
 function candCurrentSector() { return state.candSector || (state.candSectors.length === 1 ? state.candSectors[0] : null); }
 
@@ -4036,6 +4048,7 @@ function candFilterSummary() {
   var bits = [];
   var sec = candCurrentSector();
   if (sec) bits.push(candSectorLabel(sec));
+  if (state.candCategoryFilter) bits.push(candCategoryLabel(state.candCategoryFilter));
   if (state.candSpecialtyFilter) bits.push(state.candSpecialtyFilter);
   if (state.candCountyFilter) bits.push(state.candCountyFilter);
   bits.push(state.candStatusFilter && state.candStatusFilter !== 'all' ? (CAND_STATUS_LABELS[state.candStatusFilter] || state.candStatusFilter) : 'All statuses');
@@ -4047,6 +4060,7 @@ function candSectorLabel(s) { return CAND_SECTOR_LABELS[s] || String(s || '').re
 
 function candApplyFilters(q) {
   if (state.candSector) q = q.eq('sector', state.candSector);
+  if (state.candCategoryFilter) q = q.eq('job_category', state.candCategoryFilter);
   if (state.candSpecialtyFilter) q = q.eq('specialty', state.candSpecialtyFilter);
   if (state.candStatusFilter && state.candStatusFilter !== 'all') q = q.eq('status', state.candStatusFilter);
   if (state.candCountyFilter) q = q.eq('county', state.candCountyFilter);
@@ -4534,11 +4548,147 @@ function renderCandidateAddPanel() {
   `;
 }
 
+// Edit an existing candidate — same field set as Add, but sector isn't editable
+// (changing sector would move the record between access-restricted lists, which
+// isn't something to do accidentally from a quick edit).
+function openCandidateEdit(id) {
+  var c = (state.candRows || []).find(function(r) { return r.id === id; });
+  if (!c) return;
+  state.candEditId = id;
+  state.candEditForm = {
+    sector: c.sector,
+    status: c.status || 'available',
+    job_category: c.job_category || (c.sector === 'practice_nurse_gp' ? CAND_CATEGORIES[0] : ''),
+    first_name: c.first_name || '',
+    last_name: c.last_name || '',
+    email: c.email || '',
+    phone: c.phone || '',
+    job_title: c.job_title || '',
+    specialty: c.specialty || '',
+    town: c.town || '',
+    county: c.county || '',
+    postcode: c.postcode || '',
+    notes: c.notes || '',
+  };
+  state.candEditError = null;
+  state.candEditMode = true;
+}
+
+async function submitCandidateEdit() {
+  var f = state.candEditForm;
+  if (!f || !state.candEditId) return;
+  var missing = CAND_ADD_FIELDS.filter(function(fld) { return fld.required && !String(f[fld.key] || '').trim(); });
+  if (missing.length) { state.candEditError = missing.map(function(m) { return m.label; }).join(', ') + ' — required'; render(); return; }
+  if (f.email && f.email.indexOf('@') === -1) { state.candEditError = 'Enter a valid email address'; render(); return; }
+
+  state.candEditSaving = true;
+  state.candEditError = null;
+  render();
+
+  var origRow = (state.candRows || []).find(function(r) { return r.id === state.candEditId; });
+  var postcodeChanged = origRow && (origRow.postcode || '') !== (f.postcode || '').trim();
+
+  var row = {
+    first_name: f.first_name.trim(),
+    last_name: f.last_name.trim(),
+    email: f.email.trim(),
+    phone: f.phone.trim() || null,
+    job_title: f.job_title.trim() || null,
+    job_category: f.sector === 'practice_nurse_gp' ? (f.job_category || null) : null,
+    specialty: f.specialty.trim() || null,
+    town: f.town.trim() || null,
+    county: f.county.trim() || null,
+    postcode: f.postcode.trim() || null,
+    notes: f.notes.trim() || null,
+    status: f.status,
+  };
+
+  var upd = await sb.from('candidates').update(row).eq('id', state.candEditId);
+  if (upd.error) {
+    state.candEditError = 'Failed to save: ' + upd.error.message;
+    state.candEditSaving = false;
+    render();
+    return;
+  }
+
+  // Re-geocode if the postcode changed, so radius search stays accurate.
+  if (postcodeChanged && row.postcode) {
+    try {
+      var geo = await geocodePostcodeForRadius(row.postcode);
+      if (geo) {
+        await sb.from('candidates').update({
+          lat: geo.lat, lng: geo.lng, geocoded_at: new Date().toISOString(),
+          normalized_postcode: row.postcode.toUpperCase().replace(/\s+/g, ''),
+          geo_precision: 'postcode',
+        }).eq('id', state.candEditId);
+      }
+    } catch (e) { /* non-fatal */ }
+  } else if (postcodeChanged && !row.postcode) {
+    await sb.from('candidates').update({ lat: null, lng: null, geocoded_at: null, normalized_postcode: null, geo_precision: null }).eq('id', state.candEditId);
+  }
+
+  state.candEditSaving = false;
+  state.candEditMode = false;
+  state.candEditId = null;
+  state.candEditForm = null;
+  toast('Candidate updated ✓');
+  await loadCandidatesPage();
+  render();
+}
+
+function renderCandidateEditPanel() {
+  var f = state.candEditForm;
+  if (!f) return '<div class="compose-step brevo-panel"><p class="muted">No candidate selected.</p></div>';
+
+  return `
+    <div class="compose-step brevo-panel">
+      <div class="brevo-panel-header">
+        <div>
+          <h3 style="margin:0 0 4px;">✏️ Edit candidate</h3>
+          <p class="muted" style="margin:0;font-size:12px;">${esc(candSectorLabel(f.sector))} — if the postcode changes, it's re-geocoded automatically.</p>
+        </div>
+        <button class="btn small" id="cand-edit-close">← Back to Candidates</button>
+      </div>
+
+      <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">Status</label>
+          <select class="select cand-edit-input" data-edit-field="status" style="width:100%;">
+            ${Object.keys(CAND_STATUS_LABELS).map(function(k) { return '<option value="' + k + '" ' + (f.status === k ? 'selected' : '') + '>' + CAND_STATUS_LABELS[k] + '</option>'; }).join('')}
+          </select>
+        </div>
+        ${f.sector === 'practice_nurse_gp' ? `<div>
+          <label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">Job title category</label>
+          <select class="select cand-edit-input" data-edit-field="job_category" style="width:100%;">
+            ${CAND_CATEGORIES.map(function(c) { return '<option value="' + esc(c) + '" ' + (f.job_category === c ? 'selected' : '') + '>' + esc(candCategoryLabel(c)) + '</option>'; }).join('')}
+          </select>
+        </div>` : ''}
+        ${CAND_ADD_FIELDS.map(function(fld) {
+          var val = f[fld.key] || '';
+          return '<div style="' + (fld.wide ? 'grid-column:1 / -1;' : '') + '">' +
+            '<label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">' + esc(fld.label) + (fld.required ? ' *' : '') + '</label>' +
+            '<input class="select cand-edit-input" data-edit-field="' + fld.key + '" value="' + esc(val) + '" style="width:100%;" ' + (state.candEditSaving ? 'disabled' : '') + ' />' +
+          '</div>';
+        }).join('')}
+      </div>
+
+      ${state.candEditError ? '<p style="color:#DC2626;font-size:12px;margin-top:12px;">✕ ' + esc(state.candEditError) + '</p>' : ''}
+
+      <div style="margin-top:16px;">
+        <button class="btn accent" id="cand-edit-submit" ${state.candEditSaving ? 'disabled' : ''}>
+          ${state.candEditSaving ? '<span class="spinner-inline"></span> Saving…' : '✓ Save changes'}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function renderCandidates() {
   if (state.candSendMode) return renderCandidateSend();
   if (state.candRadiusMode) return renderCandidateRadiusPanel();
   if (state.candDropMode) return renderCandidateEmailDropPanel();
   if (state.candAddMode) return renderCandidateAddPanel();
+  if (state.candEditMode) return renderCandidateEditPanel();
 
   var total = state.candTotal || 0;
   var start = (state.candPage - 1) * state.pageSize;
@@ -4575,6 +4725,10 @@ function renderCandidates() {
 
     <div class="toolbar">
       <input class="search" id="cand-search-input" placeholder="Search by name, email, phone, job title, town, county..." value="${esc(state.candSearch)}" />
+      ${candCurrentSector() === 'practice_nurse_gp' ? `<select class="select" id="cand-category-filter">
+        <option value="">All job titles</option>
+        ${CAND_CATEGORIES.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candCategoryFilter === c ? 'selected' : '') + '>' + esc(candCategoryLabel(c)) + '</option>'; }).join('')}
+      </select>` : ''}
       ${state.candSpecialties.length ? `<select class="select" id="cand-specialty-filter">
         <option value="">All specialties</option>
         ${state.candSpecialties.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candSpecialtyFilter === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('')}
@@ -4603,6 +4757,7 @@ function renderCandidates() {
             <th>Status</th>
             <th class="hide-sm">Last Emailed</th>
             <th>Notes</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -4611,7 +4766,7 @@ function renderCandidates() {
             var lastEm = c.last_emailed_at ? esc(String(c.last_emailed_at).slice(0, 10)) : '—';
             return '<tr>' +
               '<td><strong>' + name + '</strong></td>' +
-              '<td class="hide-sm ellipsis" title="' + esc([c.job_title, c.specialty].filter(Boolean).join(' — ')) + '">' + esc(c.job_title || c.specialty || '—') + '</td>' +
+              '<td class="hide-sm ellipsis" title="' + esc([c.job_title, c.job_category, c.specialty].filter(Boolean).join(' — ')) + '">' + esc(c.job_title || c.specialty || '—') + (c.job_category ? ' <span class="muted" style="font-size:11px;">(' + esc(candCategoryLabel(c.job_category)) + ')</span>' : '') + '</td>' +
               '<td class="ellipsis" title="' + esc(c.email || '') + '">' + (c.email ? esc(c.email) : '<span class="muted">no email</span>') + '</td>' +
               '<td class="hide-sm">' + esc(c.phone || '—') + '</td>' +
               '<td class="hide-sm">' + esc(c.town || '—') + '</td>' +
@@ -4621,6 +4776,7 @@ function renderCandidates() {
               '</select></td>' +
               '<td class="hide-sm">' + lastEm + '</td>' +
               '<td><button class="btn small" data-cand-notes="' + esc(c.id) + '" title="' + esc(c.notes || 'Add notes') + '">' + (c.notes ? '📝' : '＋') + '</button></td>' +
+              '<td><button class="btn small" data-cand-edit="' + esc(c.id) + '" title="Edit candidate">✏️</button></td>' +
             '</tr>';
           }).join('')}
         </tbody>
@@ -4845,9 +5001,18 @@ function bindCandidateEvents() {
     state.candStatusFilter = 'all';
     state.candCountyFilter = '';
     state.candSpecialtyFilter = '';
+    state.candCategoryFilter = '';
     state.candSearch = '';
     state.candCounts = null;
     await loadCandidateFacets();
+    await loadCandidatesPage();
+    render();
+  };
+
+  var categoryFilter = document.getElementById('cand-category-filter');
+  if (categoryFilter) categoryFilter.onchange = async function(e) {
+    state.candCategoryFilter = e.target.value;
+    state.candPage = 1;
     await loadCandidatesPage();
     render();
   };
@@ -4958,6 +5123,36 @@ function bindCandidateEvents() {
 
   var addSubmitBtn = document.getElementById('cand-add-submit');
   if (addSubmitBtn) addSubmitBtn.onclick = submitCandidateAdd;
+
+  document.querySelectorAll('[data-cand-edit]').forEach(function(btn) {
+    btn.onclick = function() {
+      openCandidateEdit(btn.dataset.candEdit);
+      render();
+    };
+  });
+
+  var editCloseBtn = document.getElementById('cand-edit-close');
+  if (editCloseBtn) editCloseBtn.onclick = function() {
+    state.candEditMode = false;
+    state.candEditId = null;
+    state.candEditForm = null;
+    state.candEditError = null;
+    render();
+  };
+
+  document.querySelectorAll('.cand-edit-input').forEach(function(inp) {
+    inp.oninput = function() {
+      if (!state.candEditForm) return;
+      state.candEditForm[inp.dataset.editField] = inp.value;
+    };
+    inp.onchange = function() {
+      if (!state.candEditForm) return;
+      state.candEditForm[inp.dataset.editField] = inp.value;
+    };
+  });
+
+  var editSubmitBtn = document.getElementById('cand-edit-submit');
+  if (editSubmitBtn) editSubmitBtn.onclick = submitCandidateEdit;
 
   var dropCloseBtn = document.getElementById('cand-drop-close');
   if (dropCloseBtn) dropCloseBtn.onclick = function() {
