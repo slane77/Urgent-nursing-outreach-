@@ -122,6 +122,9 @@ const state = {
   candEditForm: null,
   candEditSaving: false,
   candEditError: null,
+  candEditSendCount: null,
+  candEditConfirmDelete: false,
+  candEditDeleting: false,
   senderEmail: '',
   senderName: '',
   senderSaving: false,
@@ -4551,7 +4554,7 @@ function renderCandidateAddPanel() {
 // Edit an existing candidate — same field set as Add, but sector isn't editable
 // (changing sector would move the record between access-restricted lists, which
 // isn't something to do accidentally from a quick edit).
-function openCandidateEdit(id) {
+async function openCandidateEdit(id) {
   var c = (state.candRows || []).find(function(r) { return r.id === id; });
   if (!c) return;
   state.candEditId = id;
@@ -4571,7 +4574,37 @@ function openCandidateEdit(id) {
     notes: c.notes || '',
   };
   state.candEditError = null;
+  state.candEditConfirmDelete = false;
+  state.candEditSendCount = null;
   state.candEditMode = true;
+  render();
+
+  // Check send history so the delete option can warn accordingly before it's shown.
+  var cnt = await sb.from('candidate_sends').select('id', { count: 'exact', head: true }).eq('candidate_id', id);
+  state.candEditSendCount = cnt.error ? 0 : (cnt.count || 0);
+  render();
+}
+
+async function deleteCandidate() {
+  if (!state.candEditId) return;
+  state.candEditDeleting = true;
+  render();
+  var del = await sb.from('candidates').delete().eq('id', state.candEditId);
+  state.candEditDeleting = false;
+  if (del.error) {
+    state.candEditError = 'Failed to delete: ' + del.error.message;
+    render();
+    return;
+  }
+  toast('Candidate deleted');
+  state.candEditMode = false;
+  state.candEditId = null;
+  state.candEditForm = null;
+  state.candEditConfirmDelete = false;
+  state.candCounts = null;
+  await loadCandidateFacets();
+  await loadCandidatesPage();
+  render();
 }
 
 async function submitCandidateEdit() {
@@ -4674,10 +4707,28 @@ function renderCandidateEditPanel() {
 
       ${state.candEditError ? '<p style="color:#DC2626;font-size:12px;margin-top:12px;">✕ ' + esc(state.candEditError) + '</p>' : ''}
 
-      <div style="margin-top:16px;">
+      <div style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
         <button class="btn accent" id="cand-edit-submit" ${state.candEditSaving ? 'disabled' : ''}>
           ${state.candEditSaving ? '<span class="spinner-inline"></span> Saving…' : '✓ Save changes'}
         </button>
+
+        <div>
+          ${state.candEditSendCount === null ? '<span class="muted" style="font-size:12px;">Checking send history…</span>' : (
+            !state.candEditConfirmDelete
+            ? '<button class="btn small" id="cand-edit-delete-start" style="color:#DC2626;border-color:#DC2626;">🗑 Delete candidate</button>'
+            : `<div style="text-align:right;">
+                <p style="font-size:12px;color:#DC2626;margin:0 0 6px;max-width:320px;">
+                  ${state.candEditSendCount > 0
+                    ? 'This candidate has ' + state.candEditSendCount + ' logged send' + (state.candEditSendCount === 1 ? '' : 's') + ' — deleting them permanently removes that history too. This cannot be undone.'
+                    : 'This permanently removes the candidate. This cannot be undone.'}
+                </p>
+                <button class="btn small" id="cand-edit-delete-cancel" ${state.candEditDeleting ? 'disabled' : ''}>Cancel</button>
+                <button class="btn small" id="cand-edit-delete-confirm" style="background:#DC2626;color:#fff;border-color:#DC2626;" ${state.candEditDeleting ? 'disabled' : ''}>
+                  ${state.candEditDeleting ? '<span class="spinner-inline"></span> Deleting…' : 'Yes, delete permanently'}
+                </button>
+              </div>`
+          )}
+        </div>
       </div>
     </div>
   `;
@@ -5127,7 +5178,6 @@ function bindCandidateEvents() {
   document.querySelectorAll('[data-cand-edit]').forEach(function(btn) {
     btn.onclick = function() {
       openCandidateEdit(btn.dataset.candEdit);
-      render();
     };
   });
 
@@ -5137,6 +5187,8 @@ function bindCandidateEvents() {
     state.candEditId = null;
     state.candEditForm = null;
     state.candEditError = null;
+    state.candEditConfirmDelete = false;
+    state.candEditSendCount = null;
     render();
   };
 
@@ -5153,6 +5205,21 @@ function bindCandidateEvents() {
 
   var editSubmitBtn = document.getElementById('cand-edit-submit');
   if (editSubmitBtn) editSubmitBtn.onclick = submitCandidateEdit;
+
+  var editDeleteStart = document.getElementById('cand-edit-delete-start');
+  if (editDeleteStart) editDeleteStart.onclick = function() {
+    state.candEditConfirmDelete = true;
+    render();
+  };
+
+  var editDeleteCancel = document.getElementById('cand-edit-delete-cancel');
+  if (editDeleteCancel) editDeleteCancel.onclick = function() {
+    state.candEditConfirmDelete = false;
+    render();
+  };
+
+  var editDeleteConfirm = document.getElementById('cand-edit-delete-confirm');
+  if (editDeleteConfirm) editDeleteConfirm.onclick = deleteCandidate;
 
   var dropCloseBtn = document.getElementById('cand-drop-close');
   if (dropCloseBtn) dropCloseBtn.onclick = function() {
