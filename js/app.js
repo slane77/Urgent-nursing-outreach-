@@ -81,7 +81,7 @@ const state = {
   candSector: null,
   candSectors: [],
   candSpecialtyFilter: '',
-  candCategoryFilter: '',
+  candCategoryFilter: [],
   candSpecialties: [],
   candCounts: null,
   candLoading: false,
@@ -95,8 +95,8 @@ const state = {
   candRadiusMode: false,
   candRadiusPostcode: '',
   candRadiusMiles: 15,
-  candRadiusCategory: '',
-  candDropCategory: '',
+  candRadiusCategory: [],
+  candDropCategory: [],
   candRadiusSearching: false,
   candRadiusError: null,
   candRadiusOrigin: null,
@@ -4045,13 +4045,27 @@ var CAND_CATEGORIES = ['Practice Nurses', 'ANP/ENP', 'Assistant / Phlebotomy', '
 var CAND_CATEGORY_LABELS = { 'Doctor': 'GPs' }; // display override — underlying stored value stays 'Doctor'
 function candCategoryLabel(c) { return CAND_CATEGORY_LABELS[c] || c; }
 
+// Multi-select job-title category chips — Joe's ask so e.g. "ANPs doing Practice
+// Nurse work" show up when combining ANP/ENP + Practice Nurses in one search/send.
+function renderCategoryChips(selected, group) {
+  var sel = selected || [];
+  var chips = CAND_CATEGORIES.map(function(c) {
+    var active = sel.indexOf(c) !== -1;
+    return '<button type="button" class="btn small cat-chip ' + (active ? 'primary' : '') + '" data-chip-group="' + group + '" data-chip-value="' + esc(c) + '">' + esc(candCategoryLabel(c)) + '</button>';
+  }).join(' ');
+  var clear = sel.length ? ' <button type="button" class="btn small cat-chip-clear" data-chip-group="' + group + '" style="color:var(--grey-600);">Clear</button>' : '';
+  return chips + clear;
+}
+
+var CAT_CHIP_STATE_KEY = { list: 'candCategoryFilter', radius: 'candRadiusCategory', drop: 'candDropCategory' };
+
 function candCurrentSector() { return state.candSector || (state.candSectors.length === 1 ? state.candSectors[0] : null); }
 
 function candFilterSummary() {
   var bits = [];
   var sec = candCurrentSector();
   if (sec) bits.push(candSectorLabel(sec));
-  if (state.candCategoryFilter) bits.push(candCategoryLabel(state.candCategoryFilter));
+  if (state.candCategoryFilter && state.candCategoryFilter.length) bits.push(state.candCategoryFilter.map(candCategoryLabel).join(' + '));
   if (state.candSpecialtyFilter) bits.push(state.candSpecialtyFilter);
   if (state.candCountyFilter) bits.push(state.candCountyFilter);
   bits.push(state.candStatusFilter && state.candStatusFilter !== 'all' ? (CAND_STATUS_LABELS[state.candStatusFilter] || state.candStatusFilter) : 'All statuses');
@@ -4063,7 +4077,7 @@ function candSectorLabel(s) { return CAND_SECTOR_LABELS[s] || String(s || '').re
 
 function candApplyFilters(q) {
   if (state.candSector) q = q.eq('sector', state.candSector);
-  if (state.candCategoryFilter) q = q.eq('job_category', state.candCategoryFilter);
+  if (state.candCategoryFilter && state.candCategoryFilter.length) q = q.in('job_category', state.candCategoryFilter);
   if (state.candSpecialtyFilter) q = q.eq('specialty', state.candSpecialtyFilter);
   if (state.candStatusFilter && state.candStatusFilter !== 'all') q = q.eq('status', state.candStatusFilter);
   if (state.candCountyFilter) q = q.eq('county', state.candCountyFilter);
@@ -4153,7 +4167,7 @@ async function runCandidateRadiusSearch() {
     p_lng: origin.lng,
     p_radius_miles: state.candRadiusMiles,
     p_sector: candCurrentSector() || 'nursing_urgent',
-    p_category: (candCurrentSector() === 'practice_nurse_gp' && state.candRadiusCategory) ? state.candRadiusCategory : null,
+    p_category: (candCurrentSector() === 'practice_nurse_gp' && state.candRadiusCategory && state.candRadiusCategory.length) ? state.candRadiusCategory.join(',') : null,
   });
 
   state.candRadiusSearching = false;
@@ -4191,17 +4205,15 @@ function renderCandidateRadiusPanel() {
           <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Radius (miles)</label>
           <input class="select" type="number" min="1" max="200" step="1" id="cand-radius-miles" value="${esc(state.candRadiusMiles)}" style="max-width:90px;" ${state.candRadiusSearching ? 'disabled' : ''} />
         </div>
-        ${candCurrentSector() === 'practice_nurse_gp' ? `<div>
-          <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Job title</label>
-          <select class="select" id="cand-radius-category" style="max-width:200px;" ${state.candRadiusSearching ? 'disabled' : ''}>
-            <option value="">Any</option>
-            ${CAND_CATEGORIES.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candRadiusCategory === c ? 'selected' : '') + '>' + esc(candCategoryLabel(c)) + '</option>'; }).join('')}
-          </select>
-        </div>` : ''}
         <button class="btn accent" id="cand-radius-search" ${state.candRadiusSearching ? 'disabled' : ''}>
           ${state.candRadiusSearching ? '<span class="spinner-inline"></span> Searching…' : icon('search') + '&nbsp;Find candidates'}
         </button>
       </div>
+
+      ${candCurrentSector() === 'practice_nurse_gp' ? `<div style="margin-top:12px;">
+        <label style="font-size:12px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:6px;">Job title(s) — pick more than one to combine, e.g. ANP/ENP + Practice Nurses</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">${renderCategoryChips(state.candRadiusCategory, 'radius')}</div>
+      </div>` : ''}
 
       ${state.candRadiusError ? '<p style="color:#DC2626;font-size:12px;margin-top:10px;">✕ ' + esc(state.candRadiusError) + '</p>' : ''}
 
@@ -4323,13 +4335,13 @@ async function handleJobEmailPaste(text) {
 // Auto-suggest a job title category from the extracted job title, so Joe doesn't
 // have to pick one by hand for the common case — he can still override it.
 async function suggestDropCategory(data) {
-  state.candDropCategory = '';
+  state.candDropCategory = [];
   if (candCurrentSector() !== 'practice_nurse_gp') return;
   var title = data && data.extracted && data.extracted.job_title;
   if (!title) return;
   try {
     var r = await sb.rpc('suggest_category_for_title', { p_title: title });
-    if (!r.error && r.data) state.candDropCategory = r.data;
+    if (!r.error && r.data) state.candDropCategory = [r.data];
   } catch (e) { /* non-fatal — Joe can pick manually */ }
 }
 
@@ -4387,12 +4399,9 @@ function renderCandidateEmailDropPanel() {
             </p>
           ` : ''}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            ${candCurrentSector() === 'practice_nurse_gp' ? `<div>
-              <label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">Job title category</label>
-              <select class="select" id="job-drop-category" style="width:100%;">
-                <option value="">Any</option>
-                ${CAND_CATEGORIES.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candDropCategory === c ? 'selected' : '') + '>' + esc(candCategoryLabel(c)) + '</option>'; }).join('')}
-              </select>
+            ${candCurrentSector() === 'practice_nurse_gp' ? `<div style="grid-column:1 / -1;">
+              <label style="font-size:11px;font-weight:600;color:var(--grey-600);display:block;margin-bottom:4px;">Job title category (pick more than one to combine)</label>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">${renderCategoryChips(state.candDropCategory, 'drop')}</div>
             </div>` : ''}
             ${Object.keys(JOB_FIELD_LABELS).map(function(key) {
               var val = (ex && ex[key] != null) ? ex[key] : '';
@@ -4776,10 +4785,6 @@ function renderCandidates() {
 
     <div class="toolbar">
       <input class="search" id="cand-search-input" placeholder="Search by name, email, phone, job title, town, county..." value="${esc(state.candSearch)}" />
-      ${candCurrentSector() === 'practice_nurse_gp' ? `<select class="select" id="cand-category-filter">
-        <option value="">All job titles</option>
-        ${CAND_CATEGORIES.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candCategoryFilter === c ? 'selected' : '') + '>' + esc(candCategoryLabel(c)) + '</option>'; }).join('')}
-      </select>` : ''}
       ${state.candSpecialties.length ? `<select class="select" id="cand-specialty-filter">
         <option value="">All specialties</option>
         ${state.candSpecialties.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candSpecialtyFilter === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('')}
@@ -4789,6 +4794,11 @@ function renderCandidates() {
         ${state.candCounties.map(function(c) { return '<option value="' + esc(c) + '" ' + (state.candCountyFilter === c ? 'selected' : '') + '>' + esc(c) + '</option>'; }).join('')}
       </select>
     </div>
+
+    ${candCurrentSector() === 'practice_nurse_gp' ? `<div style="margin-bottom:12px;">
+      <label class="muted" style="font-size:12px;display:block;margin-bottom:6px;">Job title(s) — pick more than one to combine, e.g. ANP/ENP + Practice Nurses</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${renderCategoryChips(state.candCategoryFilter, 'list')}</div>
+    </div>` : ''}
 
     <div class="muted" style="margin-bottom:8px;">
       ${state.candLoading ? 'Loading...' : 'Showing ' + (total === 0 ? 0 : start + 1) + '–' + Math.min(start + state.pageSize, total) + ' of ' + total.toLocaleString() + ' candidates' + (cc.with_email != null ? ' · ' + Number(cc.with_email).toLocaleString() + ' with email' : '')}
@@ -5052,7 +5062,7 @@ function bindCandidateEvents() {
     state.candStatusFilter = 'all';
     state.candCountyFilter = '';
     state.candSpecialtyFilter = '';
-    state.candCategoryFilter = '';
+    state.candCategoryFilter = [];
     state.candSearch = '';
     state.candCounts = null;
     await loadCandidateFacets();
@@ -5060,13 +5070,39 @@ function bindCandidateEvents() {
     render();
   };
 
-  var categoryFilter = document.getElementById('cand-category-filter');
-  if (categoryFilter) categoryFilter.onchange = async function(e) {
-    state.candCategoryFilter = e.target.value;
-    state.candPage = 1;
-    await loadCandidatesPage();
-    render();
-  };
+  // Multi-select job-title category chips — shared handler across the three
+  // places they appear (list filter, radius search, job-email-drop).
+  document.querySelectorAll('.cat-chip').forEach(function(btn) {
+    btn.onclick = async function() {
+      var group = btn.dataset.chipGroup;
+      var key = CAT_CHIP_STATE_KEY[group];
+      if (!key) return;
+      var arr = (state[key] || []).slice();
+      var val = btn.dataset.chipValue;
+      var idx = arr.indexOf(val);
+      if (idx === -1) arr.push(val); else arr.splice(idx, 1);
+      state[key] = arr;
+      if (group === 'list') {
+        state.candPage = 1;
+        await loadCandidatesPage();
+      }
+      render();
+    };
+  });
+
+  document.querySelectorAll('.cat-chip-clear').forEach(function(btn) {
+    btn.onclick = async function() {
+      var group = btn.dataset.chipGroup;
+      var key = CAT_CHIP_STATE_KEY[group];
+      if (!key) return;
+      state[key] = [];
+      if (group === 'list') {
+        state.candPage = 1;
+        await loadCandidatesPage();
+      }
+      render();
+    };
+  });
 
   var specialty = document.getElementById('cand-specialty-filter');
   if (specialty) specialty.onchange = async function(e) {
@@ -5286,8 +5322,7 @@ function bindCandidateEvents() {
     };
   });
 
-  var jobDropCategorySel = document.getElementById('job-drop-category');
-  if (jobDropCategorySel) jobDropCategorySel.onchange = function(e) { state.candDropCategory = e.target.value; };
+  // Job title category is now handled by the .cat-chip delegated handler above.
 
   var jobFindBtn = document.getElementById('job-drop-find-candidates');
   if (jobFindBtn) jobFindBtn.onclick = function() {
@@ -5297,7 +5332,7 @@ function bindCandidateEvents() {
     state.candDropMode = false;
     state.candRadiusMode = true;
     state.candRadiusPostcode = ex.postcode;
-    state.candRadiusCategory = state.candDropCategory || '';
+    state.candRadiusCategory = (state.candDropCategory || []).slice();
     state.candRadiusResults = null;
     state.candRadiusError = null;
     render();
@@ -5322,8 +5357,7 @@ function bindCandidateEvents() {
     radiusMilesInput.onkeydown = function(e) { if (e.key === 'Enter') runCandidateRadiusSearch(); };
   }
 
-  var radiusCategorySel = document.getElementById('cand-radius-category');
-  if (radiusCategorySel) radiusCategorySel.onchange = function(e) { state.candRadiusCategory = e.target.value; };
+  // Job title category is now handled by the .cat-chip delegated handler above.
 
   var radiusSearchBtn = document.getElementById('cand-radius-search');
   if (radiusSearchBtn) radiusSearchBtn.onclick = runCandidateRadiusSearch;
