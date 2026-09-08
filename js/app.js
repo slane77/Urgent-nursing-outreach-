@@ -335,30 +335,50 @@ function csvEscape(v) {
 //  AUTH
 // ============================================================================
 
-async function initAuth() {
-  // Check existing session
-  const { data: { session } } = await sb.auth.getSession();
-  state.user = session ? session.user : null;
-  state.authLoading = false;
+let authBootUserId = null;
+let authBootPromise = null;
 
-  // Listen for changes
-  sb.auth.onAuthStateChange((_event, session) => {
-    state.user = session ? session.user : null;
-    if (state.user) {
-      bootApp();
-    } else {
-      render();
+async function initAuth() {
+  const { data, error } = await sb.auth.getSession();
+  if (error) console.warn('Session recovery:', error.message);
+  state.user = data?.session?.user || null;
+  state.authLoading = false;
+  sb.auth.onAuthStateChange((event, session) => {
+    // Never run Supabase queries inside the auth callback. Token refresh and
+    // tab focus must not rebuild the screen or discard the consultant's work.
+    const previousId = state.user?.id;
+    if (session?.user) {
+      state.user = session.user;
+      if (session.user.id !== previousId) {
+        setTimeout(() => bootApp(), 0);
+      }
+    } else if (event === 'SIGNED_OUT') {
+      state.user = null;
+      state.userProfile = null;
+      mailshotRows = [];
+      clearTimeout(mailshotPoll);
+      authBootUserId = null;
+      setTimeout(() => render(), 0);
     }
+  });
+  window.addEventListener('offline', () => toast('Connection lost. Your queued mailshots will keep running.', 'error'));
+  window.addEventListener('online', () => {
+    toast('Connection restored');
+    refreshMailshots();
   });
 }
 
 async function signIn(email, password) {
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  return error;
+  try {
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    return error;
+  } catch (error) {
+    return { message: 'Could not connect to sign in. Check your connection and try again.' };
+  }
 }
 
 async function signOut() {
-  await sb.auth.signOut();
+  await sb.auth.signOut({ scope: 'local' });
   state.user = null;
   state.templates = [];
   state.currentRows = [];
@@ -756,12 +776,27 @@ async function previewComposeCounts() {
 // ============================================================================
 
 async function bootApp() {
-  $('#app').innerHTML = '<div style="padding:40px;text-align:center;color:#6B7280;">Loading data...</div>';
-  await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
-  await loadContactsPage();
-  render();
-  loadDashboard();
-  loadUserProfile().then(function() { render(); });
+  const userId = state.user?.id;
+  if (!userId || authBootUserId === userId) return authBootPromise;
+  authBootUserId = userId;
+  authBootPromise = (async () => {
+    $('#app').innerHTML = '<div class="empty">Loading your workspace…</div>';
+    try {
+      await loadUserProfile();
+      await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
+      await loadContactsPage();
+      if (state.user?.id !== userId) return;
+      render();
+      loadDashboard();
+      refreshMailshots();
+    } catch (error) {
+      authBootUserId = null;
+      if (state.user?.id !== userId) return;
+      render();
+      toast('Your session is still active. Could not load some data; refresh to retry.', 'error');
+    }
+  })();
+  return authBootPromise;
 }
 
 function render() {
@@ -798,6 +833,7 @@ function renderAppShell() {
       <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import">⬇ Import</div>
       <div class="tab ${state.view === 'responses' ? 'active' : ''}" data-view="responses">&#x1F4EC; Responses</div>
     </div>
+    <div id="mailshot-panel">${renderMailshotPanel()}</div>
     <div class="main" id="main">
       ${state.view === 'dashboard' ? renderDashboard() :
         state.view === 'database' ? renderDatabase() :
@@ -1089,102 +1125,18 @@ function updateCandSendProgressText() {
   const p = state.candSendProgress;
   if (!el || !p) return;
   el.innerHTML = 'Batch ' + p.batch + ' of ' + p.batches + ' &middot; ' + p.done.toLocaleString() + ' / ' + p.total.toLocaleString() + ' processed' +
-    (p.waitSeconds ? ' &middot; next batch in ' + Math.floor(p.waitSeconds / 60) + ':' + String(p.waitSeconds % 60).padStart(2, '0') + ' (keep this tab open)' : '');
+    (p.waitSeconds ? ' &middot; next batch in ' + Math.floor(p.waitSeconds / 60) + ':' + String(p.waitSeconds % 60).padStart(2, '0') + ' (sending continues in the background)' : '');
 }
 
 async function sendFilteredViaBrevo() {
-  const template = state.templates.find(t => t.id === state.composeTemplateId);
-  if (!template) return toast('Select a template first');
-
-  // Pull EVERY contact matching the current filters (not just one batch).
-  const all = await buildAllComposeContactsFromDb();
-  if (!all.length) {
-    state.composeBrevoResult = { error: 'No contacts match your current filters' };
-    state.composeBrevoSending = false;
-    state.composeBrevoProgress = null;
-    render();
-    return;
-  }
-
-  const CHUNK_SIZE = 250;
-  const ids = all.map(c => c.id);
-  const totalToSend = ids.length;
-  const numBatches = Math.ceil(totalToSend / CHUNK_SIZE);
-
-  {
-    const estMins = numBatches > 1 ? (numBatches - 1) * 5 : 0;
-    const _isAhp = (state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland');
-    const _fromLine = _isAhp ? 'your Day Webster team address (per specialty)' : 'you \u2014 ' + (state.senderEmail || (state.user && state.user.email) || 'your signed-in address');
-    let _msg = 'Send "' + (template.name || 'this template') + '" to ' + totalToSend + ' contact' + (totalToSend === 1 ? '' : 's') + '.\n\nSource: ' + composeSourceLabel() + '\nFrom: ' + _fromLine;
-    if (numBatches > 1) _msg += '\n\n' + numBatches + ' batches of up to ' + CHUNK_SIZE + ', 5-min gaps (~' + estMins + ' min). Keep this tab open until it finishes.';
-    _msg += '\n\nContinue?';
-    if (!confirm(_msg)) return;
-  }
-
-  state.composeBrevoSending = true;
-  state.composeBrevoResult = null;
-  state.composeBrevoProgress = { done: 0, total: totalToSend, batch: 0, batches: numBatches };
-  render();
-
-  let sent = 0, failed = 0, total = 0;
+  const template=state.templates.find(t=>t.id===state.composeTemplateId);
+  if(!template) return toast('Select a template first');
   try {
-    const { data: { session } } = await sb.auth.getSession();
-    const token = session?.access_token;
-    if (!token) throw new Error('Not authenticated');
-
-    const stamp = 'batch_' + Date.now();
-    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-      const chunk = ids.slice(i, i + CHUNK_SIZE);
-      const batchNo = Math.floor(i / CHUNK_SIZE) + 1;
-      state.composeBrevoProgress.batch = batchNo;
-      state.composeBrevoProgress.waitSeconds = 0;
-      render();
-
-      const sess = await sb.auth.getSession();
-      const token = sess.data.session?.access_token;
-
-      let d = {};
-      try {
-        const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ templateId: template.id, contactIds: chunk, batchId: stamp + '_' + batchNo, ...composeSenderFields() }),
-        });
-        d = await res.json();
-      } catch (err) {
-        d = { error: err.message };
-      }
-
-      if (d && typeof d.sent === 'number') {
-        sent += d.sent; failed += (d.failed || 0); total += (d.total || chunk.length);
-      } else {
-        failed += chunk.length; total += chunk.length;
-      }
-
-      state.composeBrevoProgress.done = Math.min(i + CHUNK_SIZE, totalToSend);
-      render();
-
-      if (i + CHUNK_SIZE < ids.length) {
-        for (let secs = 300; secs > 0; secs--) {
-          state.composeBrevoProgress.waitSeconds = secs;
-          updateComposeProgressText();
-          await new Promise(r => setTimeout(r, 1000));
-        }
-        state.composeBrevoProgress.waitSeconds = 0;
-        render();
-      }
-    }
-
-    state.composeBrevoResult = { sent, failed, total };
-    await Promise.all([loadStatusCounts(), loadSourceCounts(), loadContactsPage()]);
-    toast(sent + ' emails sent via Brevo \u2713');
-  } catch (e) {
-    state.composeBrevoResult = { error: e.message, sent, failed, total };
-  }
-
-  state.composeBrevoSending = false;
-  state.composeBrevoProgress = null;
-  render();
+    const contacts=await buildAllComposeContactsFromDb();
+    if(!contacts.length) return toast('No contacts match your filters');
+    if(!confirm('Queue "'+template.name+'" for '+contacts.length+' contacts?\nSource: '+composeSourceLabel()+'\nSending continues after you close the browser.')) return;
+    await queueMailshot('contacts',template,contacts.map(c=>c.id),composeSenderFields());
+  } catch(error) {toast(error.message,'error');}
 }
 
 async function buildAllComposeContactsFromDb() {
@@ -1200,7 +1152,7 @@ async function buildAllComposeContactsFromDb() {
     if (state.composeUncontactedOnly) query = query.is('last_emailed_at', null);
     query = query.order('updated_at', { ascending: true }).range(from, from + PAGE - 1);
     const { data, error } = await query;
-    if (error) { toast('Failed to load contacts for compose: ' + error.message, 'error'); break; }
+    if (error) throw new Error('Could not load the complete contact list: ' + error.message);
     if (!data || !data.length) break;
     out.push(...data);
     if (data.length < PAGE) break;
@@ -1209,48 +1161,11 @@ async function buildAllComposeContactsFromDb() {
 }
 
 async function sendSelectedViaBrevo() {
-  const ids = state.composeSelectedIds;
-  if (!ids?.length) return;
-  const template = state.templates.find(t => t.id === state.composeTemplateId);
-  if (!template) return toast('Select a template first');
-
-  if (!confirm('Send "' + (template.name || 'this template') + '" to ' + ids.length + ' selected contact' + (ids.length === 1 ? '' : 's') + '?\nSource: ' + composeSourceLabel())) return;
-
-  state.composeBrevoSending = true;
-  state.composeBrevoResult = null;
-  render();
-
-  try {
-    const { data: { session } } = await sb.auth.getSession();
-    const token = session?.access_token;
-    if (!token) throw new Error('Not authenticated — please sign in again');
-
-    const batchId = 'batch_' + Date.now();
-    const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + token,
-      },
-      body: JSON.stringify({
-        templateId: template.id,
-        contactIds:  ids,
-        batchId,
-        ...composeSenderFields(),
-      }),
-    });
-
-    state.composeBrevoResult = await res.json();
-    if (state.composeBrevoResult.sent > 0) {
-      await Promise.all([loadStatusCounts(), loadSourceCounts(), loadContactsPage()]);
-      toast(state.composeBrevoResult.sent + ' emails sent via Brevo ✓');
-    }
-  } catch(e) {
-    state.composeBrevoResult = { error: e.message };
-  }
-
-  state.composeBrevoSending = false;
-  render();
+  const ids=state.composeSelectedIds;
+  const template=state.templates.find(t=>t.id===state.composeTemplateId);
+  if(!ids?.length||!template) return toast('Select a template and recipients');
+  if(!confirm('Queue "'+template.name+'" for '+ids.length+' selected contacts?\nSending continues after you close the browser.')) return;
+  await queueMailshot('contacts',template,ids,composeSenderFields());
 }
 
 function renderCompose() {
@@ -1374,7 +1289,7 @@ function renderCompose() {
 
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
         <button class="btn primary" id="brevo-filter-send-btn" ${!template || !previewMatch ? 'disabled' : ''}>
-          ${state.composeBrevoSending ? '<span class="spinner-inline"></span> Sending&hellip;' : icon('mail') + '&nbsp;Send all ' + previewMatch + ' Emails via Brevo' + (previewMatch > 250 ? ' (' + Math.ceil(previewMatch/250) + ' batches)' : '')}
+          ${state.composeBrevoSending ? '<span class="spinner-inline"></span> Sending&hellip;' : icon('mail') + '&nbsp;Send all ' + previewMatch + ' Emails via Brevo' }
         </button>
         ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
         ${!previewMatch ? '<span class="muted" style="font-size:12px;">No contacts match — adjust filters</span>' : ''}
@@ -3946,6 +3861,70 @@ async function exportAllAsCsv() {
   toast(`Exported ${all.length} contacts`);
 }
 
+let mailshotRows = [];
+let mailshotPoll = null;
+let mailshotSubmitting = false;
+let pendingMailshotRequest = null;
+
+async function queueMailshot(audience, template, ids, options) {
+  if(mailshotSubmitting) return;
+  const fingerprint=JSON.stringify([state.user.id,audience,template.id,ids,options]);
+  if(!pendingMailshotRequest || pendingMailshotRequest.fingerprint!==fingerprint) {
+    pendingMailshotRequest={fingerprint,id:crypto.randomUUID()};
+  }
+  mailshotSubmitting=true;
+  try {
+    const {data,error}=await sb.rpc('queue_outreach_mailshot',{
+      p_id:pendingMailshotRequest.id,p_audience:audience,p_template:template.id,
+      p_recipients:ids,p_options:options||{}
+    });
+    if(error) throw error;
+    pendingMailshotRequest=null;
+    toast('Mailshot queued. You can close the browser.');
+    await refreshMailshots();
+    return data;
+  } catch(error) {
+    toast('Could not confirm the queue request. Retry this same selection to check it safely: '+error.message,'error');
+  } finally {mailshotSubmitting=false;}
+}
+
+async function refreshMailshots() {
+  clearTimeout(mailshotPoll);
+  if(!state.user) return;
+  const userId=state.user.id;
+  try {
+    const {data,error}=await sb.rpc('outreach_mailshot_status');
+    if(error) throw error;
+    if(state.user?.id!==userId) return;
+    mailshotRows=data||[];
+    const host=document.getElementById('mailshot-panel');
+    if(host) host.innerHTML=renderMailshotPanel();
+  } catch(error) {
+    const host=document.getElementById('mailshot-panel');
+    if(host) host.innerHTML='<div class="queue-note">Mailshot progress is temporarily unavailable. Queued sending continues.</div>';
+  }
+  if(state.user?.id===userId) mailshotPoll=setTimeout(refreshMailshots,15000);
+}
+
+function renderMailshotPanel() {
+  if(!mailshotRows.length) return '';
+  return '<details class="mailshot-tray" open><summary>Mailshot activity <span>Continues when you close the browser</span></summary>'+mailshotRows.map(m=>{
+    const remaining=Number(m.queued)+Number(m.processing);
+    const completed=Number(m.total)-remaining;
+    return '<div class="mailshot-row"><div><strong>'+esc(m.template_name)+'</strong><div class="muted">'+esc(m.audience)+' · '+new Date(m.created_at).toLocaleString('en-GB')+'</div></div><div><progress max="'+m.total+'" value="'+completed+'"></progress><div class="muted">'+m.sent+' sent · '+remaining+' waiting'+(Number(m.failed)?' · '+m.failed+' failed':'')+(Number(m.skipped)?' · '+m.skipped+' skipped':'')+(Number(m.uncertain)?' · '+m.uncertain+' need delivery review':'')+(Number(m.cancelled)?' · '+m.cancelled+' cancelled':'')+'</div></div>'+(Number(m.queued)?'<button class="btn small" data-cancel-mailshot="'+m.id+'">Cancel waiting</button>':'<span class="muted">'+(Number(m.uncertain)?'Review needed':'Finished')+'</span>')+'</div>';
+  }).join('')+'</details>';
+}
+
+document.addEventListener('click',async e=>{
+  const button=e.target.closest('[data-cancel-mailshot]');
+  if(!button) return;
+  if(!confirm('Cancel the emails still waiting? Emails already being processed may still be sent.')) return;
+  button.disabled=true;
+  const {error}=await sb.rpc('cancel_outreach_mailshot',{p_id:button.dataset.cancelMailshot});
+  if(error) toast(error.message,'error');
+  await refreshMailshots();
+});
+
 // ============================================================================
 //  INIT
 // ============================================================================
@@ -4870,7 +4849,7 @@ function renderCandidateSend() {
       <div class="brevo-panel-header">
         <div>
           <h3 style="margin:0 0 4px;">✉ Email Candidates — ${n.toLocaleString()} recipients</h3>
-          <p class="muted" style="margin:0;font-size:12px;"><strong>${esc(state.candSendSourceLabel || candFilterSummary())}</strong> — with a valid email. Do Not Use &amp; unsubscribed are excluded. Sends from <strong>${esc(state.senderEmail || (state.user && state.user.email) || 'your address')}</strong> via Brevo in batches of 250 with 5-minute gaps.</p>
+          <p class="muted" style="margin:0;font-size:12px;"><strong>${esc(state.candSendSourceLabel || candFilterSummary())}</strong> — with a valid email. Do Not Use &amp; unsubscribed are excluded. Sends from <strong>${esc(state.senderEmail || (state.user && state.user.email) || 'your address')}</strong> via Brevo. Once queued, sending continues after you close the browser.</p>
         </div>
         <button class="btn small" id="cand-send-back" ${state.candSending ? 'disabled' : ''}>← Back to Candidates</button>
       </div>
@@ -4912,7 +4891,7 @@ function renderCandidateSend() {
           <div class="progress-bar"><div class="fill" style="width:${prog.total ? (prog.done / prog.total * 100).toFixed(1) : 0}%;"></div></div>
           <p class="muted" id="cand-send-progress-text" style="margin-top:6px;font-size:12px;">
             Batch ${prog.batch} of ${prog.batches} · ${prog.done.toLocaleString()} / ${prog.total.toLocaleString()} processed
-            ${prog.waitSeconds ? ' · next batch in ' + Math.floor(prog.waitSeconds / 60) + ':' + String(prog.waitSeconds % 60).padStart(2, '0') + ' (keep this tab open)' : ''}
+            ${prog.waitSeconds ? ' · next batch in ' + Math.floor(prog.waitSeconds / 60) + ':' + String(prog.waitSeconds % 60).padStart(2, '0') + ' (sending continues in the background)' : ''}
           </p>
         </div>` : ''}
 
@@ -4948,82 +4927,11 @@ async function buildCandidateSendIds() {
 }
 
 async function startCandidateSend() {
-  var ids = state.candSendIds || [];
-  var template = state.templates.find(function(t) { return t.id === state.candTemplateId; });
-  if (!template) return toast('Select a template first');
-  if (!ids.length) return toast('No candidates to send to');
-
-  var CHUNK_SIZE = 250;
-  var numBatches = Math.ceil(ids.length / CHUNK_SIZE);
-  var estMins = numBatches > 1 ? (numBatches - 1) * 5 : 0;
-  var msg = 'Send "' + (template.name || 'this template') + '" to ' + ids.length + ' candidate' + (ids.length === 1 ? '' : 's') + '.\n\nFrom: ' + (state.senderEmail || (state.user && state.user.email) || 'your signed-in address');
-  if (state.candSendJobDetails) msg += '\n\nJob details will be included: ' + [state.candSendJobDetails.job_title, state.candSendJobDetails.ward_or_department, state.candSendJobDetails.days, state.candSendJobDetails.hours].filter(Boolean).join(' · ');
-  if (numBatches > 1) msg += '\n\n' + numBatches + ' batches of up to ' + CHUNK_SIZE + ', 5-min gaps (~' + estMins + ' min). Keep this tab open until it finishes.';
-  msg += '\n\nContinue?';
-  if (!confirm(msg)) return;
-
-  state.candSending = true;
-  state.candSendResult = null;
-  state.candSendProgress = { done: 0, total: ids.length, batch: 0, batches: numBatches, waitSeconds: 0 };
-  render();
-
-  var sent = 0, failed = 0, total = 0;
-  try {
-    var stamp = 'cand_batch_' + Date.now();
-    for (var i = 0; i < ids.length; i += CHUNK_SIZE) {
-      var chunk = ids.slice(i, i + CHUNK_SIZE);
-      var batchNo = Math.floor(i / CHUNK_SIZE) + 1;
-      state.candSendProgress.batch = batchNo;
-      state.candSendProgress.waitSeconds = 0;
-      render();
-
-      var sess = await sb.auth.getSession();
-      var token = sess.data.session && sess.data.session.access_token;
-      if (!token) throw new Error('Not authenticated — please sign in again');
-
-      var d = {};
-      try {
-        var res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/send-mailshot', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ audience: 'candidates', templateId: template.id, candidateIds: chunk, batchId: stamp + '_' + batchNo, jobDetails: state.candSendJobDetails || null }),
-        });
-        d = await res.json();
-      } catch (err) {
-        d = { error: err.message };
-      }
-
-      if (d && typeof d.sent === 'number') {
-        sent += d.sent; failed += (d.failed || 0); total += (d.total || chunk.length);
-      } else {
-        failed += chunk.length; total += chunk.length;
-        if (d && d.error) { state.candSendResult = { error: d.error, sent: sent, failed: failed, total: total }; break; }
-      }
-
-      state.candSendProgress.done = Math.min(i + CHUNK_SIZE, ids.length);
-      render();
-
-      if (i + CHUNK_SIZE < ids.length) {
-        for (var secs = 300; secs > 0; secs--) {
-          state.candSendProgress.waitSeconds = secs;
-          updateCandSendProgressText();
-          await new Promise(function(r) { setTimeout(r, 1000); });
-        }
-        state.candSendProgress.waitSeconds = 0;
-        render();
-      }
-    }
-
-    if (!state.candSendResult) state.candSendResult = { sent: sent, failed: failed, total: total };
-    if (sent > 0) toast(sent + ' candidate emails sent via Brevo ✓');
-    await loadCandidatesPage();
-  } catch (e) {
-    state.candSendResult = { error: e.message, sent: sent, failed: failed, total: total };
-  }
-
-  state.candSending = false;
-  state.candSendProgress = null;
-  render();
+  const ids=state.candSendIds||[];
+  const template=state.templates.find(t=>t.id===state.candTemplateId);
+  if(!template||!ids.length) return toast('Select a template and candidates');
+  if(!confirm('Queue "'+template.name+'" for '+ids.length+' candidates?\nFrom: '+(state.senderEmail||state.user.email)+'\nSending continues after you close the browser.')) return;
+  await queueMailshot('candidates',template,ids,{jobDetails:state.candSendJobDetails||null});
 }
 
 async function updateCandidate(id, patch) {
