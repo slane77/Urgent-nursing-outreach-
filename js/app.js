@@ -2305,15 +2305,19 @@ function renderImport() {
 // ============================================================================
 
 const CM_API = 'https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/contact-manager';
-const CM_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU';
 
 async function callCM(action, extra = {}) {
+  const { data, error } = await sb.auth.getSession();
+  const token = data?.session?.access_token;
+  if (error || !token) throw new Error('Please sign in again to continue.');
   const res = await fetch(CM_API, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CM_ANON },
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify({ action, ...extra }),
   });
-  return res.json();
+  const result = await res.json();
+  if (!res.ok || result.error) throw new Error(result.error || 'Unable to load the dashboard. Please try again.');
+  return result;
 }
 
 async function loadDashboard() {
@@ -4935,7 +4939,7 @@ async function buildCandidateSendIds() {
     q = candApplyFilters(q);
     q = q.order('id', { ascending: true }).range(f, f + PAGE - 1);
     var r = await q;
-    if (r.error) { toast('Failed to load candidates: ' + r.error.message, 'error'); break; }
+    if (r.error) throw new Error('Could not load the complete recipient list: ' + r.error.message);
     if (!r.data || !r.data.length) break;
     r.data.forEach(function(c) { if (c.email && c.email.indexOf('@') > -1) ids.push(c.id); });
     if (r.data.length < PAGE) break;
@@ -5394,7 +5398,16 @@ function bindCandidateEvents() {
   if (emailBtn) emailBtn.onclick = async function() {
     emailBtn.disabled = true;
     emailBtn.textContent = 'Loading…';
-    var ids = await buildCandidateSendIds();
+    var ids;
+    try {
+      ids = await buildCandidateSendIds();
+    } catch (error) {
+      state.candSendIds = null;
+      state.candSendMode = false;
+      toast(error.message, 'error');
+      render();
+      return;
+    }
     if (!ids.length) { toast('No emailable candidates match your filters', 'error'); render(); return; }
     state.candSendIds = ids;
     state.candSendMode = true;
