@@ -1,15 +1,29 @@
 {
   "rewrites": [
     { "source": "/", "has": [{ "type": "host", "value": "join.daywebster.com" }], "destination": "/intake.html" },
+
+    { "source": "/", "destination": "/dashboard.html" },
+    { "source": "/portal-home", "destination": "/dashboard.html" },
+    { "source": "/dashboard", "destination": "/dashboard.html" },
+    { "source": "/compliance", "destination": "/compliance.html" },
+    { "source": "/candidates", "destination": "/candidates.html" },
+    { "source": "/vacancies", "destination": "/vacancies.html" },
+    { "source": "/import", "destination": "/candidate-import.html" },
+    { "source": "/admin", "destination": "/admin.html" },
+    { "source": "/training", "destination": "/training-admin.html" },
+    { "source": "/verify", "destination": "/verify-cert.html" },
+    { "source": "/learn", "destination": "/training.html" },
+
+    { "source": "/outreach", "destination": "/index.html" },
     { "source": "/register", "destination": "/intake.html" },
     { "source": "/join", "destination": "/intake.html" },
     { "source": "/chat", "destination": "/chat.html" },
     { "source": "/portal", "destination": "/portal.html" },
+    { "source": "/documents", "destination": "/portal.html" },
     { "source": "/audit-pack", "destination": "/audit-pack.html" },
     { "source": "/guide", "destination": "/guide.html" },
     { "source": "/rules", "destination": "/rules.html" },
     { "source": "/golive", "destination": "/golive.html" },
-    { "source": "/documents", "destination": "/portal.html" },
     { "source": "/poster", "destination": "/register-poster.html" },
     { "source": "/qr", "destination": "/qr.html" }
   ]
