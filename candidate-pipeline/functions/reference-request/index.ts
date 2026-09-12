@@ -14,25 +14,17 @@
 
 import { createClient } from "npm:@supabase/supabase-js";
 import { sendBrevoEmail, emailHtml, newToken, replyToFor } from "../_shared/email.ts";
+import { verifyStaff, unauthorized, CORS } from "../_shared/auth.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   { db: { schema: "candidate" } },
 );
-const ALLOWED = ["@daywebster.com","@daywebstergroup.com","@homecare-providers.com","@homecareproviders.co.uk"];
-const CORS = { "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type", "Content-Type":"application/json" };
-
-function authorized(req: Request): boolean {
-  const t = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").split(".")[1];
-  if (!t) return false;
-  try { const e = (JSON.parse(atob(t.replace(/-/g,"+").replace(/_/g,"/"))).email ?? "").toLowerCase(); return ALLOWED.some(d=>e.endsWith(d)); }
-  catch { return false; }
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (!authorized(req)) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: CORS });
+  if (!(await verifyStaff(req))) return unauthorized();
   try {
     const { candidate_id, referee_email, referee_name, requirement_code = "references_3yr" } = await req.json();
     if (!candidate_id || !referee_email) return new Response(JSON.stringify({ error: "candidate_id and referee_email required" }), { status: 400, headers: CORS });

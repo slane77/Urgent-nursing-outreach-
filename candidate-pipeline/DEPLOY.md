@@ -58,12 +58,21 @@ In the dev project: Edge Functions → Secrets (or `supabase secrets set`). Set:
 | `CANDIDATE_SENDER_NAME` | `Day Webster` |
 | `REPLY_DOMAIN` | `candidates.daywebster.com` |
 | `REPLY_LOCAL` | `compliance` |
-| `INBOUND_SECRET` | any random string |
-| `CRON_SECRET` | any random string |
+| `INBOUND_SECRET` | any random string — **required**; `inbound-email` now fails closed and returns 403 if this is unset |
+| `CRON_SECRET` | any random string — **required**; `early-warnings` now fails closed and returns 403 if this is unset |
+| `UNSUBSCRIBE_SECRET` | any random string — **required for outreach**; signs one-click unsubscribe links. Without it, marketing sends carry no working opt-out and the `unsubscribe` function rejects every request |
 | `PUBLIC_SITE_URL` | where `intake.html` is hosted (see step 6) |
 | `ORG_NAME` / `ORG_URL` | `Day Webster` / `https://www.daywebster.com` |
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically — don't set them.
+Staff functions verify the access-token **signature** via the project JWKS at
+`<SUPABASE_URL>/auth/v1/.well-known/jwks.json` (no secret needed). For legacy
+projects that sign tokens with the shared HS256 secret, also set
+`SUPABASE_JWT_SECRET` (Project Settings → API → JWT secret).
+
+> **Migration:** apply `candidate-pipeline/sql/20_consent_suppression.sql` (after 10–19)
+> before deploying `outreach-campaign`/`unsubscribe` — it adds the latest-consent
+> view, the `email_suppression` list, and the `campaign_targets()` function they rely on.
 
 ---
 
@@ -93,6 +102,11 @@ with these JWT settings:
 | `inbound-email` | **false** | email provider (`?secret=`) |
 | `early-warnings` | **false** | cron (`?secret=`) |
 | `jobs` | **false** | public (Google) |
+| `unsubscribe` | **false** | recipients (one-click opt-out; HMAC-signed) |
+
+> Note: the staff functions no longer trust `verify_jwt` alone — each verifies the
+> token signature and the sender's company domain in-code, so a mis-set flag can't
+> silently expose them. Keep `verify_jwt=true` on them anyway as defence in depth.
 
 ---
 
