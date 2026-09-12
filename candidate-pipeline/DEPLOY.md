@@ -60,6 +60,7 @@ In the dev project: Edge Functions → Secrets (or `supabase secrets set`). Set:
 | `REPLY_LOCAL` | `compliance` |
 | `INBOUND_SECRET` | any random string |
 | `CRON_SECRET` | any random string |
+| `WORK_READY_TOKEN` | any random string — shared bearer the external booking system sends to the `work-ready` gate; the function returns 401 until this is set |
 | `PUBLIC_SITE_URL` | where `intake.html` is hosted (see step 6) |
 | `ORG_NAME` / `ORG_URL` | `Day Webster` / `https://www.daywebster.com` |
 
@@ -93,6 +94,21 @@ with these JWT settings:
 | `inbound-email` | **false** | email provider (`?secret=`) |
 | `early-warnings` | **false** | cron (`?secret=`) |
 | `jobs` | **false** | public (Google) |
+| `work-ready` | **false** | external booking system (Bearer `WORK_READY_TOKEN`) — compliance gate; returns 401 until the token is set |
+
+> **Compliance Phase 0 migrations** — apply `sql/22_compliance_sets.sql`,
+> `sql/23_work_ready_gate.sql`, then `sql/24_seed_nhs_rn_set.sql` (after 10–21).
+> They add versioned requirement sets, the `is_compliance` staff flag, the
+> append-only `verification_events` audit table, and the computed work-ready
+> gate (`is_work_ready()` / `work_ready_status()`), plus a seeded NHS Registered
+> Nurse set. The external booking system calls the `work-ready` function to gate
+> placement (fail-closed: unreachable / red ⇒ do not place).
+>
+> Note on set versions: candidates are pinned to the set *version* they were
+> assigned. Publishing a new active version (e.g. `NHS_RN` v2) does not move v1
+> candidates automatically — reassign them to the new version so the gate
+> recomputes; until then the booking system (which resolves `set_code` to the
+> latest active version) reads them as red (fail-closed, not fail-open).
 
 ---
 
