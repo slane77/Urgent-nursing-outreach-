@@ -9,8 +9,8 @@ Contact proposals retain a snapshot of the original values. Accepting a stale pr
 ## Deployment status and order
 
 1. `sql/complex_care.sql` has been applied to the existing Supabase project as `complex_care_candidate_responses`. It adds three RLS-protected tables and narrowly granted functions; it does not backfill candidate data.
-2. Deploy `supabase/functions/complex-care-response/index.ts` and `validation.mjs` to `complex-care-response`. The endpoint uses custom invitation-token authentication and therefore requires gateway `verify_jwt=false`. The service-role key remains server-side and the submission RPC is service-role-only. **Deployment was blocked by automatic approval review pending explicit approval for this exact configuration. The endpoint is not live.**
-3. Only after endpoint deployment and live synthetic end-to-end checks, publish the frontend change. The branch is prepared for review; do not merge a page whose endpoint is unavailable.
+2. The user explicitly approved publication with invitation-token authentication on 29 September 2026. `complex-care-response` version 1 is deployed with gateway `verify_jwt=false`; the 256-bit invitation is the custom credential. The service-role key remains server-side and the submission RPC is service-role-only.
+3. The real form was tested against the deployed endpoint using a temporary synthetic candidate. Skills saved to the matching record; a proposed email entered pending review; existing email, do-not-use status and unsubscribe flag remained unchanged. Publish the frontend through the existing main-branch deployment and verify production routing.
 
 The form links to the published Day Webster privacy policy. No unconfirmed pay-rate claim is included.
 
@@ -18,7 +18,7 @@ The form links to the published Day Webster privacy policy. No unconfirmed pay-r
 
 Run `node --test tests/*.test.cjs`. Run `tests/complex-care.sql` through the SQL connection: it uses synthetic records in a transaction and rolls back. Assertions cover record matching, retry idempotency, all/any skills, multiple locations, proposed-versus-current location, staff approval, unchanged status, suppression blocking, and unauthorised access.
 
-Run `node tests/build-complex-care-preview.cjs` to generate local-only mock pages in `tests/preview`. These use fictional examples and make no API calls. Browser preview is UI validation, not proof of live end-to-end operation.
+Run `node tests/build-complex-care-preview.cjs` to generate local-only mock pages in `tests/preview`. These use fictional examples and make no API calls. The real browser form was also submitted to the deployed endpoint and the resulting database record verified. No campaign emails were sent. A signed-in consultant browser check remains dependent on an available consultant session.
 
 ## Rollback
 
