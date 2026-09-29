@@ -4072,7 +4072,7 @@ function candApplyFilters(q) {
 async function loadCandidatesPage() {
   state.candLoading = true;
   var from = (state.candPage - 1) * state.pageSize;
-  var q = sb.from('candidates').select('*', { count: 'exact' });
+  var q = sb.from('candidates').select('*,candidate_complex_care(experience)', { count: 'exact' });
   q = candApplyFilters(q);
   q = q.order('last_name', { ascending: true, nullsFirst: false }).order('first_name', { ascending: true }).range(from, from + state.pageSize - 1);
   var res = await q;
@@ -4753,6 +4753,7 @@ function renderCandidates() {
       ${state.candSectors.length > 1 ? `<select class="select" id="cand-sector-filter" title="Candidate list">
         ${state.candSectors.map(function(s) { return '<option value="' + esc(s) + '" ' + (state.candSector === s ? 'selected' : '') + '>' + esc(candSectorLabel(s)) + '</option>'; }).join('')}
       </select>` : ''}
+      <a class="btn small" href="complex-care.html">Complex Care · skills search</a>
       <button class="btn small" id="cand-radius-open">📍 Job radius match</button>
       <button class="btn small" id="cand-drop-open">📧 Job email</button>
       <button class="btn small" id="cand-add-open">➕ Add candidate</button>
@@ -4809,7 +4810,7 @@ function renderCandidates() {
             var name = esc([c.first_name, c.last_name].filter(Boolean).join(' ') || '—');
             var lastEm = c.last_emailed_at ? esc(String(c.last_emailed_at).slice(0, 10)) : '—';
             return '<tr>' +
-              '<td><strong>' + name + '</strong></td>' +
+              '<td><strong>' + name + '</strong>' + (['current','previous'].indexOf(c.candidate_complex_care?.experience) >= 0 ? '<br><a href="complex-care.html" style="color:#135d32;font-size:12px;">Complex care experience (reported)</a>' : '') + '</td>' +
               '<td class="hide-sm ellipsis" title="' + esc([c.job_title, c.job_category, c.specialty].filter(Boolean).join(' — ')) + '">' + esc(c.job_title || c.specialty || '—') + (c.job_category ? ' <span class="muted" style="font-size:11px;">(' + esc(candCategoryLabel(c.job_category)) + ')</span>' : '') + '</td>' +
               '<td class="ellipsis" title="' + esc(c.email || '') + '">' + (c.email ? esc(c.email) : '<span class="muted">no email</span>') + '</td>' +
               '<td class="hide-sm">' + esc(c.phone || '—') + '</td>' +

@@ -1,0 +1,11 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {pathToFileURL}=require('node:url');
+const path=require('node:path');
+const validation=import(pathToFileURL(path.join(__dirname,'../supabase/functions/complex-care-response/validation.mjs')));
+const sample=()=>({token:'a'.repeat(64),action:'submit',answers:{interest:'now',experience:'current',population:'adults',skills:['tracheostomy','invasive_ventilation'],shifts:['nights'],availability:'now',preferred_locations:'Essex',travel_miles:20,contact_preference:'email',notes:''},contact:{email:' Test@Example.invalid ',postcode:'cm11aa'}});
+test('response validates, preserves skills and normalises proposed contact details',async()=>{const {validate}=await validation;const r=validate(sample());assert.equal(r.contact.email,'test@example.invalid');assert.equal(r.contact.postcode,'CM1 1AA');assert.deepEqual(r.answers.skills,['tracheostomy','invasive_ventilation']);});
+test('not interested needs no experience answers and requests no follow-up',async()=>{const {validate}=await validation;const b=sample();b.answers={interest:'not_interested'};const r=validate(b);assert.equal(r.answers.experience,'unknown');assert.equal(r.answers.contact_preference,'none');assert.deepEqual(r.answers.skills,[]);});
+test('rejects malformed tokens, enum values and contact fields',async()=>{const {validate}=await validation;for(const change of [b=>b.token='candidate-id',b=>b.answers.skills=['verified'],b=>b.answers.travel_miles=-1,b=>b.contact={unsubscribed:false},b=>b.contact.email='bad',b=>b.contact.postcode='nope',b=>b.answers.contact_preference='marketing_opt_in',b=>b.answers.notes='x'.repeat(1001)]){const b=sample();change(b);assert.throws(()=>validate(b));}});
+test('check requests return no personal information',async()=>{const {validate}=await validation;assert.deepEqual(validate({token:'b'.repeat(64),action:'check',candidate_id:'ignored'}),{token:'b'.repeat(64),action:'check'});});
+test('unrecognised candidate and sending attributes are never copied into response',async()=>{const {validate}=await validation;const b=sample();b.answers.candidate_id='other';b.answers.unsubscribed=false;b.answers.status='available';const r=validate(b);assert.equal(r.answers.candidate_id,undefined);assert.equal(r.answers.status,undefined);assert.equal(r.answers.unsubscribed,undefined);});
