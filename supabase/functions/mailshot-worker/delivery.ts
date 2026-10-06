@@ -1,4 +1,6 @@
-// send-mailshot v26 — adds job-detail tokens ({{JobDays}}, {{JobHours}}, {{JobRate}},
+// send-mailshot v27 — FOI campaigns (source 'foi') send from the dedicated FOI
+// mailbox held in sender_addresses (source='foi'), so trust replies land there.
+// v26 — adds job-detail tokens ({{JobDays}}, {{JobHours}}, {{JobRate}},
 // {{JobWard}}, {{JobPostcode}}, {{JobTown}}, {{JobStartDate}}, {{JobNotes}},
 // {{JobSummary}}) sourced from an optional `jobDetails` object in the request body.
 // These come from the job-email drag-and-drop feature (extract-job-email function)
@@ -334,6 +336,7 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
       if (AHP_SPECIALTIES.has(dept)) return { source: 'ahp', sub: dept };
       if (dept === 'Advanced Nurse Practitioner' || /Source:\s*ANP/i.test(notes)) return { source: 'anp', sub: null };
       if (dept === 'Emergency Nurse Practitioner' || /Source:\s*ENP/i.test(notes)) return { source: 'enp', sub: null };
+      if (/Source:\s*FOI/i.test(notes)) return { source: 'foi', sub: null };
       if (/Source:\s*GP Surgery/i.test(notes)) return { source: 'gp_surgery', sub: null };
       return { source: null, sub: null };
     };
@@ -341,6 +344,7 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
     // ── Resolve the "from" for this send ──
     // AHP / NHS Scotland campaigns keep their per-specialty Day Webster team
     // address (a single specialty if chosen, else per-contact derivation below).
+    // FOI campaigns send from the FOI mailbox in sender_addresses.
     // EVERY other campaign — GP, agency, HSE, care home, ANP/ENP, all —
     // sends from the PERSON who is signed in and sending (their own address),
     // never a team address and never another user's.
@@ -353,6 +357,10 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
     } else if (campaignSource && AHP_CAMPAIGN.has(campaignSource)) {
       if (campaignSub) batchFrom = lookupSender(campaignSource, campaignSub);
       // no specialty chosen → batchFrom stays null → per-contact team address below
+    } else if (campaignSource === 'foi') {
+      // FOI requests go out from the dedicated FOI mailbox (sender_addresses source='foi')
+      // so trust replies land there, never in the sender's personal inbox.
+      batchFrom = lookupSender('foi', null) || { email: fallbackEmail, name: fallbackName };
     } else if (campaignSource) {
       // Non-AHP campaign → the signed-in sender, one address for the whole batch.
       batchFrom = { email: fallbackEmail, name: fallbackName };
