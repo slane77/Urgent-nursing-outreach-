@@ -194,6 +194,7 @@ const MODAL_SOURCE_TAGS = {
   camhs:           'Source: CAMHS',
   anp:             'Source: ANP',
   enp:             'Source: ENP',
+  foi:             'Source: FOI',
 };
 const MODAL_SOURCE_OPTIONS = [
   { k: 'gp_surgery',      l: 'GP Surgery' },
@@ -210,6 +211,7 @@ const MODAL_SOURCE_OPTIONS = [
   { k: 'camhs',           l: 'CAMHS' },
   { k: 'anp',             l: 'ANP' },
   { k: 'enp',             l: 'ENP' },
+  { k: 'foi',             l: 'FOI – NHS Trusts' },
 ];
 
 // Read the source key out of the notes field by scanning for any known tag.
@@ -560,7 +562,10 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: ANP%')
       .not('notes', 'ilike', '%Source: ENP%')
       .not('notes', 'ilike', '%Source: HSE%')
-      .not('notes', 'ilike', '%Source: NHS Scotland%');
+      .not('notes', 'ilike', '%Source: NHS Scotland%')
+      .not('notes', 'ilike', '%Source: FOI%');
+  } else if (sf === 'foi') {
+    query = query.ilike('notes', '%Source: FOI%');
   } else if (sf === 'ahp') {
     query = query.ilike('notes', '%Source: NHS Jobs AHP%');
     if (state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
@@ -713,7 +718,8 @@ function applyComposeSourceFilter(q, source) {
       .not('notes', 'ilike', '%Source: ANP%')
       .not('notes', 'ilike', '%Source: ENP%')
       .not('notes', 'ilike', '%Source: HSE%')
-      .not('notes', 'ilike', '%Source: NHS Scotland%');
+      .not('notes', 'ilike', '%Source: NHS Scotland%')
+      .not('notes', 'ilike', '%Source: FOI%');
   }
   const SOURCE_TAGS = {
     children_homes:  'Ofsted Register',
@@ -730,6 +736,7 @@ function applyComposeSourceFilter(q, source) {
     camhs:           'Source: CAMHS',
     anp:             'Source: ANP',
     enp:             'Source: ENP',
+    foi:             'Source: FOI',
   };
   const tag = SOURCE_TAGS[source];
   if (tag) return q.ilike('notes', `%${tag}%`);
@@ -872,6 +879,7 @@ function renderDatabase() {
     { key: 'enp',             label: 'ENP'               },
     { key: 'care_home',       label: 'Care Homes'        },
     { key: 'private_theatre', label: 'Theatres'  },
+    { key: 'foi',             label: 'FOI – NHS Trusts' },
   ];
 
   const total = state.totalRows;
@@ -1097,7 +1105,7 @@ function renderTemplates() {
 
 
 
-const COMPOSE_SRC_LABELS = { all:'ALL SOURCES \u26a0', gp_surgery:'GP Surgeries', children_homes:"Children's Homes", agency:'Agency Outreach', private_theatre:'Theatres', ahp:'NHS Jobs AHP', nhs_scotland:'NHS Scotland (AHP)', hse:'HSE (Ireland)', care_home:'Care Homes', bms:'BMS', sterile:'Sterile Services', nhs_staffbank:'NHS Staff Banks', camhs:'CAMHS', anp:'ANP', enp:'ENP' };
+const COMPOSE_SRC_LABELS = { all:'ALL SOURCES \u26a0', gp_surgery:'GP Surgeries', children_homes:"Children's Homes", agency:'Agency Outreach', private_theatre:'Theatres', ahp:'NHS Jobs AHP', nhs_scotland:'NHS Scotland (AHP)', hse:'HSE (Ireland)', care_home:'Care Homes', bms:'BMS', sterile:'Sterile Services', nhs_staffbank:'NHS Staff Banks', camhs:'CAMHS', anp:'ANP', enp:'ENP', foi:'FOI – NHS Trusts' };
 function composeSourceLabel() { return COMPOSE_SRC_LABELS[state.composeSourceFilter] || state.composeSourceFilter || 'ALL SOURCES \u26a0'; }
 function composeSenderFields() {
   const s = state.composeSourceFilter;
@@ -1219,6 +1227,7 @@ function renderCompose() {
               {k:'camhs',          l:'CAMHS'},
               {k:'anp',            l:'ANP'},
               {k:'enp',            l:'ENP'},
+              {k:'foi',            l:'FOI – NHS Trusts'},
             ].map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
           </select>
         </div>
