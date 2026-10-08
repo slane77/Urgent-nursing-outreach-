@@ -11,6 +11,11 @@
     { "source": "/golive", "destination": "/golive.html" },
     { "source": "/documents", "destination": "/portal.html" },
     { "source": "/poster", "destination": "/register-poster.html" },
-    { "source": "/qr", "destination": "/qr.html" }
+    { "source": "/qr", "destination": "/qr.html" },
+    { "source": "/crisis", "destination": "/downloads/Day-Webster-Crisis-RMN-Rapid-Response.pdf" },
+    { "source": "/profile", "destination": "/downloads/Day-Webster-Sample-RMN-Profile.pdf" }
+  ],
+  "redirects": [
+    { "source": "/book", "destination": "https://bookings.cloud.microsoft/bookwithme/user/6a78e931b0b842b382f096d18a809b73@daywebster.com?anonymous&ep=signature&ismsaljsauthenabled", "permanent": false }
   ]
 }
