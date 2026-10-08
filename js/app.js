@@ -607,7 +607,8 @@ async function loadContactsPage() {
     const q = state.search.replace(/[%_]/g, '\\$&'); // basic SQL wildcard escaping
     query = query.or(
       `first_name.ilike.%${q}%,last_name.ilike.%${q}%,org.ilike.%${q}%,` +
-      `email.ilike.%${q}%,town.ilike.%${q}%,postcode.ilike.%${q}%`
+      `email.ilike.%${q}%,town.ilike.%${q}%,postcode.ilike.%${q}%,` +
+      `job_title.ilike.%${q}%,care_group.ilike.%${q}%`
     );
   }
 
@@ -979,7 +980,7 @@ function renderDatabase() {
       </div>
     </div>
     <div class="toolbar">
-      <input class="search" id="search-input" placeholder="Search by name, surgery, email, town, postcode..." value="${esc(state.search)}" />
+      <input class="search" id="search-input" placeholder="Search by name, org, group, job title, email, town, postcode..." value="${esc(state.search)}" />
       <select class="select" id="region-filter">
         <option value="">All regions</option>
         ${state.regions.map(r => `<option value="${esc(r)}" ${state.regionFilter===r?'selected':''}>${esc(r)}</option>`).join('')}
