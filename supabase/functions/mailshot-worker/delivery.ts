@@ -163,7 +163,16 @@ function personalize(text: string, c: Record<string, unknown>): string {
 }
 
 function toHtml(text: string): string {
-  return text.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll("\n","<br>");
+  const escaped = text.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  // Turn bare URLs into real links — Outlook does not auto-link plain text inside HTML bodies.
+  // Trailing punctuation (.,;:!?) and closing brackets are left outside the link.
+  const linked = escaped.replace(/https?:\/\/[^\s<]+/g, (m) => {
+    const t = m.match(/[.,;:!?)\]]+$/);
+    const url = t ? m.slice(0, -t[0].length) : m;
+    const tail = t ? t[0] : "";
+    return `<a href="${url}">${url}</a>${tail}`;
+  });
+  return linked.replaceAll("\n","<br>");
 }
 
 export async function deliverRecipient(req: Request, user: {id: string; email?: string}, snapshot: {subject: string; body: string}) {
