@@ -20,6 +20,21 @@ export function validate(body) {
    answers.travel_miles=a.travel_miles;
   }
  }
+ if(interest!=='not_interested' && a.screening_details!==undefined) {
+  const d=a.screening_details;
+  if(!d||typeof d!=='object'||Array.isArray(d)) throw Error('Invalid experience details.');
+  const pick=(k,values)=>{const v=d[k]||'';if(!values.includes(v))throw Error('Invalid '+k+'.');return v;};
+  const skill_details={};
+  if(d.skill_details!==undefined && (!d.skill_details||typeof d.skill_details!=='object'||Array.isArray(d.skill_details)))throw Error('Invalid skill details.');
+  for(const [skill,detail] of Object.entries(d.skill_details||{})) {
+   if(!answers.skills.includes(skill)||!detail||typeof detail!=='object'||Array.isArray(detail))throw Error('Invalid skill details.');
+   if(!['','within_6_months','6_to_12_months','over_12_months'].includes(detail.last_used||''))throw Error('Invalid skill recency.');
+   if(!['','home','hospital','both','other'].includes(detail.setting||''))throw Error('Invalid practice setting.');
+   if(typeof (detail.equipment??'')!=='string'||(detail.equipment||'').length>200)throw Error('Please shorten equipment details.');
+   skill_details[skill]={last_used:detail.last_used||'',setting:detail.setting||'',equipment:(detail.equipment||'').trim()};
+  }
+  answers.screening_details={population_experience:pick('population_experience',['','adults','children','both','none']),transport:pick('transport',['','car','public_transport','other']),notice:pick('notice',['','same_day','24_hours','48_hours','planned_only']),skill_details};
+ }
  const input=body.contact??{},contact={};
  if(typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['email','phone','town','postcode'].includes(k))) throw Error('Invalid contact update.');
  for(const [key,value] of Object.entries(input)) {

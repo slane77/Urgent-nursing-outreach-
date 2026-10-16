@@ -1,5 +1,6 @@
 'use strict';
 window.CC={
+ stages:{to_contact:'To contact',screening:'Screening',compliance_review:'Compliance review',clinical_review:'Clinical review',paused:'Paused'},
  skills:{tracheostomy:'Tracheostomy care',invasive_ventilation:'Invasive ventilation',noninvasive_ventilation:'Non-invasive ventilation',suction:'Airway suctioning',peg:'Enteral / PEG feeding',neurological:'Complex neurological care',seizures:'Seizure management',home_care:'Independent home care'},
  interest:{now:'Interested now',later:'Interested later',discuss:'Wants a conversation',not_interested:'Not currently interested'},
  experience:{current:'Currently in complex care',previous:'Previous complex care experience',none:'Interested in transitioning',unknown:'Experience not provided'},
