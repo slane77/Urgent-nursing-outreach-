@@ -1,3 +1,4 @@
+import { hasComplexCareLink, createComplexCareLink } from './complex-care-link.mjs';
 // send-mailshot v27 — FOI campaigns (source 'foi') send from the dedicated FOI
 // mailbox held in sender_addresses (source='foi'), so trust replies land there.
 // v26 — adds job-detail tokens ({{JobDays}}, {{JobHours}}, {{JobRate}},
@@ -78,6 +79,7 @@ function rawVal(name: string, c: Record<string, unknown>): string {
   const s = (x: unknown) => (x == null ? "" : String(x).trim());
   const j = (c._jobDetails || {}) as JobDetails;
   switch (name) {
+    case "ComplexCareLink": return s(c._complexCareLink);
     case "FirstName":    return s(c.first_name);
     case "LastName":     return s(c.last_name);
     case "Name":         return [s(c.first_name), s(c.last_name)].filter(Boolean).join(" ");
@@ -135,6 +137,7 @@ function personalize(text: string, c: Record<string, unknown>): string {
   const jobTitle = v(c.job_title, vacancy);
 
   return text
+    .replaceAll("{{ComplexCareLink}}", v(c._complexCareLink)).replaceAll("«ComplexCareLink»", v(c._complexCareLink))
     .replaceAll("{{FirstName}}",    first).replaceAll("«FirstName»", first)
     .replaceAll("{{LastName}}",     lastName).replaceAll("«LastName»", lastName)
     .replaceAll("{{Name}}",         fullName)
@@ -195,6 +198,9 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
     const body  = await req.json();
     const { templateId, contactIds, batchId, audience, candidateIds, jobDetails } = body;
 
+    if(hasComplexCareLink(snapshot?.subject) || (hasComplexCareLink(snapshot?.body) && audience!=='candidates'))
+      return new Response(JSON.stringify({error:'ComplexCareLink is supported only in candidate email bodies'}),{status:400});
+
     // ── Signed-in sender (the person actually sending) ──
     const { data: userProfile } = await admin
       .from('user_profiles')
@@ -250,7 +256,16 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
           continue;
         }
 
+        let complexCareLink = '';
+        if(hasComplexCareLink(template.body)) {
+          try {
+            const link = await createComplexCareLink(admin,cand,user.id);
+            if(!link){results.push({candidateId:cand.id,ok:false,error:'skipped'});continue;}
+            complexCareLink=link;
+          } catch {results.push({candidateId:cand.id,ok:false,error:'Personal invitation could not be created; no email sent'});continue;}
+        }
         const pseudo = {
+          _complexCareLink: complexCareLink,
           id: cand.id,
           first_name: cand.first_name,
           last_name:  cand.last_name,

@@ -4872,7 +4872,7 @@ function renderCandidateSend() {
           ${state.templates.map(function(t) { return '<option value="' + esc(t.id) + '" ' + (state.candTemplateId === t.id ? 'selected' : '') + '>' + esc(t.name) + '</option>'; }).join('')}
         </select>
         ${template ? '<div style="margin-top:10px;background:var(--grey-50);padding:10px;border-radius:6px;font-size:12px;"><strong>Subject:</strong> ' + esc(template.subject) + '</div>' : ''}
-        <p class="muted" style="font-size:11px;margin-top:8px;">Tokens available: {{FirstName}}, {{LastName}}, {{Name}}, {{JobTitle}}, {{Specialty}}, {{Town}}, {{Region}} (county), {{SenderName}}${state.candSendJobDetails ? ', {{JobSummary}}, {{JobPostcode}}, {{JobTown}}, {{JobWard}}, {{JobDays}}, {{JobHours}}, {{JobRate}}, {{JobStartDate}}, {{JobNotes}}' : ''}.</p>
+        <p class="muted" style="font-size:11px;margin-top:8px;">Tokens available: {{FirstName}}, {{LastName}}, {{Name}}, {{JobTitle}}, {{Specialty}}, {{Town}}, {{Region}} (county), {{SenderName}}, {{ComplexCareLink}} (body only, Urgent Nursing personal questionnaire)${state.candSendJobDetails ? ', {{JobSummary}}, {{JobPostcode}}, {{JobTown}}, {{JobWard}}, {{JobDays}}, {{JobHours}}, {{JobRate}}, {{JobStartDate}}, {{JobNotes}}' : ''}.</p>
       </div>
 
       ${state.candSendJobDetails ? `

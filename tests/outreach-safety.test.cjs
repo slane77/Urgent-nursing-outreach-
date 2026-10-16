@@ -120,19 +120,21 @@ test('queue retry reuses request ID after a lost response', async()=>{
   assert.equal(ids[0],ids[1]);
 });
 
-function deliveryHarness(candidate, providerStatus=201) {
-  let calls=0;const logs=[];
+function deliveryHarness(candidate, providerStatus=201, template={subject:'Hi {{FirstName}}',body:'Example'}, profile=null) {
+  let calls=0;const logs=[],invitations=[],messages=[];
   const admin={from(table){return {
     select(){return this;},eq(){return this;},
-    single:async()=>({data:{sender_email:'sender@example.invalid',sender_name:'Test',role:'user',candidate_sectors:['test']}}),
+    single:async()=>({data:{sender_email:'sender@example.invalid',sender_name:'Test',role:'user',candidate_sectors:['test','nursing_urgent']}}),
     in:async()=>({data:table==='candidates'?[candidate]:[]}),
-    insert:async rows=>{logs.push(...rows);return {};},
+    maybeSingle:async()=>({data:profile}),
+    insert:async rows=>{if(table==='complex_care_invitations')invitations.push(rows);else logs.push(...rows);return {};},
     update(){return this;}
   };}};
-  let source=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/delivery.ts'),'utf8').replace(/^import .*;\n/m,'').replace('export async function','async function');
-  const ctx=vm.createContext({createClient:()=>admin,Deno:{env:{get:()=> 'synthetic'}},Request,Response,AbortSignal,console,setTimeout:fn=>fn(),fetch:async()=>{calls++;return new Response('{}',{status:providerStatus});}});
-  vm.runInContext(stripTypeScriptTypes(source),ctx);
-  return {run:()=>ctx.deliverRecipient(new Request('https://example.invalid',{method:'POST',body:JSON.stringify({audience:'candidates',candidateIds:['candidate'],templateId:'template'})}),{id:'user',email:'sender@example.invalid'},{subject:'Hi {{FirstName}}',body:'Example'}),calls:()=>calls,logs};
+  let source=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/delivery.ts'),'utf8').replace(/^import .*;\n/gm,'').replace('export async function','async function');
+  const helper=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/complex-care-link.mjs'),'utf8').replaceAll('export ','');
+  const ctx=vm.createContext({crypto,TextEncoder,createClient:()=>admin,Deno:{env:{get:()=> 'synthetic'}},Request,Response,AbortSignal,console,setTimeout:fn=>fn(),fetch:async(url,options)=>{calls++;messages.push(JSON.parse(options.body));return new Response('{}',{status:providerStatus});}});
+  vm.runInContext(helper+stripTypeScriptTypes(source),ctx);
+  return {run:()=>ctx.deliverRecipient(new Request('https://example.invalid',{method:'POST',body:JSON.stringify({audience:'candidates',candidateIds:['candidate'],templateId:'template'})}),{id:'user',email:'sender@example.invalid'},template),calls:()=>calls,logs,invitations,messages};
 }
 
 test('queued delivery rechecks unsubscribe and candidate sector before contacting provider',async()=>{
@@ -145,4 +147,18 @@ test('queued delivery records successful acceptance and does not call provider r
   const candidate={id:'candidate',sector:'test',email:'test@example.invalid'};
   const ok=deliveryHarness(candidate);assert.equal((await (await ok.run()).json()).sent,1);assert.equal(ok.logs[0].status,'sent');
   const rejected=deliveryHarness(candidate,429);assert.equal((await (await rejected.run()).json()).sent,0);assert.equal(rejected.logs.length,0);
+});
+
+test('campaign worker renders unique questionnaire link into text and HTML without logging the token',async()=>{
+ const h=deliveryHarness({id:'candidate',sector:'nursing_urgent',email:'test@example.invalid'},201,{subject:'Complex care',body:'Hi {{FirstName}}, [[your link: {{ComplexCareLink}}]]'});
+ const result=await (await h.run()).json();assert.equal(result.sent,1);assert.equal(h.invitations.length,1);
+ const body=h.messages[0].textContent;assert.match(body,/https:\/\/urgent-nursing-outreach\.vercel\.app\/complex-care-interest\.html#invite=[a-f0-9]{64}/);
+ assert.equal(body.includes('{{ComplexCareLink}}'),false);assert.match(h.messages[0].htmlContent,/<a href=/);
+ const token=body.match(/invite=([a-f0-9]{64})/)[1];assert.equal(JSON.stringify(result).includes(token),false);assert.equal(JSON.stringify(h.logs).includes(token),false);
+});
+test('campaign does not send to a declined nurse or put a personal link in a subject',async()=>{
+ const c={id:'candidate',sector:'nursing_urgent',email:'test@example.invalid'};
+ const declined=deliveryHarness(c,201,{subject:'Hi',body:'{{ComplexCareLink}}'},{interest:'not_interested',contact_preference:'none'});
+ assert.equal((await (await declined.run()).json()).sent,0);assert.equal(declined.calls(),0);assert.equal(declined.invitations.length,0);
+ const subject=deliveryHarness(c,201,{subject:'{{ComplexCareLink}}',body:'Hi'});assert.equal((await subject.run()).status,400);assert.equal(subject.calls(),0);
 });
