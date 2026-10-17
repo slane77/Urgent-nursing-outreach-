@@ -1,0 +1,4 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+const ctx={window:{},Intl,Date};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../js/complex-care-time.js'),'utf8'),ctx);const t=ctx.window.CCTime;
+test('UK shift times resolve consistently regardless of browser timezone',()=>{assert.equal(t.iso('2026-07-12T20:00'),'2026-07-12T19:00:00.000Z');assert.equal(t.iso('2026-12-12T20:00'),'2026-12-12T20:00:00.000Z');});
+test('clock change ambiguity and invalid dates fail visibly; explicit UTC works',()=>{assert.throws(()=>t.iso('2026-10-25T01:30'),/clock change/);assert.throws(()=>t.iso('2026-03-29T01:30'),/clock change/);assert.throws(()=>t.iso('2026-02-30T12:00'),/Invalid/);assert.equal(t.iso('2026-10-25T01:30','UTC'),'2026-10-25T01:30:00.000Z');});
