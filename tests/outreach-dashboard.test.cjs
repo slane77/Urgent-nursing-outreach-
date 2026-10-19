@@ -92,9 +92,10 @@ test('Only dashboard contains the mailshot panel',()=>{
 test('Intake shows status instead of selecting mixed statuses for bulk outreach',()=>{
   const {ctx,state}=dataHarness(intakeRows());
   Object.assign(state,{dbStage:'added_today',subTab:'all',sourceFilter:'ahp',sourceCounts:{ahp:178},newTodayCounts:{ahp:178},sourceStatusCounts:{lead:161,live:0,unsubscribed:17},counts:{},regions:[],countries:[],currentRows:intakeRows(),totalRows:178});
-  Object.assign(ctx,{esc:String,extractSpecialty:()=> 'physiotherapy'});
+  Object.assign(ctx,{esc:String,extractSpecialty:()=> 'physiotherapy',hcpTabVisible:()=>false});
   vm.runInContext(section('function renderDatabase()', 'function renderTemplates()'),ctx);
   const html=ctx.renderDatabase();
+  assert.doesNotMatch(html,/data-source="hcp"/);
   assert.match(html,/data-new-source="ahp"/);assert.match(html,/data-dstage="recent"/);
   assert.match(html,/unsubscribed \/ new/);assert.match(html,/lead \/ contacted/);
   assert.doesNotMatch(html,/class="row-cb"|id="select-all-cb"|data-bulk=/);
