@@ -524,17 +524,55 @@ async function loadSourceCounts() {
   } catch (e) { console.error('source counts', e); state.newTodayCounts = null; }
 }
 
+// Match dashboard_counts(): the reporting day starts at midnight in London,
+// including BST. Do not use the browser's local timezone or UTC midnight.
+function londonDayStart(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(now);
+  const part = type => Number(parts.find(p => p.type === type).value);
+  const midnight = Date.UTC(part('year'), part('month') - 1, part('day'));
+  const offset = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', timeZoneName: 'shortOffset'
+  }).formatToParts(new Date(midnight)).find(p => p.type === 'timeZoneName').value;
+  return new Date(midnight - (offset === 'GMT+1' ? 3600000 : 0)).toISOString();
+}
+
+// Dashboard drilldowns and fresh-intake buttons must not inherit hidden filters.
+async function openDatabaseView(stage = 'all', source = 'all') {
+  Object.assign(state, {
+    view: 'database', subTab: stage === 'added_today' ? 'all' : stage === 'live' ? 'live' : 'lead',
+    dbStage: stage === 'live' ? 'all' : stage, sourceFilter: source,
+    search: '', regionFilter: '', countryFilter: '', ahpSpecialtyFilter: 'all',
+    page: 1, selected: new Set()
+  });
+  if (stage === 'new' || stage === 'added_today') {
+    state.sortKey = 'created_at';
+    state.sortDir = 'desc';
+  }
+  await Promise.all([loadSourceStatusCounts(), loadContactsPage()]);
+  render();
+}
+
+let contactsPageRequest = 0;
 async function loadContactsPage() {
+  const requestId = ++contactsPageRequest;
   state.loadingPage = true;
   state.selected = new Set();
   const start = (state.page - 1) * state.pageSize;
   const end = start + state.pageSize - 1;
 
-  let query = sb.from('contacts_with_last_email').select('*', { count: 'exact' })
-    .eq('status', state.subTab);
+  let query = sb.from('contacts_with_last_email').select('*', { count: 'exact' });
+  // Intake is a date-based view of every new record, including contacts already
+  // emailed or unsubscribed. Their stored status and stage remain untouched.
+  if (state.dbStage === 'added_today') {
+    query = query.gte('created_at', londonDayStart());
+  } else {
+    query = query.eq('status', state.subTab);
+  }
 
   // Stage filter — only applies to leads (unsubscribed have stage='opted_out', live have stage='live')
-  if (state.subTab === 'lead') {
+  if (state.subTab === 'lead' && state.dbStage !== 'added_today') {
     const today2 = new Date().toISOString().split('T')[0];
     if (state.dbStage === 'followup') {
       query = query.lte('follow_up_date', today2).not('follow_up_date', 'is', null);
@@ -612,9 +650,10 @@ async function loadContactsPage() {
     );
   }
 
-  query = query.order(state.sortKey, { ascending: state.sortDir === 'asc' }).range(start, end);
+  query = query.order(state.sortKey, { ascending: state.sortDir === 'asc' }).order('id', { ascending: true }).range(start, end);
 
   const { data, error, count } = await query;
+  if (requestId !== contactsPageRequest) return;
   state.loadingPage = false;
 
   if (error) {
@@ -841,7 +880,6 @@ function renderAppShell() {
       <div class="tab ${state.view === 'import' ? 'active' : ''}" data-view="import">⬇ Import</div>
       <div class="tab ${state.view === 'responses' ? 'active' : ''}" data-view="responses">&#x1F4EC; Responses</div>
     </div>
-    <div id="mailshot-panel">${renderMailshotPanel()}</div>
     <div class="main" id="main">
       ${state.view === 'dashboard' ? renderDashboard() :
         state.view === 'database' ? renderDatabase() :
@@ -851,6 +889,7 @@ function renderAppShell() {
         state.view === 'import' ? renderImport() :
         state.view === 'responses' ? renderResponses() :
         renderSettings()}
+      ${state.view === 'dashboard' ? '<div id="mailshot-panel">' + renderMailshotPanel() + '</div>' : ''}
     </div>
   `;
 }
@@ -883,6 +922,7 @@ function renderDatabase() {
     { key: 'foi',             label: 'FOI – NHS Trusts' },
   ];
 
+  const intakeView = state.dbStage === 'added_today';
   const total = state.totalRows;
   const start = (state.page - 1) * state.pageSize;
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
@@ -896,12 +936,12 @@ function renderDatabase() {
         const cnt = state.sourceCounts[s.key];
         const isEmpty = cnt === 0;
         const isActive = state.sourceFilter === s.key;
-        return `<button class="source-tab${isActive ? ' active' : ''}${isEmpty ? ' source-empty' : ''}" data-source="${s.key}">
+        return `<div class="source-tab-group"><button class="source-tab${isActive ? ' active' : ''}${isEmpty ? ' source-empty' : ''}" data-source="${s.key}">
           ${esc(s.label)}
           ${cnt != null ? `<span class="source-count${isEmpty ? ' zero' : ''}">${Number(cnt).toLocaleString()}</span>` : ''}
-          ${state.newTodayCounts && state.newTodayCounts[s.key] > 0 ? `<span class="source-new" style="background:#16A34A;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px;">+${state.newTodayCounts[s.key]} today</span>` : ''}
           ${s.key === 'children_homes' && cnt > 0 ? '<span class="source-warn" title="Most have placeholder emails — run enrichment from Import tab">⚠</span>' : ''}
-        </button>`;
+        </button>
+        ${state.newTodayCounts && state.newTodayCounts[s.key] > 0 ? `<button class="btn small source-new" data-new-source="${s.key}" aria-label="View ${esc(s.label)} records added today">+${state.newTodayCounts[s.key]} added today</button>` : ''}</div>`;
       }).join('')}
     </div>
 
@@ -954,18 +994,21 @@ function renderDatabase() {
       ].map(s => `<button class="stage-tab${state.ahpSpecialtyFilter===s.k?' active':''}" data-specialty="${s.k}">${s.l}</button>`).join('')}
     </div>` : ''}
 
-    ${state.subTab === 'lead' ? `
+    ${state.subTab === 'lead' || intakeView ? `
     <div class="stage-tabs">
       ${[
         {k:'all',       l:'All'},
-        {k:'new',       l:'New'},
+        {k:'added_today', l:'New today'},
+        {k:'new',       l:'Uncontacted'},
         {k:'contacted', l:'Contacted'},
         {k:'responded', l:'Responded'},
         {k:'meeting',   l:'Meeting'},
         {k:'followup',  l:'Follow-up Due'},
       ].map(s => `<button class="stage-tab${state.dbStage===s.k?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
     </div>` : ''}
+    ${intakeView ? '<p class="muted">New today includes every record added since midnight (UK time), across all statuses. Use Uncontacted for leads awaiting outreach.</p>' : ''}
     <div class="subtabs">
+      ${intakeView ? '<div class="subtab active">All statuses</div>' : ''}
       <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">
         Leads
         <span class="count">${state.sourceStatusCounts.lead !== null ? state.sourceStatusCounts.lead.toLocaleString() : state.counts.lead.toLocaleString()}</span>
@@ -1000,7 +1043,7 @@ function renderDatabase() {
         <thead>
           <tr>
             <th style="width:36px;text-align:center">
-              <input type="checkbox" id="select-all-cb" ${allPageSel ? 'checked' : ''} />
+              ${intakeView ? 'Status / stage' : `<input type="checkbox" id="select-all-cb" ${allPageSel ? 'checked' : ''} />`}
             </th>
             ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">Group</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
             ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
@@ -1023,7 +1066,7 @@ function renderDatabase() {
           ${state.currentRows.map(c => `
             <tr class="${state.selected.has(c.id) ? 'row-selected' : ''}">
               <td style="width:36px;text-align:center">
-                <input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />
+                ${intakeView ? esc(c.status) + ' / ' + esc(c.stage) : `<input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />`}
               </td>
               ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
               <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
@@ -2250,7 +2293,8 @@ async function loadDashboard() {
   state.dashboardData = null;
   render();
   try {
-    state.dashboardData = await callCM('dashboard');
+    const [dashboard] = await Promise.all([callCM('dashboard'), loadSourceCounts(), loadStatusCounts()]);
+    state.dashboardData = dashboard;
   } catch(e) {
     state.dashboardData = { error: e.message };
   }
@@ -2275,11 +2319,11 @@ function renderDashboard() {
   const emailPct = t.all ? Math.round((t.emailable / t.all) * 100) : 0;
 
   const pipelineStages = [
-    { key: 'new',       label: 'New',       count: p.new       || 0, color: '#6B7280', action: () => { state.view='database'; state.dbStage='new'; loadContactsPage().then(render); } },
-    { key: 'contacted', label: 'Contacted', count: p.contacted || 0, color: '#3B82F6', action: () => { state.view='database'; state.sourceFilter='all'; state.dbStage='contacted'; loadContactsPage().then(render); } },
-    { key: 'responded', label: 'Responded', count: p.responded || 0, color: '#F59E0B', action: () => { state.view='database'; state.dbStage='responded'; loadContactsPage().then(render); } },
-    { key: 'meeting',   label: 'Meeting',   count: p.meeting   || 0, color: '#8B5CF6', action: () => { state.view='database'; state.dbStage='meeting';   loadContactsPage().then(render); } },
-    { key: 'live',      label: 'Live',      count: p.live      || 0, color: '#10B981', action: () => { state.view='database'; state.subTab='live'; state.dbStage='all'; loadContactsPage().then(render); } },
+    { key: 'new',       label: 'New',       count: p.new       || 0, color: '#6B7280' },
+    { key: 'contacted', label: 'Contacted', count: p.contacted || 0, color: '#3B82F6' },
+    { key: 'responded', label: 'Responded', count: p.responded || 0, color: '#F59E0B' },
+    { key: 'meeting',   label: 'Meeting',   count: p.meeting   || 0, color: '#8B5CF6' },
+    { key: 'live',      label: 'Live',      count: p.live      || 0, color: '#10B981' },
   ];
   const pipelineTotal = Object.values(p).reduce((a, b) => a + b, 0) || 1;
 
@@ -2306,9 +2350,9 @@ function renderDashboard() {
           <div class="dash-stat-sub">${(t.sentToday || 0).toLocaleString()} today &middot; ${(t.sentThisMonth || 0).toLocaleString()} this month</div>
         </div>
         <div class="dash-stat">
-          <div class="dash-stat-val">${(t.newToday || 0).toLocaleString()}</div>
-          <div class="dash-stat-lbl">New leads today</div>
-          <div class="dash-stat-sub">from scrapers &amp; uploads</div>
+          <div class="dash-stat-val">${(state.newTodayCounts?.all ?? t.newToday ?? 0).toLocaleString()}</div>
+          <div class="dash-stat-lbl">New records today</div>
+          <div class="dash-stat-sub"><a class="dash-link" data-dash-action="newtoday">View new today →</a> · scrapers &amp; uploads</div>
         </div>
       </div>
 
@@ -3168,22 +3212,30 @@ function bindEvents() {
   // Stage filter tabs (database view)
   document.querySelectorAll('[data-dstage]').forEach(btn => {
     btn.onclick = async () => {
-      state.dbStage = btn.dataset.dstage;
+      const stage = btn.dataset.dstage;
+      if (stage === 'new' || stage === 'added_today' || state.dbStage === 'added_today') {
+        await openDatabaseView(stage, state.sourceFilter);
+        return;
+      }
+      state.dbStage = stage;
       state.page = 1;
       await loadContactsPage();
       render();
     };
   });
 
+  document.querySelectorAll('[data-pipe-stage]').forEach(el => {
+    el.onclick = () => openDatabaseView(el.dataset.pipeStage);
+  });
+
   // Dashboard quick-action links
   document.querySelectorAll('[data-dash-action]').forEach(el => {
     el.onclick = () => {
       const a = el.dataset.dashAction;
-      if (a === 'followup') {
-        state.view = 'database';
-        state.subTab = 'lead';
-        state.dbStage = 'followup';
-        loadContactsPage().then(render);
+      if (a === 'newtoday') {
+        openDatabaseView('added_today');
+      } else if (a === 'followup') {
+        openDatabaseView('followup');
       } else if (a === 'compose') {
         state.view = 'compose';
         render();
@@ -3191,11 +3243,13 @@ function bindEvents() {
         state.view = 'import';
         render();
       } else if (a === 'database') {
-        state.view = 'database';
-        state.dbStage = 'all';
-        loadContactsPage().then(render);
+        openDatabaseView();
       }
     };
+  });
+
+  document.querySelectorAll('[data-new-source]').forEach(button => {
+    button.onclick = () => openDatabaseView('added_today', button.dataset.newSource);
   });
 
   // Source filter tabs
@@ -3209,6 +3263,7 @@ function bindEvents() {
       state.page = 1;
       state.search = '';
       state.regionFilter = '';
+      state.countryFilter = '';
       await Promise.all([loadSourceStatusCounts(), loadContactsPage()]);
       render();
     };
@@ -3872,6 +3927,7 @@ async function exportAllAsCsv() {
 }
 
 let mailshotRows = [];
+let mailshotError = false;
 let mailshotPoll = null;
 let mailshotSubmitting = false;
 let pendingMailshotRequest = null;
@@ -3907,9 +3963,11 @@ async function refreshMailshots() {
     if(error) throw error;
     if(state.user?.id!==userId) return;
     mailshotRows=data||[];
+    mailshotError=false;
     const host=document.getElementById('mailshot-panel');
     if(host) host.innerHTML=renderMailshotPanel();
   } catch(error) {
+    mailshotError=true;
     const host=document.getElementById('mailshot-panel');
     if(host) host.innerHTML='<div class="queue-note">Mailshot progress is temporarily unavailable. Queued sending continues.</div>';
   }
@@ -3917,12 +3975,13 @@ async function refreshMailshots() {
 }
 
 function renderMailshotPanel() {
+  if(mailshotError) return '<div class="queue-note">Mailshot progress is temporarily unavailable. Queued sending continues.</div>';
   if(!mailshotRows.length) return '';
-  return '<details class="mailshot-tray" open><summary>Mailshot activity <span>Continues when you close the browser</span></summary>'+mailshotRows.map(m=>{
+  return '<section class="mailshot-tray" aria-label="Mailshot activity"><div class="mailshot-title">Mailshot activity <span>Continues when you close the browser</span></div>'+mailshotRows.map(m=>{
     const remaining=Number(m.queued)+Number(m.processing);
     const completed=Number(m.total)-remaining;
     return '<div class="mailshot-row"><div><strong>'+esc(m.template_name)+'</strong><div class="muted">'+esc(m.audience)+' · '+new Date(m.created_at).toLocaleString('en-GB')+'</div></div><div><progress max="'+m.total+'" value="'+completed+'"></progress><div class="muted">'+m.sent+' sent · '+remaining+' waiting'+(Number(m.failed)?' · '+m.failed+' failed':'')+(Number(m.skipped)?' · '+m.skipped+' skipped':'')+(Number(m.uncertain)?' · '+m.uncertain+' need delivery review':'')+(Number(m.cancelled)?' · '+m.cancelled+' cancelled':'')+'</div></div>'+(Number(m.queued)?'<button class="btn small" data-cancel-mailshot="'+m.id+'">Cancel waiting</button>':'<span class="muted">'+(Number(m.uncertain)?'Review needed':'Finished')+'</span>')+'</div>';
-  }).join('')+'</details>';
+  }).join('')+'</section>';
 }
 
 document.addEventListener('click',async e=>{

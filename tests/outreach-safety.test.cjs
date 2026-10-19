@@ -50,7 +50,7 @@ test('dashboard does not call the API when signed out', async () => {
 function contactManager(user, profile) {
   let handler, privilegedClients = 0;
   let source = fs.readFileSync(path.join(root, 'supabase/functions/contact-manager/index.ts'), 'utf8');
-  source = source.replace(/^import .*;\n/m, '');
+  source = source.replace(/^import .*;\r?\n/m, '');
   const q = { select() { return this; }, eq() { return this; }, single: async () => ({ data: profile }) };
   const ctx = vm.createContext({
     Request, Response, Date, console,
@@ -130,7 +130,7 @@ function deliveryHarness(candidate, providerStatus=201, template={subject:'Hi {{
     insert:async rows=>{if(table==='complex_care_invitations')invitations.push(rows);else logs.push(...rows);return {};},
     update(){return this;}
   };}};
-  let source=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/delivery.ts'),'utf8').replace(/^import .*;\n/gm,'').replace('export async function','async function');
+  let source=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/delivery.ts'),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export async function','async function');
   const helper=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/complex-care-link.mjs'),'utf8').replaceAll('export ','');
   const ctx=vm.createContext({crypto,TextEncoder,createClient:()=>admin,Deno:{env:{get:()=> 'synthetic'}},Request,Response,AbortSignal,console,setTimeout:fn=>fn(),fetch:async(url,options)=>{calls++;messages.push(JSON.parse(options.body));return new Response('{}',{status:providerStatus});}});
   vm.runInContext(helper+stripTypeScriptTypes(source),ctx);
