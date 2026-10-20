@@ -966,8 +966,7 @@ function renderDatabase() {
   const start = (state.page - 1) * state.pageSize;
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
   const selN = state.selected.size;
-  const allPageSel = selN > 0 && selN === state.currentRows.length;
-  const somePageSel = selN > 0 && !allPageSel;
+  const allPageSel = state.currentRows.length > 0 && state.currentRows.every(c => state.selected.has(c.id));
 
   return `
     <div class="source-tabs">
@@ -1082,7 +1081,7 @@ function renderDatabase() {
         <thead>
           <tr>
             <th style="width:36px;text-align:center">
-              ${intakeView ? 'Status / stage' : 'Select'}
+              ${intakeView ? 'Status / stage' : canSelectDatabasePage() ? `<label style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap" title="Select all contacts on this page"><input type="checkbox" id="select-all-cb" aria-label="Select all contacts on this page" ${allPageSel ? 'checked' : ''} ${state.currentRows.length ? '' : 'disabled'} />Select all</label>` : 'Select'}
             </th>
             ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">Group</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
             ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
@@ -1222,6 +1221,21 @@ function updateCandSendProgressText() {
 function canSendContactSource(profile, source) {
   if(!profile || !source || source==='all' || !COMPOSE_SRC_LABELS[source]) return false;
   return profile.role==='admin' || (Array.isArray(profile.allowed_sources) && profile.allowed_sources.includes(source));
+}
+
+function canSelectDatabasePage() {
+  return !isRecentImportView(state.dbStage) && canSendContactSource(state.userProfile, state.sourceFilter);
+}
+
+function setDatabasePageSelection(checked) {
+  if (!canSelectDatabasePage()) return;
+  const next = new Set(state.selected);
+  state.currentRows.forEach(c => checked ? next.add(c.id) : next.delete(c.id));
+  if (checked && next.size > 500) {
+    toast('Select no more than 500 recipients per reviewed campaign.', 'error');
+    return;
+  }
+  state.selected = next;
 }
 
 function contactSendError(template, count, options) {
@@ -3340,15 +3354,11 @@ function bindEvents() {
   // Select-all checkbox
   const selectAllCb = document.getElementById('select-all-cb');
   if (selectAllCb) {
-    const allPageSel = state.currentRows.length > 0 && state.selected.size === state.currentRows.length;
-    const somePageSel = state.selected.size > 0 && !allPageSel;
+    const allPageSel = state.currentRows.length > 0 && state.currentRows.every(c => state.selected.has(c.id));
+    const somePageSel = state.currentRows.some(c => state.selected.has(c.id)) && !allPageSel;
     selectAllCb.indeterminate = somePageSel;
     selectAllCb.onchange = () => {
-      if (selectAllCb.checked) {
-        state.currentRows.forEach(c => state.selected.add(c.id));
-      } else {
-        state.currentRows.forEach(c => state.selected.delete(c.id));
-      }
+      setDatabasePageSelection(selectAllCb.checked);
       render();
     };
   }
