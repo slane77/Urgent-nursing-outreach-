@@ -102,6 +102,7 @@ const state = {
   candRadiusOrigin: null,
   candRadiusResults: null,
   candRadiusSelected: null,
+  candSelected: new Set(),
   candSendSourceLabel: null,
   // Job-email drag-and-drop
   candDropMode: false,
@@ -165,6 +166,8 @@ const state = {
   dashboardData: null,
   // Database stage filter
   dbStage: 'all',
+  recentImportPeriod: '7',
+  recentImportUncontactedOnly: false,
   // Source filter
   sourceFilter: 'all',
   sourceCounts: {},
@@ -336,6 +339,21 @@ function csvEscape(v) {
 // ============================================================================
 //  AUTH
 // ============================================================================
+
+async function activeAccessToken() {
+  const {data,error}=await withConnectionTimeout(sb.auth.getSession());
+  if(error || !data?.session?.access_token) throw new Error('Please sign in again before continuing.');
+  return data.session.access_token;
+}
+
+function withConnectionTimeout(promise, milliseconds=20000) {
+  let timer;
+  return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('The database is taking too long to respond.')),milliseconds);})]).finally(()=>clearTimeout(timer));
+}
+function showConnectionRetry(message) {
+  document.getElementById('app').innerHTML='<div class="auth-container"><div class="auth-card"><h2>Connection is taking too long</h2><p>'+esc(message)+'</p><p>Your browser has kept your sign-in. Retry when the connection recovers.</p><button class="btn primary" id="connection-retry">Retry connection</button></div></div>';
+  document.getElementById('connection-retry').onclick=()=>window.location.reload();
+}
 
 let authBootUserId = null;
 let authBootPromise = null;
@@ -538,20 +556,42 @@ function londonDayStart(now = new Date()) {
   return new Date(midnight - (offset === 'GMT+1' ? 3600000 : 0)).toISOString();
 }
 
+function recentImportBounds(period='7', now=new Date()) {
+  const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);
+  const part=type=>Number(parts.find(p=>p.type===type).value);
+  const anchor=Date.UTC(part('year'),part('month')-1,part('day'),12);
+  const midnight=daysAgo=>londonDayStart(new Date(anchor-daysAgo*86400000));
+  if(period==='today') return {start:midnight(0),end:midnight(-1)};
+  if(period==='yesterday') return {start:midnight(1),end:midnight(0)};
+  const days=['7','14','30'].includes(String(period))?Number(period):7;
+  return {start:midnight(days-1),end:midnight(-1)};
+}
+function effectiveContactStage(contact) {return contact.stage==='new' && contact.last_emailed_at ? 'contacted' : contact.stage;}
+function isRecentImportView(stage) {return stage==='added_today'||stage==='recent';}
+
 // Dashboard drilldowns and fresh-intake buttons must not inherit hidden filters.
 async function openDatabaseView(stage = 'all', source = 'all') {
   Object.assign(state, {
-    view: 'database', subTab: stage === 'added_today' ? 'all' : stage === 'live' ? 'live' : 'lead',
+    view: 'database', subTab: isRecentImportView(stage) ? 'all' : stage === 'live' ? 'live' : 'lead',
     dbStage: stage === 'live' ? 'all' : stage, sourceFilter: source,
     search: '', regionFilter: '', countryFilter: '', ahpSpecialtyFilter: 'all',
     page: 1, selected: new Set()
   });
-  if (stage === 'new' || stage === 'added_today') {
+  if(isRecentImportView(stage)) {state.recentImportPeriod=stage==='added_today'?'today':'7';state.recentImportUncontactedOnly=false;}
+  if (stage === 'new' || isRecentImportView(stage)) {
     state.sortKey = 'created_at';
     state.sortDir = 'desc';
   }
   await Promise.all([loadSourceStatusCounts(), loadContactsPage()]);
   render();
+}
+
+async function changeDatabaseSource(source) {
+  const keepIntake=isRecentImportView(state.dbStage);
+  Object.assign(state,{sourceFilter:source,subTab:keepIntake?'all':'lead',
+    dbStage:keepIntake?state.dbStage:'all',ahpSpecialtyFilter:'all',selected:new Set(),
+    page:1,search:'',regionFilter:'',countryFilter:''});
+  await Promise.all([loadSourceStatusCounts(),loadContactsPage()]);render();
 }
 
 let contactsPageRequest = 0;
@@ -565,19 +605,18 @@ async function loadContactsPage() {
   let query = sb.from('contacts_with_last_email').select('*', { count: 'exact' });
   // Intake is a date-based view of every new record, including contacts already
   // emailed or unsubscribed. Their stored status and stage remain untouched.
-  if (state.dbStage === 'added_today') {
-    query = query.gte('created_at', londonDayStart());
+  if (isRecentImportView(state.dbStage)) {
+    const bounds=recentImportBounds(state.dbStage==='added_today'?'today':state.recentImportPeriod);
+    query=query.gte('created_at',bounds.start).lt('created_at',bounds.end);
+    if(state.recentImportUncontactedOnly) query=query.eq('status','lead').eq('stage','new').is('last_emailed_at',null);
   } else {
-    query = query.eq('status', state.subTab);
-  }
-
-  // Stage filter — only applies to leads (unsubscribed have stage='opted_out', live have stage='live')
-  if (state.subTab === 'lead' && state.dbStage !== 'added_today') {
-    const today2 = new Date().toISOString().split('T')[0];
-    if (state.dbStage === 'followup') {
-      query = query.lte('follow_up_date', today2).not('follow_up_date', 'is', null);
-    } else if (state.dbStage && state.dbStage !== 'all') {
-      query = query.eq('stage', state.dbStage);
+    query=query.eq('status',state.subTab);
+    if(state.subTab==='lead') {
+      const today2=new Date().toISOString().split('T')[0];
+      if(state.dbStage==='followup') query=query.lte('follow_up_date',today2).not('follow_up_date','is',null);
+      else if(state.dbStage==='new') query=query.eq('stage','new').is('last_emailed_at',null);
+      else if(state.dbStage==='contacted') query=query.or('stage.eq.contacted,and(stage.eq.new,last_emailed_at.not.is.null)');
+      else if(state.dbStage && state.dbStage!=='all') query=query.eq('stage',state.dbStage);
     }
   }
 
@@ -829,9 +868,10 @@ async function bootApp() {
   authBootPromise = (async () => {
     $('#app').innerHTML = '<div class="empty">Loading your workspace…</div>';
     try {
-      await loadUserProfile();
-      await Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]);
-      await loadContactsPage();
+      await withConnectionTimeout(loadUserProfile());
+      if(!state.userProfile) throw new Error('Could not verify your account profile.');
+      await withConnectionTimeout(Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]));
+      await withConnectionTimeout(loadContactsPage());
       if (state.user?.id !== userId) return;
       render();
       loadDashboard();
@@ -839,8 +879,7 @@ async function bootApp() {
     } catch (error) {
       authBootUserId = null;
       if (state.user?.id !== userId) return;
-      render();
-      toast('Your session is still active. Could not load some data; refresh to retry.', 'error');
+      showConnectionRetry('Could not load your workspace. '+error.message);
     }
   })();
   return authBootPromise;
@@ -922,7 +961,7 @@ function renderDatabase() {
     { key: 'foi',             label: 'FOI – NHS Trusts' },
   ];
 
-  const intakeView = state.dbStage === 'added_today';
+  const intakeView = isRecentImportView(state.dbStage);
   const total = state.totalRows;
   const start = (state.page - 1) * state.pageSize;
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
@@ -998,17 +1037,17 @@ function renderDatabase() {
     <div class="stage-tabs">
       ${[
         {k:'all',       l:'All'},
-        {k:'added_today', l:'New today'},
+        {k:'recent', l:'Recently added'},
         {k:'new',       l:'Uncontacted'},
         {k:'contacted', l:'Contacted'},
         {k:'responded', l:'Responded'},
         {k:'meeting',   l:'Meeting'},
         {k:'followup',  l:'Follow-up Due'},
-      ].map(s => `<button class="stage-tab${state.dbStage===s.k?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
+      ].map(s => `<button class="stage-tab${(state.dbStage===s.k||(s.k==='recent'&&intakeView))?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
     </div>` : ''}
-    ${intakeView ? '<p class="muted">New today includes every record added since midnight (UK time), across all statuses. Use Uncontacted for leads awaiting outreach.</p>' : ''}
+    ${intakeView ? `<div class="toolbar"><label for="recent-import-period">Added</label><select class="select" id="recent-import-period">${[['today','Today'],['yesterday','Yesterday'],['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days']].map(([value,label])=>'<option value="'+value+'" '+((state.dbStage==='added_today'?'today':state.recentImportPeriod||'7')===value?'selected':'')+'>'+label+'</option>').join('')}</select><label><input type="checkbox" id="recent-import-uncontacted" ${state.recentImportUncontactedOnly?'checked':''} /> Uncontacted only</label></div><p class="muted">UK calendar dates include overnight and weekend imports. Recently added includes all statuses; Uncontacted only excludes recorded email history and contacts already progressed.</p>` : ''}
     <div class="subtabs">
-      ${intakeView ? '<div class="subtab active">All statuses</div>' : ''}
+      ${intakeView ? '<div class="subtab active">'+(state.recentImportUncontactedOnly?'Uncontacted leads':'All statuses')+'</div>' : ''}
       <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">
         Leads
         <span class="count">${state.sourceStatusCounts.lead !== null ? state.sourceStatusCounts.lead.toLocaleString() : state.counts.lead.toLocaleString()}</span>
@@ -1043,7 +1082,7 @@ function renderDatabase() {
         <thead>
           <tr>
             <th style="width:36px;text-align:center">
-              ${intakeView ? 'Status / stage' : `<input type="checkbox" id="select-all-cb" ${allPageSel ? 'checked' : ''} />`}
+              ${intakeView ? 'Status / stage' : 'Select'}
             </th>
             ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">Group</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
             ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
@@ -1066,7 +1105,7 @@ function renderDatabase() {
           ${state.currentRows.map(c => `
             <tr class="${state.selected.has(c.id) ? 'row-selected' : ''}">
               <td style="width:36px;text-align:center">
-                ${intakeView ? esc(c.status) + ' / ' + esc(c.stage) : `<input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />`}
+                ${intakeView ? esc(c.status) + ' / ' + esc(effectiveContactStage(c)) : `<input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />`}
               </td>
               ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
               <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
@@ -1180,33 +1219,52 @@ function updateCandSendProgressText() {
     (p.waitSeconds ? ' &middot; next batch in ' + Math.floor(p.waitSeconds / 60) + ':' + String(p.waitSeconds % 60).padStart(2, '0') + ' (sending continues in the background)' : '');
 }
 
+function canSendContactSource(profile, source) {
+  if(!profile || !source || source==='all' || !COMPOSE_SRC_LABELS[source]) return false;
+  return profile.role==='admin' || (Array.isArray(profile.allowed_sources) && profile.allowed_sources.includes(source));
+}
+
+function contactSendError(template, count, options) {
+  if(!Number.isInteger(count)||count<1||count>500) return 'Choose 1–500 recipients. Larger campaigns must be split into reviewed selections.';
+  if(!options?.source || options.source==='all' || !COMPOSE_SRC_LABELS[options.source]) return 'Choose one specific source before sending. All-source mailshots are disabled.';
+  if(!canSendContactSource(state.userProfile,options.source)) return 'You do not have sending access to this database.';
+  if(/^GP Surgery\b/i.test(template.name||'') && options.source!=='gp_surgery') return 'GP Surgery templates can only target GP Surgeries.';
+  return null;
+}
+async function reviewContactMailshot(template, ids, options, contacts) {
+  const error=contactSendError(template,ids.length,options);
+  if(error) return toast(error,'error');
+  if(!contacts) {
+    const result=await sb.from('contacts').select('id,first_name,last_name,email,org,notes,department').in('id',ids);
+    if(result.error || result.data?.length!==ids.length) return toast('Could not verify every selected recipient. No mailshot queued.','error');
+    contacts=result.data;
+  }
+  state.modal={type:'mailshot-review',template,ids:[...ids],options:{...options},contacts};
+  renderModal();
+}
+
 async function sendFilteredViaBrevo() {
-  const template=state.templates.find(t=>t.id===state.composeTemplateId);
-  if(!template) return toast('Select a template first');
-  try {
-    const contacts=await buildAllComposeContactsFromDb();
-    if(!contacts.length) return toast('No contacts match your filters');
-    if(!confirm('Queue "'+template.name+'" for '+contacts.length+' contacts?\nSource: '+composeSourceLabel()+'\nSending continues after you close the browser.')) return;
-    await queueMailshot('contacts',template,contacts.map(c=>c.id),composeSenderFields());
-  } catch(error) {toast(error.message,'error');}
+  return toast('Sending to all matching records is disabled. Select recipients in an assigned database first.','error');
 }
 
 async function buildAllComposeContactsFromDb() {
-  const PAGE = 1000;
+  const selection={...state};
+  const PAGE = 501;
   const out = [];
   for (let from = 0; ; from += PAGE) {
-    let query = sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*').eq('status', state.composeListFilter);
-    query = applyComposeSourceFilter(query, state.composeSourceFilter);
-    if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
-    if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
-    if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
-    if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
-    if (state.composeUncontactedOnly) query = query.is('last_emailed_at', null);
+    let query = sb.from(selection.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*').eq('status', selection.composeListFilter);
+    query = applyComposeSourceFilter(query, selection.composeSourceFilter);
+    if ((selection.composeSourceFilter === 'ahp' || selection.composeSourceFilter === 'nhs_scotland') && selection.composeSpecialtyFilter && selection.composeSpecialtyFilter !== 'all') query = query.eq('department', selection.composeSpecialtyFilter);
+    if (selection.composeRegionFilter) query = query.eq('region', selection.composeRegionFilter);
+    if (selection.composeCountryFilter) query = query.eq('country', selection.composeCountryFilter);
+    if (selection.composeTownFilter) query = query.ilike('town', `%${selection.composeTownFilter}%`);
+    if (selection.composeUncontactedOnly) query = query.is('last_emailed_at', null);
     query = query.order('updated_at', { ascending: true }).range(from, from + PAGE - 1);
     const { data, error } = await query;
     if (error) throw new Error('Could not load the complete contact list: ' + error.message);
     if (!data || !data.length) break;
     out.push(...data);
+    if(out.length>500) throw new Error('More than 500 contacts match. Narrow the source, specialty or location before sending.');
     if (data.length < PAGE) break;
   }
   return out.filter(c => c.email && c.email.includes('@'));
@@ -1216,8 +1274,8 @@ async function sendSelectedViaBrevo() {
   const ids=state.composeSelectedIds;
   const template=state.templates.find(t=>t.id===state.composeTemplateId);
   if(!ids?.length||!template) return toast('Select a template and recipients');
-  if(!confirm('Queue "'+template.name+'" for '+ids.length+' selected contacts?\nSending continues after you close the browser.')) return;
-  await queueMailshot('contacts',template,ids,composeSenderFields());
+  try {await reviewContactMailshot(template,ids,composeSenderFields());}
+  catch {toast('Could not verify recipients. No mailshot queued.','error');}
 }
 
 function renderCompose() {
@@ -1256,7 +1314,7 @@ function renderCompose() {
           <label>Source</label>
           <select class="select" id="compose-source">
             ${[
-              {k:'all',            l:'All Sources'},
+              {k:'',               l:'— Choose an assigned database —'},
               {k:'gp_surgery',     l:'GP Surgeries'},
               {k:'children_homes', l:"Children's Homes"},
               {k:'agency',         l:'Agency Outreach'},
@@ -1272,7 +1330,7 @@ function renderCompose() {
               {k:'anp',            l:'ANP'},
               {k:'enp',            l:'ENP'},
               {k:'foi',            l:'FOI – NHS Trusts'},
-            ].map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
+            ].filter(s => !s.k || canSendContactSource(state.userProfile,s.k)).map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
           </select>
         </div>
         ${(state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') ? `
@@ -1326,7 +1384,7 @@ function renderCompose() {
     </div>
 
     <div class="compose-step">
-      <h3>3. Preview audience</h3>
+      <h3>3. Preview audience</h3><p class="muted">Choose one source. Maximum 500 emails per campaign. A two-minute cancellation window applies before sending starts.</p>
       <div class="stat-row">
         <div class="stat"><div class="label">Total in list</div><div class="value">${sourceCount}</div></div>
         <div class="stat"><div class="label">Match filter</div><div class="value" style="color:var(--orange-dark);">${previewMatch === null ? '?' : previewMatch}</div></div>
@@ -1341,9 +1399,7 @@ function renderCompose() {
       <p class="muted" style="margin:0 0 14px;font-size:12px;">Sends personalised emails to each contact using your template. Each contact auto-advances to <strong>Contacted</strong> stage with a 14-day follow-up date.</p>
 
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-        <button class="btn primary" id="brevo-filter-send-btn" ${!template || !previewMatch ? 'disabled' : ''}>
-          ${state.composeBrevoSending ? '<span class="spinner-inline"></span> Sending&hellip;' : icon('mail') + '&nbsp;Send all ' + previewMatch + ' Emails via Brevo' }
-        </button>
+        <p class="muted">To send, open an assigned database and select recipients individually. Sending to all matching records is disabled.</p>
         ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
         ${!previewMatch ? '<span class="muted" style="font-size:12px;">No contacts match — adjust filters</span>' : ''}
       </div>
@@ -1385,8 +1441,8 @@ function renderBrevoSend() {
     <div class="compose-step brevo-panel">
       <div class="brevo-panel-header">
         <div>
-          <h3 style="margin:0 0 4px;">✉ Direct Send — ${ids.length} contacts selected</h3>
-          <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Pick a template and send personalised emails via Brevo.</p>
+          <h3 style="margin:0 0 4px;">✉ Review Send — ${ids.length} contacts selected</h3>
+          <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Source: ${esc(composeSourceLabel())}. Choose a specific source in Database before selecting recipients. Maximum 500 per campaign.</p>
         </div>
         <button class="btn small" id="clear-selected-send">✕ Clear selection</button>
       </div>
@@ -1403,7 +1459,7 @@ function renderBrevoSend() {
         <button class="btn primary" id="brevo-send-btn" ${!template || state.composeBrevoSending ? 'disabled' : ''}>
           ${state.composeBrevoSending
             ? '<span class="spinner-inline"></span> Sending via Brevo&hellip;'
-            : icon('mail') + '&nbsp;Send ' + ids.length + ' Emails via Brevo'}
+            : icon('mail') + '&nbsp;Review ' + ids.length + ' Emails'}
         </button>
         ${!template ? '<span class="muted" style="font-size:12px;">Select a template above first</span>' : ''}
       </div>
@@ -1532,7 +1588,7 @@ async function runEnrichment() {
   try {
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/ofsted-scraper', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await activeAccessToken() },
       body: JSON.stringify({ mode: 'enrich', limit }),
     });
     state.enrichResult = await res.json();
@@ -1577,7 +1633,7 @@ async function runAgencyCSVUpload() {
   render();
 
   const CHUNK_SIZE = 500;
-  const AUTH = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU';
+  const AUTH = 'Bearer ' + await activeAccessToken();
 
   try {
     const allRows = splitCsvIntoRows(state.agencyCsvText);
@@ -1658,7 +1714,7 @@ async function previewAgencyCSV(csvText) {
   try {
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/csv-upload', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await activeAccessToken() },
       body: JSON.stringify({ csv: csvText, source: state.agencyCsvSource, preview: true }),
     });
     state.agencyCsvPreview = await res.json();
@@ -1674,7 +1730,7 @@ async function runCareHomeScrape() {
   try {
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/care-home-scraper', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await activeAccessToken() },
       body: JSON.stringify({ region: region, care_type: care_type, limit: limit }),
     });
     state.careHomeResult = await res.json();
@@ -1692,7 +1748,7 @@ async function runTheatreScrape() {
   try {
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/private-theatre-scraper', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await activeAccessToken() },
       body: JSON.stringify({ region, limit }),
     });
     state.theatreResult = await res.json();
@@ -1732,7 +1788,7 @@ async function runScotlandScrape() {
     const spec = (document.getElementById('scot-specialty') || {}).value || state.scotSpecialty || 'physiotherapy';
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-scotland-scraper', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await activeAccessToken() },
       body: JSON.stringify({ specialty: spec, offset: 0, limit: 50 }),
     });
     const data = await res.json();
@@ -1754,7 +1810,7 @@ async function runScotlandScrapeAll() {
     try {
       const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-scotland-scraper', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await activeAccessToken() },
         body: JSON.stringify({ specialty: spec, offset: 0, limit: 150 }),
       });
       const data = await res.json();
@@ -1773,7 +1829,7 @@ async function runHseScrape() {
   try {
     const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/hse-scraper', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await activeAccessToken() },
       body: JSON.stringify({ dryRun: false, limit: 120, maxPages: 50 }),
     });
     const data = await res.json();
@@ -1792,7 +1848,7 @@ async function runNHSScrape() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU',
+        'Authorization': 'Bearer ' + await activeAccessToken(),
       },
       body: JSON.stringify({
         specialty: state.importSpecialty,
@@ -1831,7 +1887,7 @@ async function runNHSScrapeAll() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU',
+          'Authorization': 'Bearer ' + await activeAccessToken(),
         },
         body: JSON.stringify({
           specialty: state.importSpecialty,
@@ -1879,7 +1935,7 @@ async function runNHSScrapeEverything() {
         render();
         const res = await fetch('https://udttpnaenmyxviuiwxqw.supabase.co/functions/v1/nhs-jobs-scraper', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVkdHRwbmFlbm15eHZpdWl3eHF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxNzAwODIsImV4cCI6MjA5NDc0NjA4Mn0.b7zeFYbNPSo7WjFu6-VFhMVelD2g1ja9m3af0Jb5geU' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + await activeAccessToken() },
           body: JSON.stringify({ specialty: spec, region: state.importRegion, band: state.importBand, limit: 50, offset: offset, mode: 'scrape' }),
         });
         const data = await res.json();
@@ -2319,7 +2375,7 @@ function renderDashboard() {
   const emailPct = t.all ? Math.round((t.emailable / t.all) * 100) : 0;
 
   const pipelineStages = [
-    { key: 'new',       label: 'New',       count: p.new       || 0, color: '#6B7280' },
+    { key: 'new',       label: 'Uncontacted',       count: p.new       || 0, color: '#6B7280' },
     { key: 'contacted', label: 'Contacted', count: p.contacted || 0, color: '#3B82F6' },
     { key: 'responded', label: 'Responded', count: p.responded || 0, color: '#F59E0B' },
     { key: 'meeting',   label: 'Meeting',   count: p.meeting   || 0, color: '#8B5CF6' },
@@ -2352,7 +2408,7 @@ function renderDashboard() {
         <div class="dash-stat">
           <div class="dash-stat-val">${(state.newTodayCounts?.all ?? t.newToday ?? 0).toLocaleString()}</div>
           <div class="dash-stat-lbl">New records today</div>
-          <div class="dash-stat-sub"><a class="dash-link" data-dash-action="newtoday">View new today →</a> · scrapers &amp; uploads</div>
+          <div class="dash-stat-sub"><a class="dash-link" data-dash-action="newtoday">View new today →</a> · <a class="dash-link" data-dash-action="recentimports">View recent imports →</a></div>
         </div>
       </div>
 
@@ -2933,7 +2989,7 @@ async function removeAutoUnsubOrg(pattern) {
 }
 
 function renderSettings() {
-  var isAdmin = !state.userProfile || state.userProfile.role === 'admin';
+  var isAdmin = state.userProfile?.role === 'admin';
 
   var sourceOptions = [
     {k:'gp_surgery',label:'GP Surgeries'},
@@ -2978,7 +3034,7 @@ function renderSettings() {
 
     var teamRows = state.teamUsers.map(function(u) {
       var isScott = u.email === 'scott.lane@daywebster.com';
-      var srcs = (!u.allowed_sources || u.allowed_sources.length === 0) ? 'All sources' : u.allowed_sources.join(', ');
+      var srcs = u.role==='admin' ? 'All databases (administrator)' : (u.allowed_sources?.length ? u.allowed_sources.join(', ') : 'No contact databases');
       var lastLogin = u.last_sign_in ? new Date(u.last_sign_in).toLocaleDateString('en-GB') : 'Never';
       return '<tr>'
         + '<td>' + esc(u.full_name || '—') + '</td>'
@@ -3010,7 +3066,7 @@ function renderSettings() {
       + '<div class="field"><label>Their Sender Name</label><input class="search" id="invite-sender-name" placeholder="Chris Thompson - Day Webster Group" /></div>'
       + '<div class="field"><label>Their Sender Email</label><input class="search" id="invite-sender-email" type="email" placeholder="chris@daywebster.com" /></div>'
       + '</div>'
-      + '<div class="field" style="margin-bottom:10px;"><label>Source Access (leave blank = all sources)</label>'
+      + '<div class="field" style="margin-bottom:10px;"><label>Database access (leave blank = no contact databases)</label>'
       + '<div class="source-checkboxes">' + sourceCheckboxes + '</div></div>'
       + '<div style="display:flex;gap:8px;align-items:center;">'
       + '<button class="btn primary" id="send-invite-btn">&#x2709; Send Invite</button>'
@@ -3147,6 +3203,19 @@ function renderModal() {
         <button class="btn primary" id="m-save">Save</button>
       </div>
     `;
+  } else if (state.modal.type === 'mailshot-review') {
+    const m=state.modal;
+    const phrase='SEND '+m.ids.length;
+    html=`<h2>Review ${m.ids.length} emails</h2>
+      <p><strong>From:</strong> ${['ahp','nhs_scotland'].includes(m.options.source) ? 'Specialty team mailbox for each recipient' : m.options.source==='foi' ? 'Dedicated FOI mailbox' : esc((state.senderName || state.userProfile?.sender_name || '')+' <'+(state.senderEmail || state.userProfile?.sender_email || state.user.email)+'>')}</p>
+      <p><strong>Source:</strong> ${esc(COMPOSE_SRC_LABELS[m.options.source])}${m.options.subSource ? ' / '+esc(m.options.subSource) : ''}</p>
+      <p><strong>Template:</strong> ${esc(m.template.name)}<br><strong>Subject:</strong> ${esc(m.template.subject)}</p>
+      <p><strong>Sample recipients:</strong></p>
+      <ul>${m.contacts.slice(0,5).map(c=>'<li>'+esc(c.org || '')+' — '+esc(c.email)+'</li>').join('')}</ul>
+      <details><summary>Preview the first email</summary><pre style="white-space:pre-wrap;max-height:220px;overflow:auto;">${esc(personalize(m.template.body,m.contacts[0]))}</pre></details>
+      <p>Sending starts after a two-minute cancellation window. Cancel from Mailshot activity on the dashboard.</p>
+      <div class="field"><label for="mailshot-confirm">Type ${esc(phrase)} to queue these emails</label><input id="mailshot-confirm" autocomplete="off" /></div>
+      <div class="modal-actions"><button class="btn" id="m-cancel">Back</button><button class="btn primary" id="mailshot-queue-confirm" disabled>Queue ${m.ids.length} emails</button></div>`;
   } else if (state.modal.type === 'confirm') {
     html = `
       <h2>${esc(state.modal.title)}</h2>
@@ -3209,11 +3278,21 @@ function bindEvents() {
     };
   });
 
+  const recentPeriod=document.getElementById('recent-import-period');
+  if(recentPeriod) recentPeriod.onchange=async e=>{
+    state.dbStage='recent';state.recentImportPeriod=e.target.value;state.page=1;
+    state.sortKey='created_at';state.sortDir='desc';await loadContactsPage();render();
+  };
+  const recentUncontacted=document.getElementById('recent-import-uncontacted');
+  if(recentUncontacted) recentUncontacted.onchange=async e=>{
+    state.recentImportUncontactedOnly=e.target.checked;state.page=1;await loadContactsPage();render();
+  };
+
   // Stage filter tabs (database view)
   document.querySelectorAll('[data-dstage]').forEach(btn => {
     btn.onclick = async () => {
       const stage = btn.dataset.dstage;
-      if (stage === 'new' || stage === 'added_today' || state.dbStage === 'added_today') {
+      if (stage === 'new' || isRecentImportView(stage) || isRecentImportView(state.dbStage)) {
         await openDatabaseView(stage, state.sourceFilter);
         return;
       }
@@ -3232,7 +3311,8 @@ function bindEvents() {
   document.querySelectorAll('[data-dash-action]').forEach(el => {
     el.onclick = () => {
       const a = el.dataset.dashAction;
-      if (a === 'newtoday') {
+      if(a==='recentimports') {openDatabaseView('recent');}
+      else if (a === 'newtoday') {
         openDatabaseView('added_today');
       } else if (a === 'followup') {
         openDatabaseView('followup');
@@ -3254,19 +3334,7 @@ function bindEvents() {
 
   // Source filter tabs
   document.querySelectorAll('.source-tab').forEach(t => {
-    t.onclick = async () => {
-      state.sourceFilter = t.dataset.source;
-      state.subTab = 'lead';
-      state.dbStage = 'all';
-      state.ahpSpecialtyFilter = 'all';
-      state.selected = new Set();
-      state.page = 1;
-      state.search = '';
-      state.regionFilter = '';
-      state.countryFilter = '';
-      await Promise.all([loadSourceStatusCounts(), loadContactsPage()]);
-      render();
-    };
+    t.onclick=()=>changeDatabaseSource(t.dataset.source);
   });
 
   // Select-all checkbox
@@ -3382,6 +3450,8 @@ function bindEvents() {
       if (action === 'move-to-live') { await bulkAction('move-to-live'); return; }
       if (action === 'send-compose') {
         state.composeSelectedIds = [...state.selected];
+        state.composeSourceFilter = state.sourceFilter;
+        state.composeSpecialtyFilter = state.ahpSpecialtyFilter || 'all';
         state.composeBrevoResult = null;
         state.composeBrevoSending = false;
         state.view = 'compose';
@@ -3653,6 +3723,19 @@ function bindModalEvents() {
   const overlay = document.querySelector('.modal-overlay');
   if (!overlay) return;
   const closeModal = () => { state.modal = null; renderModal(); };
+
+  const queueConfirm=overlay.querySelector('#mailshot-queue-confirm');
+  if(queueConfirm) {
+    const reviewed=state.modal;
+    const input=overlay.querySelector('#mailshot-confirm');
+    input.addEventListener('input',()=>{queueConfirm.disabled=input.value!=='SEND '+reviewed.ids.length;});
+    queueConfirm.addEventListener('click',async()=>{
+      if(input.value!=='SEND '+reviewed.ids.length) return;
+      queueConfirm.disabled=true;
+      const id=await queueMailshot('contacts',reviewed.template,reviewed.ids,reviewed.options);
+      if(id) closeModal(); else queueConfirm.disabled=false;
+    });
+  }
 
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
   const cancelBtn = overlay.querySelector('#m-cancel');
@@ -3934,6 +4017,8 @@ let pendingMailshotRequest = null;
 
 async function queueMailshot(audience, template, ids, options) {
   if(mailshotSubmitting) return;
+  if(!ids?.length || ids.length>500) return toast('Maximum 500 recipients per reviewed campaign.','error');
+  if(audience==='contacts') {const error=contactSendError(template,ids.length,options); if(error) return toast(error,'error');}
   const fingerprint=JSON.stringify([state.user.id,audience,template.id,ids,options]);
   if(!pendingMailshotRequest || pendingMailshotRequest.fingerprint!==fingerprint) {
     pendingMailshotRequest={fingerprint,id:crypto.randomUUID()};
@@ -3980,16 +4065,16 @@ function renderMailshotPanel() {
   return '<section class="mailshot-tray" aria-label="Mailshot activity"><div class="mailshot-title">Mailshot activity <span>Continues when you close the browser</span></div>'+mailshotRows.map(m=>{
     const remaining=Number(m.queued)+Number(m.processing);
     const completed=Number(m.total)-remaining;
-    return '<div class="mailshot-row"><div><strong>'+esc(m.template_name)+'</strong><div class="muted">'+esc(m.audience)+' · '+new Date(m.created_at).toLocaleString('en-GB')+'</div></div><div><progress max="'+m.total+'" value="'+completed+'"></progress><div class="muted">'+m.sent+' sent · '+remaining+' waiting'+(Number(m.failed)?' · '+m.failed+' failed':'')+(Number(m.skipped)?' · '+m.skipped+' skipped':'')+(Number(m.uncertain)?' · '+m.uncertain+' need delivery review':'')+(Number(m.cancelled)?' · '+m.cancelled+' cancelled':'')+'</div></div>'+(Number(m.queued)?'<button class="btn small" data-cancel-mailshot="'+m.id+'">Cancel waiting</button>':'<span class="muted">'+(Number(m.uncertain)?'Review needed':'Finished')+'</span>')+'</div>';
+    return '<div class="mailshot-row"><div><strong>'+esc(m.template_name)+'</strong><div class="muted">'+esc(m.audience)+' · '+new Date(m.created_at).toLocaleString('en-GB')+'</div></div><div><progress max="'+m.total+'" value="'+completed+'"></progress><div class="muted">'+m.sent+' sent · '+remaining+' waiting'+(Number(m.failed)?' · '+m.failed+' failed':'')+(Number(m.skipped)?' · '+m.skipped+' skipped':'')+(Number(m.uncertain)?' · '+m.uncertain+' need delivery review':'')+(Number(m.cancelled)?' · '+m.cancelled+' cancelled':'')+'</div></div>'+(Number(m.queued)+Number(m.processing)?'<button class="btn small" data-cancel-mailshot="'+m.id+'">Cancel waiting</button>':'<span class="muted">'+(Number(m.uncertain)?'Review needed':'Finished')+'</span>')+'</div>';
   }).join('')+'</section>';
 }
 
 document.addEventListener('click',async e=>{
   const button=e.target.closest('[data-cancel-mailshot]');
   if(!button) return;
-  if(!confirm('Cancel the emails still waiting? Emails already being processed may still be sent.')) return;
+  if(!confirm('Stop this campaign? Emails already handed to Brevo cannot be recalled.')) return;
   button.disabled=true;
-  const {error}=await sb.rpc('cancel_outreach_mailshot',{p_id:button.dataset.cancelMailshot});
+  const {error}=await sb.functions.invoke('mailshot-control',{body:{action:'cancel',id:button.dataset.cancelMailshot}});
   if(error) toast(error.message,'error');
   await refreshMailshots();
 });
@@ -4010,7 +4095,8 @@ document.addEventListener('click',async e=>{
     return;
   }
 
-  await initAuth();
+  try {await withConnectionTimeout(initAuth());}
+  catch(error) {state.authLoading=false;showConnectionRetry(error.message);return;}
   if (state.user) {
     await bootApp();
   } else {
@@ -4139,6 +4225,7 @@ function candApplyFilters(q) {
 }
 
 async function loadCandidatesPage() {
+  state.candSelected = new Set();
   state.candLoading = true;
   var from = (state.candPage - 1) * state.pageSize;
   var q = sb.from('candidates').select('*,candidate_complex_care(experience)', { count: 'exact' });
@@ -4230,7 +4317,7 @@ async function runCandidateRadiusSearch() {
   }
 
   state.candRadiusResults = r.data || [];
-  state.candRadiusSelected = new Set(state.candRadiusResults.map(function(c) { return c.id; })); // select all by default
+  state.candRadiusSelected = new Set(); // Every send starts with an explicit selection
   render();
 }
 
@@ -4275,7 +4362,7 @@ function renderCandidateRadiusPanel() {
         <div style="margin-top:16px;">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap;">
             <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="cand-radius-select-all" ${sel.size === results.length ? 'checked' : ''} />
+              <span>Select recipients individually</span>
               <strong>${sel.size}</strong> of ${results.length} selected — within ${state.candRadiusMiles}mi of ${esc(state.candRadiusOrigin.postcode)}
             </label>
             <button class="btn primary small" id="cand-radius-email-selected" ${sel.size === 0 ? 'disabled' : ''}>✉ Email ${sel.size} selected candidate${sel.size === 1 ? '' : 's'}</button>
@@ -4826,7 +4913,7 @@ function renderCandidates() {
       <button class="btn small" id="cand-radius-open">📍 Job radius match</button>
       <button class="btn small" id="cand-drop-open">📧 Job email</button>
       <button class="btn small" id="cand-add-open">➕ Add candidate</button>
-      <button class="btn primary" id="cand-email-filtered">✉ Email filtered candidates</button>
+      <button class="btn primary" id="cand-email-selected" ${!state.candSelected?.size ? 'disabled' : ''}>✉ Email ${state.candSelected?.size || 0} selected candidates</button>
     </div>
     <p class="muted" style="font-size:12px;margin:0 0 12px;">${esc(candSectorLabel(candCurrentSector()) || 'Candidate')} database. Only visible to accounts granted access to this list — Do Not Use and unsubscribed candidates are automatically excluded from sends.</p>
 
@@ -4862,7 +4949,7 @@ function renderCandidates() {
       <table class="table">
         <thead>
           <tr>
-            <th>Name</th>
+            <th>Select</th><th>Name</th>
             <th class="hide-sm">Job Title</th>
             <th>Email</th>
             <th class="hide-sm">Phone</th>
@@ -4879,6 +4966,7 @@ function renderCandidates() {
             var name = esc([c.first_name, c.last_name].filter(Boolean).join(' ') || '—');
             var lastEm = c.last_emailed_at ? esc(String(c.last_emailed_at).slice(0, 10)) : '—';
             return '<tr>' +
+              '<td><input type="checkbox" class="cand-send-row" data-candidate-id="'+esc(c.id)+'" aria-label="Select '+name+' for email" '+(state.candSelected?.has(c.id)?'checked ':'')+(!c.email||c.unsubscribed||c.status==='do_not_use'?'disabled':'')+' /></td>' +
               '<td><strong>' + name + '</strong>' + (['current','previous'].indexOf(c.candidate_complex_care?.experience) >= 0 ? '<br><a href="complex-care.html" style="color:#135d32;font-size:12px;">Complex care experience (reported)</a>' : '') + '</td>' +
               '<td class="hide-sm ellipsis" title="' + esc([c.job_title, c.job_category, c.specialty].filter(Boolean).join(' — ')) + '">' + esc(c.job_title || c.specialty || '—') + (c.job_category ? ' <span class="muted" style="font-size:11px;">(' + esc(candCategoryLabel(c.job_category)) + ')</span>' : '') + '</td>' +
               '<td class="ellipsis" title="' + esc(c.email || '') + '">' + (c.email ? esc(c.email) : '<span class="muted">no email</span>') + '</td>' +
@@ -5012,6 +5100,13 @@ async function updateCandidate(id, patch) {
 
 function bindCandidateEvents() {
   if (state.view !== 'candidates') return;
+  document.querySelectorAll('.cand-send-row').forEach(cb=>{
+    cb.onchange=()=>{
+      if(!state.candSelected) state.candSelected=new Set();
+      if(cb.checked) state.candSelected.add(cb.dataset.candidateId); else state.candSelected.delete(cb.dataset.candidateId);
+      render();
+    };
+  });
 
   document.querySelectorAll('[data-candstatus]').forEach(function(t) {
     t.onclick = async function() {
@@ -5372,13 +5467,13 @@ function bindCandidateEvents() {
     render();
   };
 
-  var emailBtn = document.getElementById('cand-email-filtered');
+  var emailBtn = document.getElementById('cand-email-selected');
   if (emailBtn) emailBtn.onclick = async function() {
     emailBtn.disabled = true;
     emailBtn.textContent = 'Loading…';
     var ids;
     try {
-      ids = await buildCandidateSendIds();
+      ids = Array.from(state.candSelected || []);
     } catch (error) {
       state.candSendIds = null;
       state.candSendMode = false;
