@@ -13,6 +13,8 @@ function dataHarness(rows, delayed) {
     const filters=[],orders=[]; let range=[0,49];
     const q = { select(){return this;}, eq(k,v){filters.push(r=>r[k]===v);return this;},
       gte(k,v){filters.push(r=>r[k]>=v);return this;},
+      lt(k,v){filters.push(r=>r[k]<v);return this;},
+      is(k,v){filters.push(r=>v===null?r[k]==null:r[k]===v);return this;},
       ilike(k,v){const token=v.replaceAll('%','').toLowerCase();filters.push(r=>(r[k]||'').toLowerCase().includes(token));return this;},
       order(k,o){orders.push([k,o]);return this;},range(a,b){range=[a,b];return this;},
       then(resolve,reject){queries.push({table,range,orders}); const filtered=rows.filter(r=>filters.every(f=>f(r)));
@@ -93,7 +95,7 @@ test('Intake shows status instead of selecting mixed statuses for bulk outreach'
   Object.assign(ctx,{esc:String,extractSpecialty:()=> 'physiotherapy'});
   vm.runInContext(section('function renderDatabase()', 'function renderTemplates()'),ctx);
   const html=ctx.renderDatabase();
-  assert.match(html,/data-new-source="ahp"/);assert.match(html,/data-dstage="added_today"/);
+  assert.match(html,/data-new-source="ahp"/);assert.match(html,/data-dstage="recent"/);
   assert.match(html,/unsubscribed \/ new/);assert.match(html,/lead \/ contacted/);
   assert.doesNotMatch(html,/class="row-cb"|id="select-all-cb"|data-bulk=/);
 });

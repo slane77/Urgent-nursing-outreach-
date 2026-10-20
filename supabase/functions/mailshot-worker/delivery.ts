@@ -1,3 +1,4 @@
+import { mayDispatch, matchesContactSource, hasContactSourceAccess } from './safety.mjs';
 import { hasComplexCareLink, createComplexCareLink } from './complex-care-link.mjs';
 // send-mailshot v27 — FOI campaigns (source 'foi') send from the dedicated FOI
 // mailbox held in sender_addresses (source='foi'), so trust replies land there.
@@ -204,7 +205,7 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
     // ── Signed-in sender (the person actually sending) ──
     const { data: userProfile } = await admin
       .from('user_profiles')
-      .select('sender_email, sender_name, full_name, role, candidate_sectors')
+      .select('sender_email, sender_name, full_name, role, candidate_sectors, allowed_sources')
       .eq('user_id', user.id)
       .single();
     if (!userProfile) return new Response(JSON.stringify({error: 'Authorised profile required'}), {status:403});
@@ -283,6 +284,7 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
         const htmlBody = toHtml(textBody);
 
         try {
+          if(!await mayDispatch(admin,body,cand.id)) {results.push({candidateId:cand.id,ok:false,error:'cancelled'});continue;}
           const brevoRes = await fetch("https://api.brevo.com/v3/smtp/email", {
             method: "POST",
             signal: AbortSignal.timeout(15000),
@@ -341,6 +343,8 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
 
+    if(!hasContactSourceAccess(userProfile,body.source)) return new Response(JSON.stringify({error:'Source outside your permitted access'}),{status:403});
+
     // ── Team sender mappings (AHP specialty inboxes) ──
     const { data: senderRows } = await admin
       .from('sender_addresses')
@@ -376,7 +380,12 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
     const campaignSource = body.source ? String(body.source) : null;
     const campaignSub    = body.subSource ? String(body.subSource) : null;
     let batchFrom: { email: string; name: string } | null = null;
-    if (body.fromEmail) {
+    // Chris's outreach uses his personal mailbox for both From and Reply-To.
+    // Resolve from the authenticated owner, so stale queued/client overrides
+    // cannot switch his AHP campaigns back to specialty inboxes.
+    if (user.email?.trim().toLowerCase() === 'chris.shine@daywebster.com') {
+      batchFrom = { email: 'chris.shine@daywebster.com', name: fallbackName };
+    } else if (body.fromEmail) {
       batchFrom = { email: String(body.fromEmail), name: String(body.fromName || body.fromEmail) };
     } else if (campaignSource && AHP_CAMPAIGN.has(campaignSource)) {
       if (campaignSub) batchFrom = lookupSender(campaignSource, campaignSub);
@@ -412,6 +421,9 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
         continue;
       }
 
+      if(!matchesContactSource(contact,body.source,body.subSource)) {
+        results.push({contactId:contact.id,ok:false,error:'skipped'}); continue;
+      }
       // Resolve the "send from" for THIS contact.
       let resolved = batchFrom;
       if (!resolved) { const d = deriveContactSource(contact); resolved = lookupSender(d.source, d.sub); }
@@ -425,6 +437,7 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
       const htmlBody = toHtml(textBody);
 
       try {
+        if(!await mayDispatch(admin,body,contact.id)) {results.push({contactId:contact.id,ok:false,error:'cancelled'});continue;}
         const brevoRes = await fetch("https://api.brevo.com/v3/smtp/email", {
           method: "POST",
           signal: AbortSignal.timeout(15000),

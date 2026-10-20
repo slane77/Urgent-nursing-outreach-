@@ -112,7 +112,7 @@ test('session refresh and repeated sign-in do not restart an active workspace', 
 test('queue retry reuses request ID after a lost response', async()=>{
   let attempts=0; const ids=[];
   const ctx=appFunction('let mailshotRows =', 'async function refreshMailshots()', {
-    state:{user:{id:'joe'}},crypto:{randomUUID:()=> 'request-'+(++attempts)},toast(){},refreshMailshots:async()=>{},
+    state:{user:{id:'joe'}},contactSendError:()=>null,crypto:{randomUUID:()=> 'request-'+(++attempts)},toast(){},refreshMailshots:async()=>{},
     sb:{rpc:async(name,args)=>{ids.push(args.p_id);return ids.length===1?{error:{message:'connection lost'}}:{data:args.p_id};}},
   });
   await ctx.queueMailshot('contacts',{id:'template'},['recipient'],{});
@@ -124,17 +124,18 @@ function deliveryHarness(candidate, providerStatus=201, template={subject:'Hi {{
   let calls=0;const logs=[],invitations=[],messages=[];
   const admin={from(table){return {
     select(){return this;},eq(){return this;},
-    single:async()=>({data:{sender_email:'sender@example.invalid',sender_name:'Test',role:'user',candidate_sectors:['test','nursing_urgent']}}),
+    single:async()=>({data:table==='outreach_mailshots'?{cancelled:false}:{sender_email:'sender@example.invalid',sender_name:'Test',role:'user',candidate_sectors:['test','nursing_urgent']}}),
     in:async()=>({data:table==='candidates'?[candidate]:[]}),
-    maybeSingle:async()=>({data:profile}),
+    maybeSingle:async()=>({data:table==='outreach_mailshot_items'?{status:'processing'}:profile}),
     insert:async rows=>{if(table==='complex_care_invitations')invitations.push(rows);else logs.push(...rows);return {};},
     update(){return this;}
   };}};
   let source=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/delivery.ts'),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export async function','async function');
   const helper=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/complex-care-link.mjs'),'utf8').replaceAll('export ','');
   const ctx=vm.createContext({crypto,TextEncoder,createClient:()=>admin,Deno:{env:{get:()=> 'synthetic'}},Request,Response,AbortSignal,console,setTimeout:fn=>fn(),fetch:async(url,options)=>{calls++;messages.push(JSON.parse(options.body));return new Response('{}',{status:providerStatus});}});
-  vm.runInContext(helper+stripTypeScriptTypes(source),ctx);
-  return {run:()=>ctx.deliverRecipient(new Request('https://example.invalid',{method:'POST',body:JSON.stringify({audience:'candidates',candidateIds:['candidate'],templateId:'template'})}),{id:'user',email:'sender@example.invalid'},template),calls:()=>calls,logs,invitations,messages};
+  const guards=fs.readFileSync(path.join(root,'supabase/functions/mailshot-worker/safety.mjs'),'utf8').replaceAll('export ','');
+  vm.runInContext(guards+helper+stripTypeScriptTypes(source),ctx);
+  return {run:()=>ctx.deliverRecipient(new Request('https://example.invalid',{method:'POST',body:JSON.stringify({batchId:'queue_11111111-1111-4111-8111-111111111111',audience:'candidates',candidateIds:['candidate'],templateId:'template'})}),{id:'user',email:'sender@example.invalid'},template),calls:()=>calls,logs,invitations,messages};
 }
 
 test('queued delivery rechecks unsubscribe and candidate sector before contacting provider',async()=>{
