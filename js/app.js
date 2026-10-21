@@ -4923,6 +4923,9 @@ function renderCandidates() {
       <button class="btn small" id="cand-radius-open">📍 Job radius match</button>
       <button class="btn small" id="cand-drop-open">📧 Job email</button>
       <button class="btn small" id="cand-add-open">➕ Add candidate</button>
+      <button class="btn small" id="cand-select-page" ${!state.candRows.some(function(c) { return c.email && !c.unsubscribed && c.status !== 'do_not_use'; }) ? 'disabled' : ''}>Select page</button>
+      <button class="btn small" id="cand-select-all" ${!total || state.candLoading ? 'disabled' : ''}>Select all matching</button>
+      <button class="btn small" id="cand-clear-selection" ${!state.candSelected?.size ? 'disabled' : ''}>Clear selection</button>
       <button class="btn primary" id="cand-email-selected" ${!state.candSelected?.size ? 'disabled' : ''}>✉ Email ${state.candSelected?.size || 0} selected candidates</button>
     </div>
     <p class="muted" style="font-size:12px;margin:0 0 12px;">${esc(candSectorLabel(candCurrentSector()) || 'Candidate')} database. Only visible to accounts granted access to this list — Do Not Use and unsubscribed candidates are automatically excluded from sends.</p>
@@ -5108,8 +5111,47 @@ async function updateCandidate(id, patch) {
   return true;
 }
 
+async function selectAllMatchingCandidates() {
+  // Fetch every matching emailable ID, not just the currently displayed page.
+  // Supabase/PostgREST enforces response row limits, so use bounded batches.
+  var selected = new Set();
+  var batchSize = 500;
+  for (var offset = 0; ; offset += batchSize) {
+    var q = sb.from('candidates').select('id').not('email', 'is', null)
+      .neq('email', '').neq('status', 'do_not_use').eq('unsubscribed', false);
+    q = candApplyFilters(q);
+    var res = await q.order('id', { ascending: true }).range(offset, offset + batchSize - 1);
+    if (res.error) throw res.error;
+    (res.data || []).forEach(function(row) { selected.add(row.id); });
+    if (!res.data || res.data.length < batchSize) break;
+  }
+  return selected;
+}
+
 function bindCandidateEvents() {
   if (state.view !== 'candidates') return;
+  var selectPage = document.getElementById('cand-select-page');
+  if (selectPage) selectPage.onclick = function() {
+    if (!state.candSelected) state.candSelected = new Set();
+    state.candRows.forEach(function(c) {
+      if (c.email && !c.unsubscribed && c.status !== 'do_not_use') state.candSelected.add(c.id);
+    });
+    render();
+  };
+  var selectAll = document.getElementById('cand-select-all');
+  if (selectAll) selectAll.onclick = async function() {
+    selectAll.disabled = true;
+    selectAll.textContent = 'Selecting…';
+    try {
+      state.candSelected = await selectAllMatchingCandidates();
+      toast(state.candSelected.size.toLocaleString() + ' matching emailable candidates selected');
+    } catch (error) {
+      toast('Could not select candidates: ' + error.message, 'error');
+    }
+    render();
+  };
+  var clearSelection = document.getElementById('cand-clear-selection');
+  if (clearSelection) clearSelection.onclick = function() { state.candSelected = new Set(); render(); };
   document.querySelectorAll('.cand-send-row').forEach(cb=>{
     cb.onchange=()=>{
       if(!state.candSelected) state.candSelected=new Set();
