@@ -46,3 +46,12 @@ BEGIN
   END IF;
   EXECUTE d;
 END $$;
+
+-- Access: Homecare Providers – Complex Care Clients contacts are visible and
+-- editable only to scott.lane@daywebster.com (applied as migration
+-- restrict_hcp_complex_care_contacts_to_scott). The contacts_with_last_email view
+-- now runs as the caller so row security applies through it too.
+-- alter view public.contacts_with_last_email set (security_invoker = true);
+-- create policy hcp_complex_care_scott_only on public.contacts as restrictive for all to authenticated
+--   using (coalesce(notes,'') not ilike '%Source: HCP Complex Care%' or lower(auth.jwt()->>'email') = 'scott.lane@daywebster.com')
+--   with check (coalesce(notes,'') not ilike '%Source: HCP Complex Care%' or lower(auth.jwt()->>'email') = 'scott.lane@daywebster.com');
