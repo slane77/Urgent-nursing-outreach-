@@ -25,6 +25,7 @@ const SOURCE_TAG: Record<string, string> = {
   enp:             'Source: ENP',
   care_home:       'Source: Care Home',
   foi:             'Source: FOI',
+  hcp:             'Source: HCP Complex Care',
 };
 
 function applySourceFilter(q: any, source: string) {
@@ -46,7 +47,8 @@ function applySourceFilter(q: any, source: string) {
       .not('notes', 'ilike', '%Source: Care Home%')
       .not('notes', 'ilike', '%Source: ANP%')
       .not('notes', 'ilike', '%Source: ENP%')
-      .not('notes', 'ilike', '%Source: FOI%');
+      .not('notes', 'ilike', '%Source: FOI%')
+      .not('notes', 'ilike', '%Source: HCP Complex Care%');
   }
   const tag = SOURCE_TAG[source];
   if (tag) return q.ilike('notes', `%${tag}%`);

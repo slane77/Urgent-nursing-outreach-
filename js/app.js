@@ -173,6 +173,8 @@ const state = {
   sourceCounts: {},
   sourceStatusCounts: { lead: null, live: null, unsubscribed: null },
   ahpSpecialtyFilter: 'all',
+  hcpAreaFilter: 'all',
+  composeAreaFilter: 'all',
   // Multi-select
   selected: new Set()
 };
@@ -198,7 +200,16 @@ const MODAL_SOURCE_TAGS = {
   anp:             'Source: ANP',
   enp:             'Source: ENP',
   foi:             'Source: FOI',
+  hcp:             'Source: HCP Complex Care',
 };
+// HCP (Home Care Providers) complex-care audience — sub-divided into outreach
+// areas stored in the contact's `department` column.
+const HCP_AREAS = [
+  { k: 'icb',             l: 'ICBs' },
+  { k: 'local_authority', l: 'Local Authorities' },
+  { k: 'case_management', l: 'Case Management' },
+  { k: 'private',         l: 'Private / Family' },
+];
 const MODAL_SOURCE_OPTIONS = [
   { k: 'gp_surgery',      l: 'GP Surgery' },
   { k: 'hse',             l: 'HSE (Ireland)' },
@@ -215,6 +226,7 @@ const MODAL_SOURCE_OPTIONS = [
   { k: 'anp',             l: 'ANP' },
   { k: 'enp',             l: 'ENP' },
   { k: 'foi',             l: 'FOI – NHS Trusts' },
+  { k: 'hcp',             l: 'Homecare Providers – Complex Care Clients' },
 ];
 
 // Read the source key out of the notes field by scanning for any known tag.
@@ -589,7 +601,7 @@ async function openDatabaseView(stage = 'all', source = 'all') {
 async function changeDatabaseSource(source) {
   const keepIntake=isRecentImportView(state.dbStage);
   Object.assign(state,{sourceFilter:source,subTab:keepIntake?'all':'lead',
-    dbStage:keepIntake?state.dbStage:'all',ahpSpecialtyFilter:'all',selected:new Set(),
+    dbStage:keepIntake?state.dbStage:'all',ahpSpecialtyFilter:'all',hcpAreaFilter:'all',selected:new Set(),
     page:1,search:'',regionFilter:'',countryFilter:''});
   await Promise.all([loadSourceStatusCounts(),loadContactsPage()]);render();
 }
@@ -640,9 +652,15 @@ async function loadContactsPage() {
       .not('notes', 'ilike', '%Source: ENP%')
       .not('notes', 'ilike', '%Source: HSE%')
       .not('notes', 'ilike', '%Source: NHS Scotland%')
-      .not('notes', 'ilike', '%Source: FOI%');
+      .not('notes', 'ilike', '%Source: FOI%')
+      .not('notes', 'ilike', '%Source: HCP Complex Care%');
   } else if (sf === 'foi') {
     query = query.ilike('notes', '%Source: FOI%');
+  } else if (sf === 'hcp') {
+    query = query.ilike('notes', '%Source: HCP Complex Care%');
+    if (state.hcpAreaFilter && state.hcpAreaFilter !== 'all') {
+      query = query.eq('department', state.hcpAreaFilter);
+    }
   } else if (sf === 'ahp') {
     query = query.ilike('notes', '%Source: NHS Jobs AHP%');
     if (state.ahpSpecialtyFilter && state.ahpSpecialtyFilter !== 'all') {
@@ -798,7 +816,8 @@ function applyComposeSourceFilter(q, source) {
       .not('notes', 'ilike', '%Source: ENP%')
       .not('notes', 'ilike', '%Source: HSE%')
       .not('notes', 'ilike', '%Source: NHS Scotland%')
-      .not('notes', 'ilike', '%Source: FOI%');
+      .not('notes', 'ilike', '%Source: FOI%')
+      .not('notes', 'ilike', '%Source: HCP Complex Care%');
   }
   const SOURCE_TAGS = {
     children_homes:  'Ofsted Register',
@@ -816,16 +835,27 @@ function applyComposeSourceFilter(q, source) {
     anp:             'Source: ANP',
     enp:             'Source: ENP',
     foi:             'Source: FOI',
+    hcp:             'Source: HCP Complex Care',
   };
   const tag = SOURCE_TAGS[source];
   if (tag) return q.ilike('notes', `%${tag}%`);
   return q; // 'all' — no filter
 }
 
+// Sub-audience filter for Compose: AHP/NHS Scotland specialty, or HCP area.
+// Both live in the contact's `department` column.
+function applyComposeSubFilter(q, sel) {
+  const st = sel || state;
+  const s = st.composeSourceFilter;
+  if ((s === 'ahp' || s === 'nhs_scotland') && st.composeSpecialtyFilter && st.composeSpecialtyFilter !== 'all') return q.eq('department', st.composeSpecialtyFilter);
+  if (s === 'hcp' && st.composeAreaFilter && st.composeAreaFilter !== 'all') return q.eq('department', st.composeAreaFilter);
+  return q;
+}
+
 async function buildComposeQueueFromDb() {
   let query = sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*').eq('status', state.composeListFilter);
   query = applyComposeSourceFilter(query, state.composeSourceFilter);
-  if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') query = query.eq('department', state.composeSpecialtyFilter);
+  query = applyComposeSubFilter(query);
   if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) query = query.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) query = query.ilike('town', `%${state.composeTownFilter}%`);
@@ -848,7 +878,7 @@ async function previewComposeCounts() {
   let q = sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*', { count: 'exact', head: true })
     .eq('status', state.composeListFilter);
   q = applyComposeSourceFilter(q, state.composeSourceFilter);
-  if ((state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all') q = q.eq('department', state.composeSpecialtyFilter);
+  q = applyComposeSubFilter(q);
   if (state.composeRegionFilter) q = q.eq('region', state.composeRegionFilter);
   if (state.composeCountryFilter) q = q.eq('country', state.composeCountryFilter);
   if (state.composeTownFilter) q = q.ilike('town', `%${state.composeTownFilter}%`);
@@ -936,7 +966,12 @@ function renderAppShell() {
 function extractSpecialty(notes) {
   if (!notes) return '—';
   const m = notes.match(/Specialty: ([^|]+)/);
-  return m ? m[1].trim().replace(/_/g,' ') : '—';
+  if (m) return m[1].trim().replace(/_/g,' ');
+  if (notes.includes('Source: HCP Complex Care')) {
+    const a = notes.match(/Area: ([^|]+)/);
+    if (a) { const hit = HCP_AREAS.find(x => x.k === a[1].trim()); return hit ? hit.l : a[1].trim(); }
+  }
+  return '—';
 }
 
 function renderFollowUpDate(d) {
@@ -959,7 +994,8 @@ function renderDatabase() {
     { key: 'care_home',       label: 'Care Homes'        },
     { key: 'private_theatre', label: 'Theatres'  },
     { key: 'foi',             label: 'FOI – NHS Trusts' },
-  ];
+    { key: 'hcp',             label: 'Homecare Providers' },
+  ].filter(s => s.key !== 'hcp' || hcpTabVisible());
 
   const intakeView = isRecentImportView(state.dbStage);
   const total = state.totalRows;
@@ -1030,6 +1066,11 @@ function renderDatabase() {
         {k:'audiology', l:'Audiology'},
         {k:'gp_surgery',      l:'GP Surgeries'},
       ].map(s => `<button class="stage-tab${state.ahpSpecialtyFilter===s.k?' active':''}" data-specialty="${s.k}">${s.l}</button>`).join('')}
+    </div>` : ''}
+
+    ${state.sourceFilter === 'hcp' ? `
+    <div class="stage-tabs">
+      ${[{k:'all', l:'All areas'}, ...HCP_AREAS].map(s => `<button class="stage-tab${state.hcpAreaFilter===s.k?' active':''}" data-area="${s.k}">${s.l}</button>`).join('')}
     </div>` : ''}
 
     ${state.subTab === 'lead' || intakeView ? `
@@ -1187,11 +1228,12 @@ function renderTemplates() {
 
 
 
-const COMPOSE_SRC_LABELS = { all:'ALL SOURCES \u26a0', gp_surgery:'GP Surgeries', children_homes:"Children's Homes", agency:'Agency Outreach', private_theatre:'Theatres', ahp:'NHS Jobs AHP', nhs_scotland:'NHS Scotland (AHP)', hse:'HSE (Ireland)', care_home:'Care Homes', bms:'BMS', sterile:'Sterile Services', nhs_staffbank:'NHS Staff Banks', camhs:'CAMHS', anp:'ANP', enp:'ENP', foi:'FOI – NHS Trusts' };
+const COMPOSE_SRC_LABELS = { all:'ALL SOURCES \u26a0', gp_surgery:'GP Surgeries', children_homes:"Children's Homes", agency:'Agency Outreach', private_theatre:'Theatres', ahp:'NHS Jobs AHP', nhs_scotland:'NHS Scotland (AHP)', hse:'HSE (Ireland)', care_home:'Care Homes', bms:'BMS', sterile:'Sterile Services', nhs_staffbank:'NHS Staff Banks', camhs:'CAMHS', anp:'ANP', enp:'ENP', foi:'FOI – NHS Trusts', hcp:'Homecare Providers – Complex Care Clients' };
 function composeSourceLabel() { return COMPOSE_SRC_LABELS[state.composeSourceFilter] || state.composeSourceFilter || 'ALL SOURCES \u26a0'; }
 function composeSenderFields() {
   const s = state.composeSourceFilter;
-  const sub = (s === 'ahp' || s === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all' ? state.composeSpecialtyFilter : null;
+  let sub = (s === 'ahp' || s === 'nhs_scotland') && state.composeSpecialtyFilter && state.composeSpecialtyFilter !== 'all' ? state.composeSpecialtyFilter : null;
+  if (s === 'hcp' && state.composeAreaFilter && state.composeAreaFilter !== 'all') sub = state.composeAreaFilter;
   return sub ? { source: s, subSource: sub } : { source: s };
 }
 
@@ -1222,6 +1264,9 @@ function canSendContactSource(profile, source) {
   if(!profile || !source || source==='all' || !COMPOSE_SRC_LABELS[source]) return false;
   return profile.role==='admin' || (Array.isArray(profile.allowed_sources) && profile.allowed_sources.includes(source));
 }
+
+// The Homecare Providers database is only shown to users with sending access to it.
+function hcpTabVisible() { return canSendContactSource(state.userProfile, 'hcp'); }
 
 function canSelectDatabasePage() {
   return !isRecentImportView(state.dbStage) && canSendContactSource(state.userProfile, state.sourceFilter);
@@ -1268,7 +1313,7 @@ async function buildAllComposeContactsFromDb() {
   for (let from = 0; ; from += PAGE) {
     let query = sb.from(selection.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*').eq('status', selection.composeListFilter);
     query = applyComposeSourceFilter(query, selection.composeSourceFilter);
-    if ((selection.composeSourceFilter === 'ahp' || selection.composeSourceFilter === 'nhs_scotland') && selection.composeSpecialtyFilter && selection.composeSpecialtyFilter !== 'all') query = query.eq('department', selection.composeSpecialtyFilter);
+    query = applyComposeSubFilter(query, selection);
     if (selection.composeRegionFilter) query = query.eq('region', selection.composeRegionFilter);
     if (selection.composeCountryFilter) query = query.eq('country', selection.composeCountryFilter);
     if (selection.composeTownFilter) query = query.ilike('town', `%${selection.composeTownFilter}%`);
@@ -1344,9 +1389,19 @@ function renderCompose() {
               {k:'anp',            l:'ANP'},
               {k:'enp',            l:'ENP'},
               {k:'foi',            l:'FOI – NHS Trusts'},
+              {k:'hcp',            l:'Homecare Providers – Complex Care Clients'},
             ].filter(s => !s.k || canSendContactSource(state.userProfile,s.k)).map(s => `<option value="${s.k}" ${state.composeSourceFilter===s.k?'selected':''}>${s.l}</option>`).join('')}
           </select>
         </div>
+        ${state.composeSourceFilter === 'hcp' ? `
+        <div class="field">
+          <label>Area</label>
+          <select class="select" id="compose-area">
+            <option value="all" ${(!state.composeAreaFilter||state.composeAreaFilter==='all')?'selected':''}>All areas</option>
+            ${HCP_AREAS.map(o => `<option value="${o.k}" ${state.composeAreaFilter===o.k?'selected':''}>${o.l}</option>`).join('')}
+          </select>
+        </div>
+        ` : ''}
         ${(state.composeSourceFilter === 'ahp' || state.composeSourceFilter === 'nhs_scotland') ? `
         <div class="field">
           <label>Specialty</label>
@@ -3282,6 +3337,16 @@ function bindEvents() {
     };
   });
 
+  // Area sub-filter tabs (HCP view)
+  document.querySelectorAll('[data-area]').forEach(btn => {
+    btn.onclick = async () => {
+      state.hcpAreaFilter = btn.dataset.area;
+      state.page = 1;
+      await loadContactsPage();
+      render();
+    };
+  });
+
   // Specialty sub-filter tabs (AHP view)
   document.querySelectorAll('[data-specialty]').forEach(btn => {
     btn.onclick = async () => {
@@ -3551,7 +3616,9 @@ function bindEvents() {
   if (composeTemplate) composeTemplate.onchange = (e) => { state.composeTemplateId = e.target.value; render(); };
   const composeList = $('#compose-list');
   const composeSource = $('#compose-source');
-  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composeSpecialtyFilter = 'all'; state.composePreviewCounts = null; render(); };
+  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composeSpecialtyFilter = 'all'; state.composeAreaFilter = 'all'; state.composePreviewCounts = null; render(); };
+  const composeArea = $('#compose-area');
+  if (composeArea) composeArea.onchange = (e) => { state.composeAreaFilter = e.target.value; state.composePreviewCounts = null; render(); };
   const composeSpecialty = $('#compose-specialty');
   if (composeSpecialty) composeSpecialty.onchange = (e) => { state.composeSpecialtyFilter = e.target.value; state.composePreviewCounts = null; render(); };
   if (composeList) composeList.onchange = (e) => { state.composeListFilter = e.target.value; state.composePreviewCounts = null; render(); };

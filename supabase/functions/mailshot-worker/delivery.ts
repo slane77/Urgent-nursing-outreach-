@@ -365,6 +365,7 @@ export async function deliverRecipient(req: Request, user: {id: string; email?: 
       if (dept === 'Advanced Nurse Practitioner' || /Source:\s*ANP/i.test(notes)) return { source: 'anp', sub: null };
       if (dept === 'Emergency Nurse Practitioner' || /Source:\s*ENP/i.test(notes)) return { source: 'enp', sub: null };
       if (/Source:\s*FOI/i.test(notes)) return { source: 'foi', sub: null };
+      if (/Source:\s*HCP Complex Care/i.test(notes)) return { source: 'hcp', sub: dept || null };
       if (/Source:\s*GP Surgery/i.test(notes)) return { source: 'gp_surgery', sub: null };
       return { source: null, sub: null };
     };
