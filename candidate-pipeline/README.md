@@ -54,10 +54,12 @@ Read `ARCHITECTURE.md` for the agent design and what's built vs pending.
    `ORG_URL`. Confirm the §11 data-protection terms before real PII.
 3. Expose the `candidate` schema to the API (Supabase → Settings → API →
    Exposed schemas) so `candidates.html` can read/write it under RLS.
-4. Staff pages (repo root): `dashboard.html` (control tower / home),
-   `candidates.html` (cockpit), `vacancies.html` (adverts), `candidate-import.html`
-   (spreadsheets). Public: `intake.html` (registration), `jobs` function (Google
-   for Jobs).
+4. Staff pages (repo root) — the staff compliance surface is branded the
+   **Day Webster Compliance Portal** (topbar wordmark + page titles):
+   `dashboard.html` (control tower / home), `candidates.html` (cockpit),
+   `vacancies.html` (adverts), `candidate-import.html` (spreadsheets),
+   `compliance.html` (compliance ops), `admin.html`. Public: `intake.html`
+   (registration), `jobs` function (Google for Jobs).
 5. **Wire the board connectors** (Indeed / Reed / CV-Library) once API
    credentials arrive — see `ACQUISITION.md`.
 6. Refine the compliance requirement set against the live compliance project.

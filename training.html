@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mandatory training — Day Webster</title>
+<!--
+  Candidate-facing training flow (design §4, [DECISION U1]).
+  PUBLIC, mobile-first, GOV.UK-style one-thing-per-screen. Deliberately NOT the
+  staff dark theme (external users; higher completion). It talks ONLY to the
+  training-portal edge function via plain fetch — it holds NO Supabase anon key,
+  makes NO direct table access, and never receives an answer key or any other
+  candidate's data. The opaque ?token= in the URL is the sole credential.
+-->
+<style>
+  :root { --ink:#0b0c0c; --muted:#505a5f; --line:#b1b4b6; --focus:#ffdd00;
+    --blue:#1d70b8; --green:#00703c; --red:#d4351c; --bg:#f3f2f1; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; background:#fff; color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; font-size:19px; line-height:1.4; }
+  .bar { background:var(--ink); color:#fff; padding:12px 16px; font-weight:700; letter-spacing:.02em; }
+  .bar span { color:#5cb8ff; }
+  main { max-width:640px; margin:0 auto; padding:22px 16px 64px; }
+  h1 { font-size:1.9rem; line-height:1.15; margin:.2em 0 .5em; }
+  h2 { font-size:1.3rem; margin:1.2em 0 .3em; }
+  p { margin:.5em 0; }
+  .muted { color:var(--muted); }
+  .lede { font-size:1.05rem; }
+  .btn { display:inline-block; background:var(--green); color:#fff; border:0; border-bottom:2px solid rgba(0,0,0,.3);
+    font-size:1.15rem; font-weight:700; padding:14px 20px; border-radius:4px; cursor:pointer; width:100%; margin-top:18px; }
+  .btn:hover { background:#005a30; }
+  .btn.secondary { background:#f3f2f1; color:var(--ink); border-bottom-color:var(--line); }
+  .btn:focus { outline:3px solid var(--focus); outline-offset:0; box-shadow:0 0 0 3px var(--focus); }
+  .kb { border-left:6px solid var(--blue); padding:2px 0 2px 16px; margin:14px 0; }
+  .kb h2 { margin-top:.2em; }
+  .progress { color:var(--muted); font-size:.95rem; margin-bottom:6px; }
+  fieldset { border:0; margin:0; padding:0; }
+  legend { font-size:1.35rem; font-weight:700; margin-bottom:10px; }
+  .opt { display:flex; align-items:flex-start; gap:12px; border:2px solid var(--line); border-radius:4px;
+    padding:14px 16px; margin:10px 0; cursor:pointer; min-height:56px; }
+  .opt:hover { background:#f3f2f1; }
+  .opt input { width:26px; height:26px; margin-top:2px; flex:0 0 auto; accent-color:var(--blue); }
+  .opt label { cursor:pointer; flex:1; }
+  .hint { color:var(--muted); font-size:.95rem; margin-bottom:8px; }
+  .panel { border:5px solid var(--green); padding:18px 20px; margin:18px 0; }
+  .panel.fail { border-color:var(--red); }
+  .panel h1 { margin-top:0; }
+  .err { border:5px solid var(--red); padding:16px 20px; }
+  a { color:var(--blue); }
+  .row { display:flex; gap:10px; }
+  .row .btn { margin-top:0; }
+</style>
+</head>
+<body>
+<div class="bar">Day <span>Webster</span> — Mandatory training</div>
+<main id="app"><p class="muted">Loading…</p></main>
+
+<script>
+// The project's Functions base. No anon key, no supabase-js: this page speaks
+// only to the training-portal function. Update to your project ref on deploy.
+const SUPABASE_URL = 'https://udttpnaenmyxviuiwxqw.supabase.co';
+const PORTAL = SUPABASE_URL + '/functions/v1/training-portal';
+
+const app = document.getElementById('app');
+const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// Tiny, safe subset of Markdown -> HTML (escape first, then **bold** + line breaks).
+const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+
+let session = null;   // session_token from consume
+let moduleInfo = null;
+let kbContent = [];    // cached KB from consume (link is single-use — can't re-consume)
+let questions = [];    // [{id, stem, options:[{key,text}]}]
+let attemptId = null;
+let idx = 0;
+let answers = {};      // { question_id: Set(keys) }
+
+function post(body) {
+  return fetch(PORTAL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, // NO Authorization — token is the credential
+    body: JSON.stringify(body),
+  }).then(async r => ({ ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) }));
+}
+
+function tokenFromUrl() {
+  return new URLSearchParams(location.search).get('token');
+}
+
+function showError(msg) {
+  app.innerHTML = `<div class="err"><h1>This link can't be opened</h1>
+    <p>${esc(msg || 'The training link is invalid, has expired, or has already been used.')}</p>
+    <p class="muted">If you think this is a mistake, contact your Day Webster compliance coordinator for a fresh link.</p></div>`;
+}
+
+async function start() {
+  const token = tokenFromUrl();
+  if (!token) { showError('No training token was found in the link.'); return; }
+  const res = await post({ mode: 'consume', token });
+  if (!res.ok || !res.data.session_token) { showError(); return; }
+  session = res.data.session_token;
+  moduleInfo = res.data.module || {};
+  kbContent = res.data.content || [];
+  renderKB();
+}
+
+function renderKB() {
+  const sections = (kbContent || []).map(s => `<div class="kb"><h2>${esc(s.heading)}</h2><div>${md(s.body_md)}</div></div>`).join('')
+    || '<p class="muted">No learning material was provided for this module.</p>';
+  app.innerHTML = `
+    <p class="progress">Step 1 of 2 — Read the material</p>
+    <h1>${esc(moduleInfo.title || 'Mandatory training')}</h1>
+    ${moduleInfo.framework_subject ? `<p class="lede muted">${esc(moduleInfo.framework_subject)}</p>` : ''}
+    <p class="lede">Please read each section carefully. When you're ready you'll answer
+      ${moduleInfo.question_count ? esc(moduleInfo.question_count) : 'a few'} questions.
+      You need ${moduleInfo.pass_threshold ? esc(moduleInfo.pass_threshold) : '75'}% to pass.
+      You can retake the assessment as many times as you need.</p>
+    ${sections}
+    <button class="btn" id="startBtn">Start assessment</button>`;
+  document.getElementById('startBtn').onclick = beginAssessment;
+  window.scrollTo(0, 0);
+}
+
+async function beginAssessment() {
+  document.getElementById('startBtn').disabled = true;
+  const res = await post({ mode: 'start', session_token: session });
+  if (!res.ok || !res.data.attempt_id) { showError('The assessment could not be started. Your session may have expired.'); return; }
+  attemptId = res.data.attempt_id;
+  questions = res.data.questions || [];
+  idx = 0;
+  answers = {};
+  for (const q of questions) answers[q.id] = new Set();
+  renderQuestion();
+}
+
+function renderQuestion() {
+  const q = questions[idx];
+  if (!q) return;
+  const sel = answers[q.id];
+  const opts = (q.options || []).map(o => {
+    const id = `q_${q.id}_${o.key}`;
+    const checked = sel.has(o.key) ? 'checked' : '';
+    return `<div class="opt"><input type="checkbox" id="${id}" value="${esc(o.key)}" ${checked} />
+      <label for="${id}">${esc(o.text)}</label></div>`;
+  }).join('');
+  const last = idx === questions.length - 1;
+  app.innerHTML = `
+    <p class="progress">Question ${idx + 1} of ${questions.length}</p>
+    <fieldset>
+      <legend>${esc(q.stem)}</legend>
+      <p class="hint">Select all answers that apply.</p>
+      ${opts}
+    </fieldset>
+    <div class="row" style="margin-top:18px;">
+      ${idx > 0 ? '<button class="btn secondary" id="backBtn">Back</button>' : ''}
+      <button class="btn" id="nextBtn">${last ? 'Submit assessment' : 'Next'}</button>
+    </div>`;
+  app.querySelectorAll('.opt input').forEach(cb => cb.onchange = () => {
+    if (cb.checked) sel.add(cb.value); else sel.delete(cb.value);
+  });
+  const back = document.getElementById('backBtn');
+  if (back) back.onclick = () => { idx--; renderQuestion(); };
+  document.getElementById('nextBtn').onclick = () => {
+    if (last) submitAssessment(); else { idx++; renderQuestion(); }
+  };
+  window.scrollTo(0, 0);
+}
+
+async function submitAssessment() {
+  document.getElementById('nextBtn').disabled = true;
+  const payload = {};
+  for (const q of questions) payload[q.id] = Array.from(answers[q.id] || []);
+  const res = await post({ mode: 'submit', session_token: session, attempt_id: attemptId, answers: payload });
+  if (!res.ok) { showError('Your answers could not be submitted. Your session may have expired.'); return; }
+  renderResult(res.data);
+}
+
+function renderResult(r) {
+  if (r.passed) {
+    app.innerHTML = `
+      <div class="panel">
+        <h1>You passed</h1>
+        <p class="lede">You scored ${esc(r.score)}% on <strong>${esc(moduleInfo.title || 'this module')}</strong>.</p>
+        ${r.certificate_id ? `<p>Your certificate ID is <strong>${esc(r.certificate_id)}</strong>.</p>` : ''}
+      </div>
+      ${r.cert_url ? `<a class="btn" href="${esc(r.cert_url)}" target="_blank" rel="noopener">Download your certificate</a>
+        <p class="muted" style="margin-top:10px;">The download link is valid for a few minutes. You can close this page once you've saved your certificate.</p>`
+      : '<p class="muted">Your certificate has been recorded. Your compliance coordinator can send you a copy.</p>'}`;
+  } else {
+    app.innerHTML = `
+      <div class="panel fail">
+        <h1>Not passed yet</h1>
+        <p class="lede">You scored ${esc(r.score)}%. You need ${moduleInfo.pass_threshold ? esc(moduleInfo.pass_threshold) : '75'}% to pass.</p>
+        <p>Don't worry — you can review the material and try again. A new set of questions will be shown.</p>
+      </div>
+      <button class="btn" id="retryBtn">Review material and try again</button>`;
+    // The magic link is single-use, but the session (~60 min) is still valid, so
+    // a retake re-reads the cached material and re-starts against the same session.
+    document.getElementById('retryBtn').onclick = () => renderKB();
+  }
+  window.scrollTo(0, 0);
+}
+
+start().catch(() => showError());
+</script>
+</body>
+</html>

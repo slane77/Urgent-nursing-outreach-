@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Verify a training certificate — Day Webster</title>
+<!--
+  PUBLIC certificate verification (design §5, [DECISION C2]). Light/neutral, no
+  login. Talks ONLY to the certificate-verify edge function, which returns the
+  minimal verify_certificate() whitelist — module, subject, SfH ref, dates, status
+  and candidate INITIALS only. No full name / DOB / score is ever shown. It holds
+  no Supabase key and makes no direct table access.
+-->
+<style>
+  :root { --ink:#0b0c0c; --muted:#505a5f; --line:#b1b4b6; --blue:#1d70b8;
+    --green:#00703c; --red:#d4351c; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; background:#fff; color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; font-size:18px; line-height:1.4; }
+  .bar { background:var(--ink); color:#fff; padding:12px 16px; font-weight:700; }
+  .bar span { color:#5cb8ff; }
+  main { max-width:620px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { font-size:1.7rem; margin:.2em 0 .4em; }
+  label { display:block; font-weight:700; margin-bottom:6px; }
+  input { width:100%; font-size:1.1rem; padding:12px 14px; border:2px solid var(--ink); border-radius:4px; }
+  input:focus { outline:3px solid #ffdd00; }
+  .btn { background:var(--green); color:#fff; border:0; border-bottom:2px solid rgba(0,0,0,.3);
+    font-size:1.1rem; font-weight:700; padding:13px 20px; border-radius:4px; cursor:pointer; margin-top:16px; }
+  .btn:hover { background:#005a30; }
+  .muted { color:var(--muted); }
+  .card { border:2px solid var(--line); border-radius:6px; padding:18px 20px; margin-top:22px; }
+  .card.valid { border-color:var(--green); border-left-width:8px; }
+  .card.expired { border-color:#b45309; border-left-width:8px; }
+  .card.invalid { border-color:var(--red); border-left-width:8px; }
+  .status { font-size:1.25rem; font-weight:800; margin:0 0 8px; }
+  .status.valid { color:var(--green); }
+  .status.expired { color:#b45309; }
+  .status.invalid { color:var(--red); }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:6px 16px; margin:12px 0 0; }
+  dt { color:var(--muted); }
+  dd { margin:0; font-weight:600; }
+  .certid { font-family:"Courier New",monospace; }
+</style>
+</head>
+<body>
+<div class="bar">Day <span>Webster</span> — Certificate checker</div>
+<main>
+  <h1>Verify a training certificate</h1>
+  <p class="muted">Enter the certificate ID (for example <span class="certid">DW-TRN-2026-3F9K2A</span>) printed on a
+    Day Webster training certificate to confirm it is genuine and current.</p>
+  <label for="cid">Certificate ID</label>
+  <input id="cid" placeholder="DW-TRN-…" autocomplete="off" spellcheck="false" />
+  <button class="btn" id="checkBtn">Check certificate</button>
+  <div id="out"></div>
+</main>
+
+<script>
+// Functions base only — no anon key, no supabase-js. The certificate-verify
+// function is public (verify_jwt=false). Update to your project ref on deploy.
+const SUPABASE_URL = 'https://udttpnaenmyxviuiwxqw.supabase.co';
+const VERIFY = SUPABASE_URL + '/functions/v1/certificate-verify';
+
+const esc = (s) => (s ?? '').toString().replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const out = document.getElementById('out');
+
+function ukDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec((iso ?? '').toString());
+  if (!m) return esc(iso || '—');
+  const mo = ['January','February','March','April','May','June','July','August','September','October','November','December'][+m[2]-1] || m[2];
+  return `${+m[3]} ${mo} ${m[1]}`;
+}
+
+async function check() {
+  const id = document.getElementById('cid').value.trim();
+  if (!id) { out.innerHTML = ''; return; }
+  out.innerHTML = '<p class="muted" style="margin-top:20px">Checking…</p>';
+  let d = {};
+  try {
+    const r = await fetch(VERIFY + '?certificate_id=' + encodeURIComponent(id), { method: 'GET' });
+    d = await r.json().catch(() => ({}));
+  } catch { out.innerHTML = '<div class="card invalid"><p class="status invalid">Could not check</p><p class="muted">Please try again in a moment.</p></div>'; return; }
+
+  if (!d || d.valid !== true) {
+    out.innerHTML = `<div class="card invalid"><p class="status invalid">Not found</p>
+      <p>No Day Webster certificate matches that ID. Check for typos, or ask the certificate holder to confirm the ID.</p></div>`;
+    return;
+  }
+  const expired = d.status === 'expired';
+  const cls = expired ? 'expired' : 'valid';
+  const word = expired ? 'Expired' : 'Valid';
+  out.innerHTML = `<div class="card ${cls}">
+    <p class="status ${cls}">${word} certificate</p>
+    <dl>
+      <dt>Module</dt><dd>${esc(d.module_title)}</dd>
+      ${d.framework_subject ? `<dt>Subject</dt><dd>${esc(d.framework_subject)}</dd>` : ''}
+      ${d.sfh_accreditation_ref ? `<dt>Skills for Health ref</dt><dd>${esc(d.sfh_accreditation_ref)}</dd>` : ''}
+      <dt>Holder</dt><dd>${esc(d.candidate_initials || '—')}</dd>
+      <dt>Completed</dt><dd>${ukDate(d.completion_date)}</dd>
+      <dt>Valid until</dt><dd>${ukDate(d.expiry_date)}</dd>
+    </dl>
+    ${expired ? '<p class="muted" style="margin-top:10px">This training has passed its expiry date and should be renewed.</p>' : ''}
+  </div>
+  <p class="muted" style="margin-top:12px">For privacy, only the holder's initials are shown.</p>`;
+}
+
+document.getElementById('checkBtn').onclick = check;
+document.getElementById('cid').addEventListener('keydown', e => { if (e.key === 'Enter') check(); });
+</script>
+</body>
+</html>

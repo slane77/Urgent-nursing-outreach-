@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Candidates — Day Webster</title>
+<title>Candidates — Day Webster Compliance Portal</title>
 <link rel="stylesheet" href="dw-theme.css" />
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
-  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a class="here" href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="admin.html">Admin</a></nav>
+  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a><span class="wordmark">Compliance Portal</span>
+  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a class="here" href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="compliance.html">Compliance</a><a href="training-admin.html">Training</a><a href="admin.html">Admin</a></nav>
 </header>
 <div class="subbar">
   <div class="tabs" id="tabs">
@@ -237,6 +237,34 @@ async function openCandidate(id) {
       </div>`).join('') || '<span class="muted">None requested yet.</span>'}
     </div>
 
+    <div class="card" id="trainingCard">
+      <h4 style="margin-top:0">Training</h4>
+      <div id="trainingBody"><span class="muted">Loading…</span></div>
+    </div>
+
+    <div class="card" id="clCard">
+      <h4 style="margin-top:0">Client checklists</h4>
+      <p class="muted">Auto-fill a client's own form from this candidate's Compliance Passport. Preview first — every answer shows its provenance and any blank is flagged.</p>
+      <div class="controls" style="gap:8px;">
+        <select id="clTemplate" style="flex:1; min-width:200px"><option value="">Loading templates…</option></select>
+        <button class="btn sm secondary" id="clPreviewBtn">Generate (preview)</button>
+        <button class="btn sm" id="clDownloadBtn">Download</button>
+        <button class="btn sm secondary" id="clSentBtn" disabled>Mark as sent</button>
+      </div>
+      <div id="clStatus" class="muted" style="margin-top:6px"></div>
+      <div id="clReview" style="margin-top:8px"></div>
+      <div style="margin-top:12px; border-top:1px solid var(--hair); padding-top:10px;">
+        <label>Onboard a new client form (their own <code>.docx</code> — no tokens needed)</label>
+        <div id="clDrop" style="border:1px dashed var(--hair); border-radius:10px; padding:14px; text-align:center; cursor:pointer;">
+          Drop a <strong>.docx</strong> here or click to choose — it uploads, then <a href="admin.html" target="_blank">AI-onboard it in Admin</a> (detect &rarr; map &rarr; save).
+          <input type="file" id="clFile" accept=".docx" style="display:none" />
+        </div>
+        <div id="clUploadMsg" class="muted" style="margin-top:6px"></div>
+      </div>
+      <h4 style="margin:14px 0 6px">History</h4>
+      <div id="clHistory"><span class="muted">No checklists generated yet.</span></div>
+    </div>
+
     <div class="card">
       <h4 style="margin-top:0">Employment history</h4>
       ${cov?`<div class="muted" style="margin-bottom:8px;">3-year reference coverage: ${cov.covered?'<span style="color:var(--green);font-weight:600;">✓ complete</span>':(cov.entries===0?'<span style="color:#b45309;font-weight:600;">⚠ no history recorded</span>':`<span style="color:#b45309;font-weight:600;">⚠ ${cov.gaps.length} gap(s)</span> — ${cov.gaps.map(g=>g.from+'→'+g.to+' ('+g.days+'d)').join(', ')}`)}</div>`:''}
@@ -256,8 +284,75 @@ async function openCandidate(id) {
   $('detail').querySelectorAll('[data-resolve]').forEach(b=>b.onclick=()=>resolveItem(b.dataset.resolve,b.dataset.st));
   $('detail').querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>viewDoc(b.dataset.view));
   $('detail').querySelectorAll('[data-airev]').forEach(b=>b.onclick=()=>aiReview(b.dataset.airev,b));
+  initChecklists(c.id);
+  renderTraining(c.id);
 }
 $('closePanel').onclick = () => { $('overlay').classList.add('hidden'); current=null; };
+
+// ---- Training card (mandatory-training engine) ----
+let _pubModules = null;
+async function pubModules() {
+  if (_pubModules) return _pubModules;
+  const { data } = await sb.from('training_modules').select('id,title,current_version_id').not('current_version_id','is',null).order('title');
+  _pubModules = data || [];
+  return _pubModules;
+}
+async function renderTraining(candId) {
+  const body = $('trainingBody');
+  const [{ data:recs }, { data:asgs }, { data:atts }, mods] = await Promise.all([
+    sb.from('training_records').select('id,module_id,source,score,completion_date,expiry_date,certificate_id,certificate_path,training_modules(title)').eq('candidate_id',candId).order('completion_date',{ascending:false}),
+    sb.from('training_assignments').select('id,module_id,status,assigned_at,training_modules(title)').eq('candidate_id',candId).order('assigned_at',{ascending:false}),
+    sb.from('training_attempts').select('id,score,passed,submitted_at,module_versions(training_modules(title))').eq('candidate_id',candId).not('submitted_at','is',null).order('submitted_at',{ascending:false}).limit(20),
+    pubModules(),
+  ]);
+  const today = new Date().toISOString().slice(0,10);
+  const recRows = (recs||[]).map(r=>{
+    const expired = r.expiry_date && r.expiry_date < today;
+    return `<div style="border-bottom:1px solid var(--hair);padding:8px 0;">
+      <strong>${esc(r.training_modules?.title)||'(module)'}</strong>
+      <span class="pill ${expired?'flag':''}">${expired?'expired':'valid'}</span>
+      <span class="muted">${r.source==='manual'?'manual':'assessed'}${r.score!=null?' · '+r.score+'%':''}</span>
+      <div class="muted">Completed ${esc(r.completion_date)} · expires ${esc(r.expiry_date)} · ${esc(r.certificate_id)}</div>
+      ${r.certificate_path?`<button class="btn sm secondary" data-cert="${esc(r.certificate_path)}" style="margin-top:4px">Download certificate</button>`:''}
+    </div>`;
+  }).join('');
+  const openAsg = (asgs||[]).filter(a=>a.status!=='passed');
+  const asgRows = openAsg.map(a=>`<div class="muted" style="padding:2px 0">${esc(a.training_modules?.title)||'(module)'} — <span class="pill">${a.status}</span> assigned ${(a.assigned_at||'').slice(0,10)}</div>`).join('');
+  const attRows = (atts||[]).map(a=>`<div class="muted" style="padding:2px 0">${esc(a.module_versions?.training_modules?.title)||'(module)'} — ${a.passed?'passed':'failed'} ${a.score!=null?a.score+'%':''} · ${(a.submitted_at||'').slice(0,16).replace('T',' ')}</div>`).join('');
+
+  body.innerHTML = `
+    ${recRows||'<span class="muted">No completed training records.</span>'}
+    <div style="margin-top:12px;border-top:1px solid var(--hair);padding-top:10px;">
+      <label>Assign a module</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <select id="tr_module" style="flex:1;min-width:200px">${(mods||[]).map(m=>`<option value="${m.id}">${esc(m.title)}</option>`).join('')||'<option value="">— no published modules —</option>'}</select>
+        <button class="btn sm" id="tr_assign">Assign training</button>
+      </div>
+      <div id="tr_link" class="hidden" style="margin-top:8px;">
+        <div style="display:flex;gap:8px;"><input id="tr_url" readonly style="flex:1"/><button class="btn sm secondary" id="tr_copy">Copy</button></div>
+        <p class="muted" style="margin-top:4px">Single-use magic link, expires in 7 days. Copy it now.</p>
+      </div>
+      <span class="muted" id="tr_msg"></span>
+    </div>
+    ${openAsg.length?`<div style="margin-top:10px"><strong class="muted">Open assignments</strong>${asgRows}</div>`:''}
+    ${attRows?`<div style="margin-top:10px"><strong class="muted">Attempt history</strong>${attRows}</div>`:''}`;
+
+  body.querySelectorAll('[data-cert]').forEach(b=>b.onclick=()=>downloadCert(b.dataset.cert));
+  $('tr_assign').onclick = async () => {
+    const moduleId=$('tr_module').value; if(!moduleId){ $('tr_msg').textContent='Pick a published module.'; return; }
+    $('tr_msg').textContent='Creating link…';
+    const { data, error } = await sb.rpc('assign_training',{ p_candidate_id:candId, p_module_id:moduleId });
+    if(error){ $('tr_msg').textContent='Error: '+error.message; return; }
+    const url = location.origin.replace(/\/$/,'') + '/training.html?token=' + data;
+    $('tr_url').value=url; $('tr_link').classList.remove('hidden'); $('tr_msg').textContent='Link created ✓';
+  };
+  $('tr_copy').onclick=()=>{ $('tr_url').select(); navigator.clipboard?.writeText($('tr_url').value); };
+}
+async function downloadCert(path) {
+  const { data, error } = await sb.storage.from('training-certs').createSignedUrl(path, 300);
+  if (error) { alert(error.message); return; }
+  window.open(data.signedUrl, '_blank');
+}
 $('auditPackBtn').onclick = () => { if (current) window.open('audit-pack.html?id=' + current.id, '_blank'); };
 
 async function saveProfile() {
@@ -372,6 +467,110 @@ async function resolveItem(id, status) {
   if (current) openCandidate(current.id);
   loadReviewCount();
   if (!$('reviewView').classList.contains('hidden')) loadReview();
+}
+
+// ---- Client checklists ----
+const CHECKLIST_FN = window.CONFIG.SUPABASE_URL + '/functions/v1/checklist-fill';
+let clState = { fillId:null, status:null };
+const PROV_COLOR = { verified:'var(--green)', self_declared:'#b45309', derived:'#64748b', static:'#64748b', missing:'#dc2626' };
+
+async function initChecklists(candId) {
+  clState = { fillId:null, status:null };
+  $('clReview').innerHTML=''; $('clStatus').textContent=''; $('clDownloadBtn').disabled=false; $('clSentBtn').disabled=true;
+  const { data:tpls } = await sb.from('checklist_templates').select('id,client_name,name,version').eq('status','active').order('client_name');
+  $('clTemplate').innerHTML = (tpls&&tpls.length)
+    ? '<option value="">Select a client form…</option>' + tpls.map(t=>`<option value="${t.id}">${esc(t.client_name)} — ${esc(t.name)} (v${t.version})</option>`).join('')
+    : '<option value="">No active templates — add one in Admin</option>';
+  $('clPreviewBtn').onclick = () => runChecklist(candId, true);
+  $('clDownloadBtn').onclick = () => runChecklist(candId, false);
+  $('clSentBtn').onclick = () => markChecklistSent(candId);
+  $('clDrop').onclick = () => $('clFile').click();
+  $('clDrop').ondragover = (e)=>{ e.preventDefault(); $('clDrop').style.borderColor='var(--green)'; };
+  $('clDrop').ondragleave = ()=>{ $('clDrop').style.borderColor='var(--hair)'; };
+  $('clDrop').ondrop = (e)=>{ e.preventDefault(); $('clDrop').style.borderColor='var(--hair)'; if(e.dataTransfer.files[0]) uploadTemplate(e.dataTransfer.files[0]); };
+  $('clFile').onchange = ()=>{ if($('clFile').files[0]) uploadTemplate($('clFile').files[0]); };
+  loadChecklistHistory(candId);
+}
+
+async function runChecklist(candId, dryRun) {
+  const tid = $('clTemplate').value; if(!tid){ $('clStatus').textContent='Pick a template first.'; return; }
+  $('clStatus').textContent = dryRun ? 'Resolving preview…' : 'Generating…';
+  const { data:{ session } } = await sb.auth.getSession();
+  try {
+    const res = await fetch(CHECKLIST_FN, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'apikey':window.CONFIG.SUPABASE_ANON_KEY, 'Authorization':'Bearer '+(session?.access_token??'') },
+      body: JSON.stringify({ candidate_id:candId, template_id:tid, dry_run:dryRun }),
+    });
+    const out = await res.json();
+    if (out.error) { $('clStatus').textContent = 'Error: ' + out.error; return; }
+    clState.status = out.status;
+    renderChecklistReview(out);
+    if (dryRun) {
+      $('clStatus').innerHTML = statusPill(out.status) + ' · preview only, nothing saved';
+    } else {
+      clState.fillId = out.fill_id;
+      $('clStatus').innerHTML = statusPill(out.status) + ' · saved to history';
+      $('clSentBtn').disabled = (out.status === 'needs_attention');
+      if (out.signed_url) window.open(out.signed_url, '_blank');
+      loadChecklistHistory(candId);
+    }
+  } catch (e) { $('clStatus').textContent = 'Error: ' + e; }
+}
+
+function statusPill(s){ const c = s==='needs_attention'?'#dc2626':(s==='sent'?'var(--green)':'#64748b'); return `<span class="pill" style="border-color:${c};color:${c}">${(s||'').replace(/_/g,' ')}</span>`; }
+
+function renderChecklistReview(out) {
+  const rows = Object.entries(out.resolved||{}).map(([token,f])=>{
+    const prov = f.provenance||'missing'; const val = (f.rendered ?? f.value);
+    const shown = (val===null||val===undefined||val==='') ? '<span style="color:#dc2626">— missing —</span>' : esc(val);
+    return `<tr><td class="muted">${esc(token)}</td><td>${shown}</td>
+      <td><span class="pill" style="border-color:${PROV_COLOR[prov]||'#64748b'};color:${PROV_COLOR[prov]||'#64748b'}">${prov.replace(/_/g,' ')}</span></td></tr>`;
+  }).join('');
+  const miss = (out.missing_fields||[]).filter(m=>m.required);
+  $('clReview').innerHTML = `${miss.length?`<div class="note" style="border-color:#dc2626;color:#dc2626">${miss.length} required field(s) unresolved: ${miss.map(m=>esc(m.label)).join(', ')}</div>`:''}
+    <table style="margin-top:6px"><thead><tr><th>Token</th><th>Value</th><th>Provenance</th></tr></thead><tbody>${rows||'<tr><td colspan="3" class="muted">No mapped fields.</td></tr>'}</tbody></table>`;
+}
+
+async function markChecklistSent(candId) {
+  if (!clState.fillId) return;
+  const { error } = await sb.rpc('mark_checklist_sent', { p_fill_id: clState.fillId });
+  if (error) { $('clStatus').textContent = 'Error: ' + error.message; return; }
+  $('clStatus').innerHTML = statusPill('sent') + ' · recorded';
+  $('clSentBtn').disabled = true;
+  loadChecklistHistory(candId);
+}
+
+async function loadChecklistHistory(candId) {
+  const { data } = await sb.from('checklist_fills')
+    .select('id,output_path,status,generated_at,template_id,checklist_templates(client_name,name)')
+    .eq('candidate_id', candId).order('generated_at',{ascending:false}).limit(50);
+  $('clHistory').innerHTML = (data&&data.length) ? data.map(f=>`<div style="display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--hair);padding:6px 0;">
+      <span style="flex:1">${esc(f.checklist_templates?.client_name)||'—'} — ${esc(f.checklist_templates?.name)||''}</span>
+      ${statusPill(f.status)}
+      <span class="muted">${(f.generated_at||'').slice(0,16).replace('T',' ')}</span>
+      <button class="btn sm secondary" data-dl="${esc(f.output_path)}">Download</button>
+    </div>`).join('') : '<span class="muted">No checklists generated yet.</span>';
+  $('clHistory').querySelectorAll('[data-dl]').forEach(b=>b.onclick=()=>downloadOutput(b.dataset.dl));
+}
+
+async function downloadOutput(path) {
+  const { data, error } = await sb.storage.from('checklist-outputs').createSignedUrl(path, 300);
+  if (error || !data?.signedUrl) { alert('Could not open file: ' + (error?.message||'unknown')); return; }
+  window.open(data.signedUrl, '_blank');
+}
+
+async function uploadTemplate(file) {
+  // Minimal hand-off: stash the raw client form in the templates bucket's inbox,
+  // then send the officer to the Admin → Checklist library to run the AI onboarding
+  // (detect → map → save). We do NOT create a half-mapped draft here — the
+  // checklist-onboard `save` mode writes the template row once mapping is confirmed.
+  if (!/\.docx$/i.test(file.name)) { $('clUploadMsg').textContent = 'Please choose a .docx file.'; return; }
+  $('clUploadMsg').textContent = 'Uploading…';
+  const path = 'inbox/' + Date.now() + '-' + file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+  const { error:upErr } = await sb.storage.from('checklist-templates').upload(path, file, { upsert:false });
+  if (upErr) { $('clUploadMsg').textContent = 'Upload error: ' + upErr.message; return; }
+  $('clUploadMsg').innerHTML = 'Uploaded ✓ — now <a href="admin.html" target="_blank">AI-onboard it in Admin → Checklist library</a> (drop the same file to detect &amp; map its blanks).';
 }
 
 // ---- Review queue ----
