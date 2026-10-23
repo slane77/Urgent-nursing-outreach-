@@ -26,6 +26,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { createClient } from "npm:@supabase/supabase-js";
 import { sendBrevoEmail, emailHtml } from "../_shared/email.ts";
+import { verifyStaff, unauthorized, CORS } from "../_shared/auth.ts";
 
 const MODEL = "claude-opus-4-8";
 
@@ -238,9 +239,14 @@ ${ctx.state}`;
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  // Staff-only: this function mutates candidate PII, advances pipeline status,
+  // sends email as Day Webster and spends LLM tokens. It must NOT be reachable
+  // with the public anon key — require a verified staff access token.
+  if (!(await verifyStaff(req))) return unauthorized();
   try {
     const { candidate_id, inbound_message, channel = "web", no_send = false } = await req.json();
-    if (!candidate_id) return new Response(JSON.stringify({ error: "candidate_id required" }), { status: 400 });
+    if (!candidate_id) return new Response(JSON.stringify({ error: "candidate_id required" }), { status: 400, headers: CORS });
 
     // --- Load context (taxonomy, candidate, recent transcript) ---
     const [{ data: disciplines }, { data: specialties }, { data: cand }, { data: history }, { data: allReqs }] = await Promise.all([
