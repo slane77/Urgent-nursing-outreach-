@@ -217,6 +217,31 @@ const HCP_AREAS = [
 
 const HCP_AUDIENCES = [
   {
+    "k": "mh_home",
+    "value": "HCP - MH discharge home - all routes",
+    "l": "MH discharge to own home - all routes"
+  },
+  {
+    "k": "mh_adult",
+    "value": "HCP - MH discharge home - adult pathways",
+    "l": "MH home discharge - adult pathways"
+  },
+  {
+    "k": "mh_cyp",
+    "value": "HCP - MH discharge home - CYP pathways",
+    "l": "MH home discharge - children / CAMHS"
+  },
+  {
+    "k": "mh_warm",
+    "value": "HCP - MH discharge home - existing brokerage",
+    "l": "MH home discharge - existing brokerage"
+  },
+  {
+    "k": "mh_discharge",
+    "value": "HCP - MH discharge home - clinical introductions",
+    "l": "MH home discharge - clinical introductions"
+  },
+  {
     "k": "priority",
     "value": "HCP - Priority children's complex care",
     "l": "Priority children's complex care"
@@ -246,11 +271,18 @@ const HCP_COMMISSIONING_AREAS = [
   "Cambridgeshire & Peterborough",
   "East Berkshire / Slough / Maidenhead",
   "Lambeth & Southwark",
-  "Cambridgeshire"
+  "Cambridgeshire",
+  "Hampshire & Isle of Wight",
+  "Southern Counties / Hampshire / Sussex / Kent & Medway",
+  "North London / Barnet / Camden / Enfield / Haringey / Islington",
+  "North London / UCLH",
+  "Camden & Islington"
 ];
 
 function applyHcpTargeting(q, audience, area) {
-  if (audience === 'reviewed') q = q.in('group_name', HCP_AUDIENCES.map(a => a.value));
+  if (audience === 'mh_home') q = q.ilike('contact_notes', '%MH home-discharge audience:%');
+  else if (audience === 'mh_warm') q = q.ilike('contact_notes', '%MH home-discharge audience: mh_warm%');
+  else if (audience === 'reviewed') q = q.in('group_name', HCP_AUDIENCES.map(a => a.value));
   else if (audience !== 'all') q = q.eq('group_name', (HCP_AUDIENCES.find(a => a.k === audience) || HCP_AUDIENCES[0]).value);
   if (area && area !== 'all' && HCP_COMMISSIONING_AREAS.includes(area)) q = q.eq('care_group', area);
   return q;
@@ -272,7 +304,7 @@ function renderHcpTargeting(prefix, audience, area) {
         ${HCP_COMMISSIONING_AREAS.map(a => `<option value="${esc(a)}" ${area===a?'selected':''}>${esc(a)}</option>`).join('')}
       </select>
     </div>
-  </div><p class="muted">Reviewed contacts include existing referral relationships. Commissioning area identifies the team buying care; package delivery locations may differ. Review named contacts and shared inboxes together before selecting recipients.</p>`;
+  </div><p class="muted">${audience && audience.startsWith('mh_') ? 'Mental-health hospital discharge into the person’s own or family home. Specialist teams, existing brokers and clinical introductions have different roles; check the contact notes before outreach. No residential placement or accommodation offer. Review named contacts and shared inboxes together.' : 'Reviewed contacts include existing referral relationships. Commissioning area identifies the team buying care; package delivery locations may differ. Review named contacts and shared inboxes together before selecting recipients.'}</p>`;
 }
 
 const MODAL_SOURCE_OPTIONS = [
