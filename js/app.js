@@ -174,6 +174,10 @@ const state = {
   sourceStatusCounts: { lead: null, live: null, unsubscribed: null },
   ahpSpecialtyFilter: 'all',
   hcpAreaFilter: 'all',
+  hcpAudienceFilter: 'priority',
+  hcpCommissioningFilter: 'all',
+  composeHcpAudienceFilter: 'priority',
+  composeHcpCommissioningFilter: 'all',
   composeAreaFilter: 'all',
   // Multi-select
   selected: new Set()
@@ -210,6 +214,67 @@ const HCP_AREAS = [
   { k: 'case_management', l: 'Case Management' },
   { k: 'private',         l: 'Private / Family' },
 ];
+
+const HCP_AUDIENCES = [
+  {
+    "k": "priority",
+    "value": "HCP - Priority children's complex care",
+    "l": "Priority children's complex care"
+  },
+  {
+    "k": "development",
+    "value": "HCP - Children's commissioning development",
+    "l": "Children's commissioning development"
+  },
+  {
+    "k": "clinical",
+    "value": "HCP - Clinical care commissioning",
+    "l": "Clinical care commissioning"
+  },
+  {
+    "k": "family",
+    "value": "HCP - Family support",
+    "l": "Family support"
+  }
+];
+const HCP_COMMISSIONING_AREAS = [
+  "Redbridge / Barking & Dagenham / Havering",
+  "West & North London / Hillingdon",
+  "West & North London",
+  "Bromley",
+  "Lewisham",
+  "Cambridgeshire & Peterborough",
+  "East Berkshire / Slough / Maidenhead",
+  "Lambeth & Southwark",
+  "Cambridgeshire"
+];
+
+function applyHcpTargeting(q, audience, area) {
+  if (audience === 'reviewed') q = q.in('group_name', HCP_AUDIENCES.map(a => a.value));
+  else if (audience !== 'all') q = q.eq('group_name', (HCP_AUDIENCES.find(a => a.k === audience) || HCP_AUDIENCES[0]).value);
+  if (area && area !== 'all' && HCP_COMMISSIONING_AREAS.includes(area)) q = q.eq('care_group', area);
+  return q;
+}
+function applyContactStatusFilter(q, status, source) {
+  if (source === 'hcp' && status === 'eligible') return q.in('status', ['lead', 'live']);
+  return q.eq('status', status === 'eligible' ? 'lead' : status);
+}
+function renderHcpTargeting(prefix, audience, area) {
+  return `<div class="field-row">
+    <div class="field"><label for="${prefix}-audience">Referral audience</label>
+      <select class="select" id="${prefix}-audience">
+        ${[...HCP_AUDIENCES, {k:'reviewed',l:'All reviewed referral contacts'}, {k:'all',l:'All HCP contacts (including unreviewed)'}].map(a => `<option value="${a.k}" ${audience===a.k?'selected':''}>${esc(a.l)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field"><label for="${prefix}-commissioning">Commissioning area</label>
+      <select class="select" id="${prefix}-commissioning">
+        <option value="all" ${!area||area==='all'?'selected':''}>All commissioning areas</option>
+        ${HCP_COMMISSIONING_AREAS.map(a => `<option value="${esc(a)}" ${area===a?'selected':''}>${esc(a)}</option>`).join('')}
+      </select>
+    </div>
+  </div><p class="muted">Reviewed contacts include existing referral relationships. Commissioning area identifies the team buying care; package delivery locations may differ. Review named contacts and shared inboxes together before selecting recipients.</p>`;
+}
+
 const MODAL_SOURCE_OPTIONS = [
   { k: 'gp_surgery',      l: 'GP Surgery' },
   { k: 'hse',             l: 'HSE (Ireland)' },
@@ -584,7 +649,7 @@ function isRecentImportView(stage) {return stage==='added_today'||stage==='recen
 // Dashboard drilldowns and fresh-intake buttons must not inherit hidden filters.
 async function openDatabaseView(stage = 'all', source = 'all') {
   Object.assign(state, {
-    view: 'database', subTab: isRecentImportView(stage) ? 'all' : stage === 'live' ? 'live' : 'lead',
+    view: 'database', subTab: isRecentImportView(stage) ? 'all' : stage === 'live' ? 'live' : source === 'hcp' && stage === 'all' ? 'eligible' : 'lead',
     dbStage: stage === 'live' ? 'all' : stage, sourceFilter: source,
     search: '', regionFilter: '', countryFilter: '', ahpSpecialtyFilter: 'all',
     page: 1, selected: new Set()
@@ -600,8 +665,8 @@ async function openDatabaseView(stage = 'all', source = 'all') {
 
 async function changeDatabaseSource(source) {
   const keepIntake=isRecentImportView(state.dbStage);
-  Object.assign(state,{sourceFilter:source,subTab:keepIntake?'all':'lead',
-    dbStage:keepIntake?state.dbStage:'all',ahpSpecialtyFilter:'all',hcpAreaFilter:'all',selected:new Set(),
+  Object.assign(state,{sourceFilter:source,subTab:keepIntake?'all':source==='hcp'?'eligible':'lead',
+    dbStage:keepIntake?state.dbStage:'all',ahpSpecialtyFilter:'all',hcpAreaFilter:'all',hcpAudienceFilter:'priority',hcpCommissioningFilter:'all',selected:new Set(),
     page:1,search:'',regionFilter:'',countryFilter:''});
   await Promise.all([loadSourceStatusCounts(),loadContactsPage()]);render();
 }
@@ -622,7 +687,7 @@ async function loadContactsPage() {
     query=query.gte('created_at',bounds.start).lt('created_at',bounds.end);
     if(state.recentImportUncontactedOnly) query=query.eq('status','lead').eq('stage','new').is('last_emailed_at',null);
   } else {
-    query=query.eq('status',state.subTab);
+    query=state.sourceFilter==='hcp' && state.subTab==='eligible' ? query.in('status',['lead','live']) : query.eq('status',state.subTab);
     if(state.subTab==='lead') {
       const today2=new Date().toISOString().split('T')[0];
       if(state.dbStage==='followup') query=query.lte('follow_up_date',today2).not('follow_up_date','is',null);
@@ -658,6 +723,7 @@ async function loadContactsPage() {
     query = query.ilike('notes', '%Source: FOI%');
   } else if (sf === 'hcp') {
     query = query.ilike('notes', '%Source: HCP Complex Care%');
+    query = applyHcpTargeting(query, state.hcpAudienceFilter, state.hcpCommissioningFilter);
     if (state.hcpAreaFilter && state.hcpAreaFilter !== 'all') {
       query = query.eq('department', state.hcpAreaFilter);
     }
@@ -848,12 +914,15 @@ function applyComposeSubFilter(q, sel) {
   const st = sel || state;
   const s = st.composeSourceFilter;
   if ((s === 'ahp' || s === 'nhs_scotland') && st.composeSpecialtyFilter && st.composeSpecialtyFilter !== 'all') return q.eq('department', st.composeSpecialtyFilter);
-  if (s === 'hcp' && st.composeAreaFilter && st.composeAreaFilter !== 'all') return q.eq('department', st.composeAreaFilter);
+  if (s === 'hcp') {
+    if (st.composeAreaFilter && st.composeAreaFilter !== 'all') q = q.eq('department', st.composeAreaFilter);
+    return applyHcpTargeting(q, st.composeHcpAudienceFilter, st.composeHcpCommissioningFilter);
+  }
   return q;
 }
 
 async function buildComposeQueueFromDb() {
-  let query = sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*').eq('status', state.composeListFilter);
+  let query = applyContactStatusFilter(sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*'), state.composeListFilter, state.composeSourceFilter);
   query = applyComposeSourceFilter(query, state.composeSourceFilter);
   query = applyComposeSubFilter(query);
   if (state.composeRegionFilter) query = query.eq('region', state.composeRegionFilter);
@@ -875,8 +944,7 @@ async function buildComposeQueueFromDb() {
 
 async function previewComposeCounts() {
   // Count matching the current filters
-  let q = sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*', { count: 'exact', head: true })
-    .eq('status', state.composeListFilter);
+  let q = applyContactStatusFilter(sb.from(state.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*', { count: 'exact', head: true }), state.composeListFilter, state.composeSourceFilter);
   q = applyComposeSourceFilter(q, state.composeSourceFilter);
   q = applyComposeSubFilter(q);
   if (state.composeRegionFilter) q = q.eq('region', state.composeRegionFilter);
@@ -1030,7 +1098,7 @@ function renderDatabase() {
         <button class="btn small batch-btn stage-btn" data-bulk="stage-responded">✓ Responded</button>
         <button class="btn small batch-btn stage-btn" data-bulk="stage-meeting">📅 Meeting</button>
         <button class="btn small batch-btn compose-btn" data-bulk="send-compose">✉ Send via Brevo (${selN})</button>
-      ` : state.subTab === 'live' ? `
+      ` : (state.subTab === 'live' || state.subTab === 'eligible') ? `
         <button class="btn small batch-btn" data-bulk="restore">→ Move to Leads</button>
         <button class="btn small batch-btn" data-bulk="unsubscribe">⊘ Unsubscribe</button>
         <button class="btn small batch-btn compose-btn" data-bulk="send-compose">✉ Send via Brevo (${selN})</button>
@@ -1070,8 +1138,9 @@ function renderDatabase() {
 
     ${state.sourceFilter === 'hcp' ? `
     <div class="stage-tabs">
-      ${[{k:'all', l:'All areas'}, ...HCP_AREAS].map(s => `<button class="stage-tab${state.hcpAreaFilter===s.k?' active':''}" data-area="${s.k}">${s.l}</button>`).join('')}
-    </div>` : ''}
+      ${[{k:'all', l:'All team types'}, ...HCP_AREAS].map(s => `<button class="stage-tab${state.hcpAreaFilter===s.k?' active':''}" data-area="${s.k}">${s.l}</button>`).join('')}
+    </div>
+    ${renderHcpTargeting('db-hcp', state.hcpAudienceFilter, state.hcpCommissioningFilter)}` : ''}
 
     ${state.subTab === 'lead' || intakeView ? `
     <div class="stage-tabs">
@@ -1087,6 +1156,7 @@ function renderDatabase() {
     </div>` : ''}
     ${intakeView ? `<div class="toolbar"><label for="recent-import-period">Added</label><select class="select" id="recent-import-period">${[['today','Today'],['yesterday','Yesterday'],['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days']].map(([value,label])=>'<option value="'+value+'" '+((state.dbStage==='added_today'?'today':state.recentImportPeriod||'7')===value?'selected':'')+'>'+label+'</option>').join('')}</select><label><input type="checkbox" id="recent-import-uncontacted" ${state.recentImportUncontactedOnly?'checked':''} /> Uncontacted only</label></div><p class="muted">UK calendar dates include overnight and weekend imports. Recently added includes all statuses; Uncontacted only excludes recorded email history and contacts already progressed.</p>` : ''}
     <div class="subtabs">
+      ${state.sourceFilter === 'hcp' && !intakeView ? `<div class="subtab ${state.subTab==='eligible'?'active':''}" data-subtab="eligible">Leads + Live</div>` : ''}
       ${intakeView ? '<div class="subtab active">'+(state.recentImportUncontactedOnly?'Uncontacted leads':'All statuses')+'</div>' : ''}
       <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">
         Leads
@@ -1124,7 +1194,7 @@ function renderDatabase() {
             <th style="width:36px;text-align:center">
               ${intakeView ? 'Status / stage' : canSelectDatabasePage() ? `<label style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap" title="Select all contacts on this page"><input type="checkbox" id="select-all-cb" aria-label="Select all contacts on this page" ${allPageSel ? 'checked' : ''} ${state.currentRows.length ? '' : 'disabled'} />Select all</label>` : 'Select'}
             </th>
-            ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">Group</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
+            ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">${state.sourceFilter==='hcp'?'Commissioning area':'Group'}</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
             ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
               <th>Contact Name</th>
               <th>Job Title</th><th class="hide-sm">Vacancy</th>
@@ -1149,8 +1219,8 @@ function renderDatabase() {
               </td>
               ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
               <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
-              <td>${esc(c.care_group) || '<span class="muted">—</span>'}</td>
-              <td class="hide-sm">${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' ')) || '<span class="muted">—</span>'}</td>
+              <td>${esc(c.care_group) || '<span class="muted">—</span>'}${state.sourceFilter==='hcp' && c.group_name ? '<div class="muted" style="font-size:11px;">'+esc(c.group_name.replace(/^HCP - /,''))+'</div>' : ''}</td>
+              <td class="hide-sm">${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' ')) || '<span class="muted">—</span>'}${state.sourceFilter==='hcp' && c.job_title ? '<div class="muted" style="font-size:11px;">'+esc(c.job_title)+'</div>' : ''}</td>
               <td>${esc(c.phone) || '<span class="muted">—</span>'}</td>
               <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
               <td class="hide-sm">${esc(c.town || c.add1) || '<span class="muted">—</span>'}</td>
@@ -1311,7 +1381,7 @@ async function buildAllComposeContactsFromDb() {
   const PAGE = 501;
   const out = [];
   for (let from = 0; ; from += PAGE) {
-    let query = sb.from(selection.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*').eq('status', selection.composeListFilter);
+    let query = applyContactStatusFilter(sb.from(selection.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*'), selection.composeListFilter, selection.composeSourceFilter);
     query = applyComposeSourceFilter(query, selection.composeSourceFilter);
     query = applyComposeSubFilter(query, selection);
     if (selection.composeRegionFilter) query = query.eq('region', selection.composeRegionFilter);
@@ -1347,7 +1417,7 @@ function renderCompose() {
   const _composeSS = (state.composeSourceFilter !== 'all' && state.sourceStatusAll && state.sourceStatusAll[state.composeSourceFilter]) || null;
   const composeLeadCount = _composeSS ? (_composeSS.lead || 0) : state.counts.lead;
   const composeLiveCount = _composeSS ? (_composeSS.live || 0) : state.counts.live;
-  const sourceCount = (state.composeListFilter === 'live' ? composeLiveCount : composeLeadCount) || 0;
+  const sourceCount = (state.composeSourceFilter==='hcp' && state.composeListFilter==='eligible' ? composeLiveCount+composeLeadCount : state.composeListFilter === 'live' ? composeLiveCount : composeLeadCount) || 0;
   const previewMatch = state.composePreviewCounts ? state.composePreviewCounts.matching : null;
 
   return `
@@ -1395,9 +1465,9 @@ function renderCompose() {
         </div>
         ${state.composeSourceFilter === 'hcp' ? `
         <div class="field">
-          <label>Area</label>
+          <label>Team type</label>
           <select class="select" id="compose-area">
-            <option value="all" ${(!state.composeAreaFilter||state.composeAreaFilter==='all')?'selected':''}>All areas</option>
+            <option value="all" ${(!state.composeAreaFilter||state.composeAreaFilter==='all')?'selected':''}>All team types</option>
             ${HCP_AREAS.map(o => `<option value="${o.k}" ${state.composeAreaFilter===o.k?'selected':''}>${o.l}</option>`).join('')}
           </select>
         </div>
@@ -1414,6 +1484,7 @@ function renderCompose() {
         <div class="field">
           <label>Status</label>
           <select class="select" id="compose-list">
+            ${state.composeSourceFilter==='hcp'?`<option value="eligible" ${state.composeListFilter==='eligible'?'selected':''}>Leads + Live (${(composeLeadCount+composeLiveCount).toLocaleString()})</option>`:''}
             <option value="lead" ${state.composeListFilter==='lead'?'selected':''}>Leads (${composeLeadCount.toLocaleString()})</option>
             <option value="live" ${state.composeListFilter==='live'?'selected':''}>Live (${composeLiveCount.toLocaleString()})</option>
           </select>
@@ -1446,6 +1517,7 @@ function renderCompose() {
           <input class="select" id="compose-town" value="${esc(state.composeTownFilter)}" placeholder="e.g. London, Birmingham" />
         </div>
       </div>
+      ${state.composeSourceFilter==='hcp' ? renderHcpTargeting('compose-hcp', state.composeHcpAudienceFilter, state.composeHcpCommissioningFilter) : ''}
       <div class="field">
         <label>Batch size (recommended max 250)</label>
         <input class="select" type="number" id="compose-batch" value="${state.composeBatchSize}" min="1" max="2000" />
@@ -3337,6 +3409,11 @@ function bindEvents() {
     };
   });
 
+  for (const [id, key] of [['db-hcp-audience','hcpAudienceFilter'],['db-hcp-commissioning','hcpCommissioningFilter']]) {
+    const el=document.getElementById(id);
+    if(el) el.onchange=async e=>{state[key]=e.target.value;state.page=1;await loadContactsPage();render();};
+  }
+
   // Area sub-filter tabs (HCP view)
   document.querySelectorAll('[data-area]').forEach(btn => {
     btn.onclick = async () => {
@@ -3526,6 +3603,12 @@ function bindEvents() {
       if (action === 'send-compose') {
         state.composeSelectedIds = [...state.selected];
         state.composeSourceFilter = state.sourceFilter;
+        if(state.sourceFilter==='hcp') {
+          state.composeAreaFilter=state.hcpAreaFilter;
+          state.composeHcpAudienceFilter=state.hcpAudienceFilter;
+          state.composeHcpCommissioningFilter=state.hcpCommissioningFilter;
+          state.composeListFilter=state.subTab;
+        }
         state.composeSpecialtyFilter = state.ahpSpecialtyFilter || 'all';
         state.composeBrevoResult = null;
         state.composeBrevoSending = false;
@@ -3616,7 +3699,11 @@ function bindEvents() {
   if (composeTemplate) composeTemplate.onchange = (e) => { state.composeTemplateId = e.target.value; render(); };
   const composeList = $('#compose-list');
   const composeSource = $('#compose-source');
-  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composeSpecialtyFilter = 'all'; state.composeAreaFilter = 'all'; state.composePreviewCounts = null; render(); };
+  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composeSpecialtyFilter = 'all'; state.composeAreaFilter = 'all'; state.composeHcpAudienceFilter='priority'; state.composeHcpCommissioningFilter='all'; state.composeListFilter=state.composeSourceFilter==='hcp'?'eligible':'lead'; state.composePreviewCounts = null; render(); };
+  for (const [id,key] of [['compose-hcp-audience','composeHcpAudienceFilter'],['compose-hcp-commissioning','composeHcpCommissioningFilter']]) {
+    const el=document.getElementById(id);
+    if(el) el.onchange=e=>{state[key]=e.target.value;state.composePreviewCounts=null;render();};
+  }
   const composeArea = $('#compose-area');
   if (composeArea) composeArea.onchange = (e) => { state.composeAreaFilter = e.target.value; state.composePreviewCounts = null; render(); };
   const composeSpecialty = $('#compose-specialty');
