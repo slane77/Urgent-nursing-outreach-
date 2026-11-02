@@ -61,3 +61,25 @@ test('Compose renders accessible referral and commissioning controls only for HC
  const {ctx,state}=harness();let html=ctx.renderCompose();assert.match(html,/id="compose-hcp-audience"/);assert.match(html,/for="compose-hcp-audience"/);assert.match(html,/id="compose-hcp-commissioning"/);assert.match(html,/value="eligible" selected/);assert.match(html,/Review named contacts and shared inboxes/);
  state.composeSourceFilter='gp_surgery';state.composeListFilter='lead';html=ctx.renderCompose();assert.doesNotMatch(html,/id="compose-hcp-audience"/);assert.doesNotMatch(html,/value="eligible"/);
 });
+
+test('MH home-discharge audience includes specialist and warm introduction routes while excluding placements and suppressed records',async()=>{
+ const {ctx,state,rows}=harness();
+ const add=(id,group,role,status='lead')=>rows.push({...rows[0],id,email:id+'@example.invalid',group_name:group,status,contact_notes:'MH home-discharge audience: '+role+' | Own/family-home scope only'});
+ add('mh-adult','HCP - MH discharge home - adult pathways','mh_adult');
+ add('mh-child','HCP - MH discharge home - CYP pathways','mh_cyp','live');
+ add('mh-warm',priority,'mh_warm','live');
+ add('mh-clinical','HCP - MH discharge home - clinical introductions','mh_discharge');
+ add('mh-unsub','HCP - MH discharge home - adult pathways','mh_adult','unsubscribed');
+ rows.push({...rows[0],id:'homefinding',group_name:development,contact_notes:'Residential placement and home-finding enquiry'});
+ state.hcpAudienceFilter='mh_home';state.composeHcpAudienceFilter='mh_home';
+ await ctx.loadContactsPage();
+ const expected=['mh-adult','mh-child','mh-clinical','mh-warm'];
+ assert.deepEqual(Array.from(state.currentRows,r=>r.id).sort(),expected);
+ assert.equal((await ctx.previewComposeCounts()).matching,4);
+ assert.deepEqual(Array.from(await ctx.buildAllComposeContactsFromDb(),r=>r.id).sort(),expected);
+ state.hcpAudienceFilter='mh_warm';await ctx.loadContactsPage();
+ assert.deepEqual(Array.from(state.currentRows,r=>r.id),['mh-warm'],'Warm contact keeps its existing primary classification');
+ state.hcpAudienceFilter='mh_cyp';await ctx.loadContactsPage();
+ assert.deepEqual(Array.from(state.currentRows,r=>r.id),['mh-child']);
+ assert.match(ctx.renderCompose(),/No residential placement or accommodation offer/);
+});
