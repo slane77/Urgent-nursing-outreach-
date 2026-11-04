@@ -53,6 +53,7 @@ const state = {
   composePreviewCounts: null,
   composeSelectedIds: null,   // IDs pre-selected from database for direct Brevo send
   composeBrevoSending: false,
+  composeReviewLoading: false,
   composeBrevoResult: null,
   // Modal
   modal: null,
@@ -1405,7 +1406,62 @@ async function reviewContactMailshot(template, ids, options, contacts) {
 }
 
 async function sendFilteredViaBrevo() {
-  return toast('Sending to all matching records is disabled. Select recipients in an assigned database first.','error');
+  if (state.composeReviewLoading || state.composeBrevoSending) return;
+  const template = state.templates.find(t => t.id === state.composeTemplateId);
+  if (!template) return toast('Select a template first.', 'error');
+  const options = composeSenderFields();
+  const error = contactSendError(template, 1, options);
+  if (error) return toast(error, 'error');
+  const selection = {...state};
+  const userId = state.user?.id;
+  const key = composeReviewKey(selection);
+  state.composeReviewLoading = true;
+  render();
+  try {
+    const contacts = await withConnectionTimeout(buildComposeReviewContacts(selection));
+    if (state.user?.id !== userId || state.view !== 'compose' || composeReviewKey(state) !== key) {
+      return toast('Your audience or template changed. Review the current selection again.', 'error');
+    }
+    if (!contacts.length) return toast('No eligible email addresses match these filters.', 'error');
+    await reviewContactMailshot({...template}, contacts.map(c => c.id), options, contacts);
+  } catch (error) {
+    toast('Could not load recipients for review. No emails queued. ' + error.message, 'error');
+  } finally {
+    state.composeReviewLoading = false;
+    render();
+  }
+}
+
+function composeReviewLimit(selection = state) {
+  return Math.min(500, Math.max(1, Math.trunc(Number(selection.composeBatchSize) || 250)));
+}
+
+function composeReviewKey(selection) {
+  return JSON.stringify([selection.composeTemplateId, selection.composeSourceFilter,
+    selection.composeListFilter, selection.composeSpecialtyFilter, selection.composeAreaFilter,
+    selection.composeHcpAudienceFilter, selection.composeHcpCommissioningFilter,
+    selection.composeRegionFilter, selection.composeCountryFilter, selection.composeTownFilter,
+    selection.composeUncontactedOnly, composeReviewLimit(selection)]);
+}
+
+async function buildComposeReviewContacts(selection) {
+  let query = applyContactStatusFilter(sb.from(selection.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*'), selection.composeListFilter, selection.composeSourceFilter);
+  query = applyComposeSourceFilter(query, selection.composeSourceFilter);
+  query = applyComposeSubFilter(query, selection);
+  if (selection.composeRegionFilter) query = query.eq('region', selection.composeRegionFilter);
+  if (selection.composeCountryFilter) query = query.eq('country', selection.composeCountryFilter);
+  if (selection.composeTownFilter) query = query.ilike('town', `%${selection.composeTownFilter}%`);
+  if (selection.composeUncontactedOnly) query = query.is('last_emailed_at', null);
+  query = query.ilike('email', '%@%').order('updated_at', {ascending: true}).order('id', {ascending: true}).range(0, composeReviewLimit(selection) - 1);
+  const {data, error} = await query;
+  if (error || !Array.isArray(data)) throw new Error(error?.message || 'The recipient list was not returned.');
+  const seen = new Set();
+  return data.filter(c => {
+    const email = String(c.email || '').trim().toLowerCase();
+    if (!c.id || !['lead', 'live'].includes(c.status) || !email.includes('@') || seen.has(email)) return false;
+    seen.add(email);
+    return true;
+  });
 }
 
 async function buildAllComposeContactsFromDb() {
@@ -1451,6 +1507,9 @@ function renderCompose() {
   const composeLiveCount = _composeSS ? (_composeSS.live || 0) : state.counts.live;
   const sourceCount = (state.composeSourceFilter==='hcp' && state.composeListFilter==='eligible' ? composeLiveCount+composeLeadCount : state.composeListFilter === 'live' ? composeLiveCount : composeLeadCount) || 0;
   const previewMatch = state.composePreviewCounts ? state.composePreviewCounts.matching : null;
+  const reviewLimit = composeReviewLimit();
+  const reviewLabel = previewMatch === null ? 'Review & send matching contacts' : previewMatch <= reviewLimit ? `Review & send all ${previewMatch} matching contacts` : `Review & send first ${reviewLimit} matching contacts`;
+  const canReview = template && canSendContactSource(state.userProfile, state.composeSourceFilter) && previewMatch !== 0 && !state.composeReviewLoading && !state.composeBrevoSending;
 
   return `
     <h2 class="section-title">Compose Mailshot</h2>
@@ -1551,8 +1610,8 @@ function renderCompose() {
       </div>
       ${state.composeSourceFilter==='hcp' ? renderHcpTargeting('compose-hcp', state.composeHcpAudienceFilter, state.composeHcpCommissioningFilter) : ''}
       <div class="field">
-        <label>Batch size (recommended max 250)</label>
-        <input class="select" type="number" id="compose-batch" value="${state.composeBatchSize}" min="1" max="2000" />
+        <label>Maximum recipients in this batch (up to 500)</label>
+        <input class="select" type="number" id="compose-batch" value="${reviewLimit}" min="1" max="500" />
       </div>
     </div>
 
@@ -1561,7 +1620,7 @@ function renderCompose() {
       <div class="stat-row">
         <div class="stat"><div class="label">Total in list</div><div class="value">${sourceCount}</div></div>
         <div class="stat"><div class="label">Match filter</div><div class="value" style="color:var(--orange-dark);">${previewMatch === null ? '?' : previewMatch}</div></div>
-        <div class="stat"><div class="label">This batch</div><div class="value" style="color:var(--green);">${previewMatch === null ? '?' : Math.min(state.composeBatchSize, previewMatch)}</div></div>
+        <div class="stat"><div class="label">This batch</div><div class="value" style="color:var(--green);">${previewMatch === null ? '?' : Math.min(reviewLimit, previewMatch)}</div></div>
       </div>
       <button class="btn" id="refresh-preview">Refresh preview</button>
       <div class="muted" style="margin-top:8px;">Unsubscribed contacts are automatically excluded — their status puts them in a separate bucket from Leads/Live.</div>
@@ -1572,10 +1631,11 @@ function renderCompose() {
       <p class="muted" style="margin:0 0 14px;font-size:12px;">Sends personalised emails to each contact using your template. Each contact auto-advances to <strong>Contacted</strong> stage with a 14-day follow-up date.</p>
 
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-        <p class="muted">To send, open an assigned database and select recipients individually. Sending to all matching records is disabled.</p>
+        <button class="btn primary" id="brevo-filter-send-btn" ${canReview ? '' : 'disabled'}>${state.composeReviewLoading ? 'Loading recipients for review...' : esc(reviewLabel)}</button>
         ${!template ? '<span class="muted" style="font-size:12px;">Select a template first</span>' : ''}
-        ${!previewMatch ? '<span class="muted" style="font-size:12px;">No contacts match — adjust filters</span>' : ''}
+        ${previewMatch === 0 ? '<span class="muted" style="font-size:12px;">No contacts match — adjust filters</span>' : ''}
       </div>
+      <p class="muted" style="margin-top:10px;font-size:12px;">Review the recipient list and a personalised email before confirming. Duplicate email addresses within this batch are removed. Nothing is queued until you confirm.</p>
 
       ${state.composeBrevoSending ? `
         <div class="import-progress" style="margin-top:12px;">
@@ -3383,8 +3443,9 @@ function renderModal() {
       <p><strong>From:</strong> ${['ahp','nhs_scotland'].includes(m.options.source) ? 'Specialty team mailbox for each recipient' : m.options.source==='foi' ? 'Dedicated FOI mailbox' : esc((state.senderName || state.userProfile?.sender_name || '')+' <'+(state.senderEmail || state.userProfile?.sender_email || state.user.email)+'>')}</p>
       <p><strong>Source:</strong> ${esc(COMPOSE_SRC_LABELS[m.options.source])}${m.options.subSource ? ' / '+esc(m.options.subSource) : ''}</p>
       <p><strong>Template:</strong> ${esc(m.template.name)}<br><strong>Subject:</strong> ${esc(m.template.subject)}</p>
-      <p><strong>Sample recipients:</strong></p>
-      <ul>${m.contacts.slice(0,5).map(c=>'<li>'+esc(c.org || '')+' — '+esc(c.email)+'</li>').join('')}</ul>
+      <details><summary>Review all ${m.contacts.length} recipients</summary>
+        <ul style="max-height:220px;overflow:auto;">${m.contacts.map(c=>'<li>'+esc(c.org || '')+' — '+esc(c.email)+'</li>').join('')}</ul>
+      </details>
       <details><summary>Preview the first email</summary><pre style="white-space:pre-wrap;max-height:220px;overflow:auto;">${esc(personalize(m.template.body,m.contacts[0]))}</pre></details>
       <p>Sending starts after a two-minute cancellation window. Cancel from Mailshot activity on the dashboard.</p>
       <div class="field"><label for="mailshot-confirm">Type ${esc(phrase)} to queue these emails</label><input id="mailshot-confirm" autocomplete="off" /></div>
@@ -3750,7 +3811,7 @@ function bindEvents() {
   const composeTown = $('#compose-town');
   if (composeTown) composeTown.oninput = (e) => { state.composeTownFilter = e.target.value; state.composePreviewCounts = null; };
   const composeBatch = $('#compose-batch');
-  if (composeBatch) composeBatch.onchange = (e) => { state.composeBatchSize = parseInt(e.target.value) || 250; render(); };
+  if (composeBatch) composeBatch.onchange = (e) => { state.composeBatchSize = composeReviewLimit({composeBatchSize:e.target.value}); render(); };
   const refreshPreview = $('#refresh-preview');
   if (refreshPreview) refreshPreview.onclick = async () => {
     state.composePreviewCounts = await previewComposeCounts();

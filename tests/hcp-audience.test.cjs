@@ -29,7 +29,7 @@ function harness(){
   then(resolve,reject){queries.push({table,calls});const filtered=rows.filter(r=>predicates.every(f=>f(r)));return Promise.resolve({data:filtered.slice(range[0],range[1]+1),count:filtered.length}).then(resolve,reject);}
  };return q;}};
  const ctx=vm.createContext({state,sb,console,esc:v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),canSendContactSource:()=>true,loadSourceStatusCounts:async()=>{},render(){},toast(message){throw Error(message);}});
- vm.runInContext(helpers+section('function applyComposeSourceFilter(', '// Sub-audience filter for Compose:')+section('function londonDayStart(','async function loadTemplates()')+section('function applyComposeSubFilter(','// ============================================================================\n//  RENDER')+section('async function buildAllComposeContactsFromDb()','async function sendSelectedViaBrevo()')+section('function renderCompose()','function renderBrevoSend()'),ctx);
+ vm.runInContext(helpers+section('function applyComposeSourceFilter(', '// Sub-audience filter for Compose:')+section('function londonDayStart(','async function loadTemplates()')+section('function applyComposeSubFilter(','// ============================================================================\n//  RENDER')+section('function composeReviewLimit(','async function sendSelectedViaBrevo()')+section('function renderCompose()','function renderBrevoSend()'),ctx);
  return {ctx,state,rows,queries};
 }
 test('HCP priority audience includes Leads and Live and excludes suppressed, development and unreviewed contacts',async()=>{
