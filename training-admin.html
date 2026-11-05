@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Training — Day Webster Compliance Portal</title>
+<link rel="stylesheet" href="dw-theme.css" />
+<!--
+  Staff authoring / approval console for the Mandatory-Training engine (design §8).
+  Dark dw-theme, topnav like admin.html. Uses the anon key + officer session; the
+  DB (RLS + SECURITY DEFINER RPCs) is the sole access authority. Answer keys are
+  visible ONLY to managers (training_questions SELECT is manager-only), and are
+  never sent anywhere. Approve/publish/manual-entry render only for managers.
+-->
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a><span class="wordmark">Compliance Portal</span>
+  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="compliance.html">Compliance</a><a class="here" href="training-admin.html">Training</a><a href="admin.html">Admin</a></nav>
+</header>
+
+<div class="loginwrap card hidden" id="login">
+  <h3 style="margin-top:0">Sign in</h3><p class="muted">Day Webster email &amp; password.</p>
+  <div class="loginform"><input id="email" type="email" placeholder="you@daywebster.com"/><input id="password" type="password" placeholder="Password"/><button class="btn" id="loginBtn">Sign in</button></div>
+  <p class="muted" id="loginMsg"></p>
+</div>
+
+<main id="app" class="hidden">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;"><span class="muted" id="whoami" style="margin-right:auto;"></span><button class="btn sm secondary" id="logoutBtn">Sign out</button></div>
+  <div class="note" id="roleNote">Authoring &amp; assigning need the compliance-officer role. Approving, publishing and manual entry are manager-only. If a button is refused, ask an admin to set your role.</div>
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-v="catalogue">Module catalogue</div>
+    <div class="tab" data-v="assign">Assign training</div>
+    <div class="tab hidden" data-v="manual" id="manualTab">Manual entry</div>
+  </div>
+
+  <!-- ── Catalogue ─────────────────────────────────────────────────────── -->
+  <div id="catalogueView" class="card" style="margin-top:14px;">
+    <h3 style="margin-top:0">Modules</h3>
+    <p class="muted">Each module is immutably versioned. Author a draft, submit for review, then a manager approves &amp; publishes it (the accreditation gate). Only a published version can be assigned.</p>
+    <div id="modList"><div class="muted">Loading…</div></div>
+  </div>
+
+  <!-- Version editor (opens under the catalogue) -->
+  <div id="editorView" class="card hidden" style="margin-top:14px;">
+    <div style="display:flex;align-items:center;gap:8px;"><h3 style="margin:0" id="edTitle">Edit draft</h3><span class="muted" id="edMsg" style="margin-left:auto"></span><button class="btn sm secondary" id="edClose">Close</button></div>
+
+    <h4 style="margin:16px 0 6px">Knowledge base</h4>
+    <p class="muted">Sections shown to the candidate before the assessment. Markdown supported for <code>**bold**</code>.</p>
+    <div id="kbRows"></div>
+    <div style="margin-top:8px;display:flex;gap:8px;"><button class="btn sm secondary" id="addKb">+ section</button><button class="btn sm" id="saveKb">Save knowledge base</button></div>
+
+    <h4 style="margin:20px 0 6px">Questions <span class="muted" id="qCountLbl"></span></h4>
+    <div class="note" id="qKeyNote">Answer keys are shown to managers only. As an officer you can add questions but cannot read existing keys back (they never leave the server).</div>
+    <div id="qList"></div>
+    <div style="border-top:1px solid var(--hair);margin-top:12px;padding-top:12px;">
+      <h4 style="margin:0 0 6px">Add a question</h4>
+      <label>Question</label><textarea id="q_stem" rows="2" style="width:100%" placeholder="Question text"></textarea>
+      <div id="q_opts"></div>
+      <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><button class="btn sm secondary" id="q_addOpt">+ option</button><span class="muted">Tick the correct option(s).</span></div>
+      <label style="margin-top:8px">Explanation (optional)</label><input id="q_expl" placeholder="Why the correct answer is correct"/>
+      <div style="margin-top:8px;"><button class="btn sm" id="q_add">Add question</button> <span class="muted" id="q_msg"></span></div>
+    </div>
+  </div>
+
+  <!-- ── Assign ────────────────────────────────────────────────────────── -->
+  <div id="assignView" class="card hidden" style="margin-top:14px;">
+    <h3 style="margin-top:0">Assign training</h3>
+    <p class="muted">Creates a single-use magic link (default 7-day expiry) for a candidate to complete a published module. Copy the link into your usual candidate message.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+      <div style="flex:1;min-width:220px"><label>Find candidate</label><input id="as_search" placeholder="name or email"/></div>
+    </div>
+    <div id="as_results" style="margin-top:8px"></div>
+    <div id="as_picked" class="hidden" style="margin-top:10px;border-top:1px solid var(--hair);padding-top:10px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;">
+        <div><label>Candidate</label><div id="as_name" style="padding-top:9px;font-weight:600"></div></div>
+        <div style="flex:1;min-width:220px"><label>Module (must be published)</label><select id="as_module"></select></div>
+        <button class="btn" id="as_go">Create link</button>
+      </div>
+      <div id="as_link" class="hidden" style="margin-top:10px;">
+        <label>Magic link</label>
+        <div style="display:flex;gap:8px;"><input id="as_url" readonly style="flex:1"/><button class="btn sm secondary" id="as_copy">Copy</button></div>
+        <p class="muted" style="margin-top:6px">Single-use, expires in 7 days. Shown once — copy it now.</p>
+      </div>
+      <p class="muted" id="as_msg"></p>
+    </div>
+  </div>
+
+  <!-- ── Manual entry (managers) ───────────────────────────────────────── -->
+  <div id="manualView" class="card hidden" style="margin-top:14px;">
+    <h3 style="margin-top:0">Manual training entry</h3>
+    <p class="muted">Record training completed elsewhere. This issues a Day Webster certificate + a verified, expiring compliance item, and files the external certificate as evidence. Manager-only, fully attributed to you.</p>
+    <div style="flex:1;min-width:220px"><label>Find candidate</label><input id="mn_search" placeholder="name or email"/></div>
+    <div id="mn_results" style="margin-top:8px"></div>
+    <div id="mn_form" class="hidden" style="margin-top:10px;border-top:1px solid var(--hair);padding-top:10px;">
+      <div class="grid2">
+        <div><label>Candidate</label><div id="mn_name" style="padding-top:9px;font-weight:600"></div></div>
+        <div><label>Module</label><select id="mn_module"></select></div>
+        <div><label>Completion date</label><input id="mn_date" type="date"/></div>
+        <div><label>Score % (optional)</label><input id="mn_score" type="number" min="0" max="100"/></div>
+        <div><label>Provider (where completed)</label><input id="mn_provider" placeholder="e.g. previous employer / e-LfH"/></div>
+      </div>
+      <label style="margin-top:8px">External certificate (optional)</label>
+      <div id="mn_drop" style="border:1px dashed var(--hair);border-radius:10px;padding:14px;text-align:center;cursor:pointer;">
+        Drop a file here or click to choose <input type="file" id="mn_file" style="display:none"/>
+      </div>
+      <div id="mn_fileName" class="muted" style="margin-top:6px"></div>
+      <div style="margin-top:10px;"><button class="btn" id="mn_go">Record training</button> <span class="muted" id="mn_msg"></span></div>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script>
+const sb = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY, { db:{ schema:'candidate' } });
+const AUTHORING_FN = window.CONFIG.SUPABASE_URL + '/functions/v1/training-authoring';
+const $=(id)=>document.getElementById(id);
+const esc=(s)=>(s??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const state = { isOfficer:false, isManager:false, modules:[], versions:{}, editing:null };
+
+// ---- Auth ----
+function refreshAuth(session){
+  if(session){ $('whoami').textContent='Signed in as '+session.user.email;
+    sb.from('app_users').upsert({user_id:session.user.id,email:session.user.email,full_name:session.user.user_metadata?.full_name||null,last_seen:new Date().toISOString()}).then(()=>{});
+    $('login').classList.add('hidden');$('app').classList.remove('hidden');init(); }
+  else { $('login').classList.remove('hidden');$('app').classList.add('hidden'); } }
+sb.auth.onAuthStateChange((_e,session)=>refreshAuth(session));
+$('loginBtn').onclick=async()=>{const e=$('email').value.trim(),p=$('password').value;if(!e||!p)return;$('loginMsg').textContent='Signing in…';const {error}=await sb.auth.signInWithPassword({email:e,password:p});$('loginMsg').textContent=error?error.message:'';};
+$('password').addEventListener('keydown',ev=>{if(ev.key==='Enter')$('loginBtn').click();});
+$('logoutBtn').onclick=()=>sb.auth.signOut();
+
+// ---- Role (mirrors candidate.is_compliance_officer / is_manager) ----
+async function resolveRole(){
+  const { data:{ session } } = await sb.auth.getSession();
+  const uid = session?.user?.id; if(!uid) return;
+  const { data:mine } = await sb.from('staff').select('is_compliance,is_admin,is_manager').eq('user_id',uid).maybeSingle();
+  if(mine){ state.isManager=!!(mine.is_manager||mine.is_admin); state.isOfficer=!!(mine.is_compliance||mine.is_manager||mine.is_admin); return; }
+  const { count } = await sb.from('staff').select('*',{count:'exact',head:true});
+  const boot=(count||0)===0; state.isManager=boot; state.isOfficer=boot; // bootstrap
+}
+
+let inited=false;
+async function init(){
+  if(inited) return; inited=true;
+  await resolveRole();
+  $('manualTab').classList.toggle('hidden', !state.isManager);
+  $('qKeyNote').classList.toggle('hidden', state.isManager);
+  await loadModules();
+}
+
+$('tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  if(t.dataset.v==='manual' && !state.isManager) return;
+  $('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); t.classList.add('active');
+  const v=t.dataset.v;
+  $('catalogueView').classList.toggle('hidden',v!=='catalogue');
+  $('editorView').classList.add('hidden');
+  $('assignView').classList.toggle('hidden',v!=='assign');
+  $('manualView').classList.toggle('hidden',v!=='manual');
+});
+
+// ---- Catalogue ----
+async function loadModules(){
+  const { data:mods } = await sb.from('training_modules').select('*').order('is_core',{ascending:false}).order('title');
+  state.modules = mods||[];
+  const { data:vers } = await sb.from('module_versions').select('id,module_id,version,status,ai_generated,ai_model,published_at').order('version',{ascending:false});
+  state.versions={}; (vers||[]).forEach(v=>{(state.versions[v.module_id]=state.versions[v.module_id]||[]).push(v);});
+  renderModules();
+  fillModuleSelects();
+}
+
+function renderModules(){
+  $('modList').innerHTML = state.modules.map(m=>{
+    const vs = state.versions[m.id]||[];
+    const pub = vs.find(v=>v.id===m.current_version_id);
+    const vrows = vs.map(v=>{
+      const isPub = v.id===m.current_version_id;
+      const btns = [];
+      if(state.isOfficer && v.status==='draft'){ btns.push(`<button class="btn sm secondary" data-edit="${v.id}" data-mod="${m.id}">Edit</button>`); btns.push(`<button class="btn sm secondary" data-submit="${v.id}">Submit for review</button>`); }
+      if(state.isOfficer && v.status==='in_review'){ btns.push(`<button class="btn sm secondary" data-edit="${v.id}" data-mod="${m.id}">Edit</button>`); }
+      if(state.isManager && v.status==='in_review'){ btns.push(`<button class="btn sm" data-approve="${v.id}">Approve</button>`); }
+      if(state.isManager && v.status==='approved'){ btns.push(`<button class="btn sm" data-publish="${v.id}">Publish</button>`); }
+      return `<tr><td>v${v.version}</td><td><span class="pill${isPub?'':' '}">${v.status}${isPub?' · current':''}</span></td>
+        <td class="muted">${v.ai_generated?'AI draft':'authored'}</td><td style="white-space:nowrap">${btns.join(' ')}</td></tr>`;
+    }).join('') || '<tr><td colspan="4" class="muted">No versions yet.</td></tr>';
+    return `<div style="border-bottom:1px solid var(--hair);padding:10px 0;">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <strong>${esc(m.title)}</strong> <span class="muted">${esc(m.code)}</span>
+        <span class="pill">${pub?'published v'+pub.version:'no published version'}</span>
+        <span class="muted">valid ${m.validity_months}m · pass ${m.pass_threshold}% · ${m.question_count} Qs</span>
+        <span style="margin-left:auto;display:flex;gap:6px;">
+          ${state.isOfficer?`<button class="btn sm secondary" data-newdraft="${m.id}">New draft</button>`:''}
+          ${state.isOfficer?`<button class="btn sm secondary" data-aidraft="${m.id}">AI draft</button>`:''}
+        </span>
+      </div>
+      <table style="margin-top:6px"><tbody>${vrows}</tbody></table>
+    </div>`;
+  }).join('') || '<div class="muted">No modules seeded yet.</div>';
+
+  $('modList').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditor(b.dataset.mod,b.dataset.edit));
+  $('modList').querySelectorAll('[data-newdraft]').forEach(b=>b.onclick=()=>newDraft(b.dataset.newdraft));
+  $('modList').querySelectorAll('[data-aidraft]').forEach(b=>b.onclick=()=>aiDraft(b.dataset.aidraft,b));
+  $('modList').querySelectorAll('[data-submit]').forEach(b=>b.onclick=()=>pipeline('submit_module_for_review',b.dataset.submit));
+  $('modList').querySelectorAll('[data-approve]').forEach(b=>b.onclick=()=>pipeline('approve_module_version',b.dataset.approve));
+  $('modList').querySelectorAll('[data-publish]').forEach(b=>b.onclick=()=>pipeline('publish_module_version',b.dataset.publish));
+}
+
+async function pipeline(rpc,versionId){
+  const { error } = await sb.rpc(rpc,{ p_version_id:versionId });
+  if(error){ alert(error.message); return; }
+  loadModules();
+}
+
+async function newDraft(moduleId){
+  const { data, error } = await sb.rpc('save_module_version',{ p_module_id:moduleId, p_content:[], p_version_id:null, p_ai_generated:false, p_ai_model:null });
+  if(error){ alert(error.message); return; }
+  await loadModules(); openEditor(moduleId, data);
+}
+
+async function aiDraft(moduleId,btn){
+  const brief = prompt('Optional authoring brief for the AI (scope, emphasis). Leave blank for standard CSTF-level scope:');
+  if(brief===null) return;
+  btn.disabled=true; const old=btn.textContent; btn.textContent='Drafting…';
+  try{
+    const { data:{ session } } = await sb.auth.getSession();
+    const res = await fetch(AUTHORING_FN,{ method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+(session?.access_token||'')}, body:JSON.stringify({ module_id:moduleId, brief }) });
+    const j = await res.json().catch(()=>({}));
+    if(!res.ok){ alert(j.error||('Error '+res.status)); return; }
+    alert(`AI draft created (v-id ${String(j.version_id).slice(0,8)}…): ${j.content_sections} sections, ${j.questions_added} questions. Review it, then a manager approves + publishes.`);
+    await loadModules(); openEditor(moduleId, j.version_id);
+  }catch(e){ alert('Network error: '+e); }
+  finally{ btn.disabled=false; btn.textContent=old; }
+}
+
+// ---- Version editor ----
+async function openEditor(moduleId, versionId){
+  const mod = state.modules.find(m=>m.id===moduleId);
+  const { data:ver } = await sb.from('module_versions').select('id,version,status,content').eq('id',versionId).maybeSingle();
+  if(!ver){ alert('Version not found'); return; }
+  state.editing = { moduleId, versionId, status:ver.status };
+  $('editorView').classList.remove('hidden');
+  $('edTitle').textContent = `${mod?mod.title:''} — v${ver.version} (${ver.status})`;
+  $('edMsg').textContent = ver.status==='draft'?'':'Read-only content once past draft; questions can still be added while in review.';
+  // KB rows
+  const content = Array.isArray(ver.content)?ver.content:[];
+  $('kbRows').innerHTML=''; (content.length?content:[{heading:'',body_md:''}]).forEach(addKbRow);
+  const editable = ver.status==='draft';
+  $('addKb').disabled=!editable; $('saveKb').disabled=!editable;
+  // Questions (manager-only read)
+  await loadQuestions(versionId);
+  buildOptionInputs();
+  $('editorView').scrollIntoView({behavior:'smooth'});
+}
+$('edClose').onclick=()=>{ $('editorView').classList.add('hidden'); state.editing=null; };
+
+function addKbRow(entry){
+  entry=entry||{heading:'',body_md:''};
+  const div=document.createElement('div');
+  div.style.cssText='border:1px solid var(--hair);border-radius:8px;padding:8px;margin-bottom:8px;';
+  div.innerHTML=`<input class="kb_h" value="${esc(entry.heading)}" placeholder="Section heading"/>
+    <textarea class="kb_b" rows="3" style="width:100%;margin-top:6px" placeholder="Section body (Markdown)">${esc(entry.body_md)}</textarea>
+    <div style="text-align:right"><button class="btn sm secondary kb_del">✕ remove</button></div>`;
+  div.querySelector('.kb_del').onclick=()=>div.remove();
+  $('kbRows').appendChild(div);
+}
+$('addKb').onclick=()=>addKbRow();
+function collectKb(){
+  return [...$('kbRows').querySelectorAll('div')].filter(d=>d.querySelector('.kb_h')).map(d=>({
+    heading:d.querySelector('.kb_h').value.trim(), body_md:d.querySelector('.kb_b').value.trim()
+  })).filter(s=>s.heading||s.body_md);
+}
+$('saveKb').onclick=async()=>{
+  if(!state.editing) return;
+  const { error } = await sb.rpc('save_module_version',{ p_module_id:state.editing.moduleId, p_content:collectKb(), p_version_id:state.editing.versionId, p_ai_generated:false, p_ai_model:null });
+  $('edMsg').textContent = error?('Error: '+error.message):'Knowledge base saved ✓';
+};
+
+async function loadQuestions(versionId){
+  $('qCountLbl').textContent='';
+  if(!state.isManager){ $('qList').innerHTML='<p class="muted">Question list is manager-only (answer keys). You can still add questions below.</p>'; return; }
+  const { data:qs, error } = await sb.from('training_questions').select('id,stem,options,correct_keys,explanation,sort_order').eq('module_version_id',versionId).order('sort_order');
+  if(error){ $('qList').innerHTML='<p class="muted">'+esc(error.message)+'</p>'; return; }
+  $('qCountLbl').textContent = `(${(qs||[]).length})`;
+  $('qList').innerHTML = (qs||[]).map((q,i)=>{
+    const opts=(q.options||[]).map(o=>{ const ok=(q.correct_keys||[]).includes(o.key); return `<li>${ok?'<strong>✓ ':''}${esc(o.key)}. ${esc(o.text)}${ok?'</strong>':''}</li>`; }).join('');
+    return `<div style="border-bottom:1px solid var(--hair);padding:6px 0;"><div><strong>${i+1}.</strong> ${esc(q.stem)}</div><ul style="margin:4px 0">${opts}</ul>${q.explanation?`<div class="muted">${esc(q.explanation)}</div>`:''}</div>`;
+  }).join('') || '<p class="muted">No questions yet.</p>';
+}
+
+// Add-question option inputs (a,b,c,d…)
+let optCount=0;
+function buildOptionInputs(){ $('q_opts').innerHTML=''; optCount=0; for(let i=0;i<4;i++) addOptInput(); }
+function addOptInput(){
+  const key=String.fromCharCode(97+optCount); optCount++;
+  const div=document.createElement('div'); div.style.cssText='display:flex;gap:8px;align-items:center;margin-top:6px;';
+  div.innerHTML=`<input type="checkbox" class="q_ok" data-key="${key}" title="correct"/><span class="muted" style="width:16px">${key}.</span><input class="q_txt" data-key="${key}" placeholder="Option ${key}" style="flex:1"/>`;
+  $('q_opts').appendChild(div);
+}
+$('q_addOpt').onclick=()=>addOptInput();
+$('q_add').onclick=async()=>{
+  if(!state.editing) return;
+  const stem=$('q_stem').value.trim(); if(!stem){ $('q_msg').textContent='Question text required.'; return; }
+  const options=[]; const correct=[];
+  $('q_opts').querySelectorAll('.q_txt').forEach(inp=>{ const t=inp.value.trim(); if(t){ options.push({key:inp.dataset.key,text:t}); } });
+  $('q_opts').querySelectorAll('.q_ok').forEach(cb=>{ if(cb.checked && options.some(o=>o.key===cb.dataset.key)) correct.push(cb.dataset.key); });
+  if(options.length<2){ $('q_msg').textContent='At least two options required.'; return; }
+  if(correct.length<1){ $('q_msg').textContent='Tick at least one correct option.'; return; }
+  const { error } = await sb.rpc('add_training_question',{ p_version_id:state.editing.versionId, p_stem:stem, p_options:options, p_correct_keys:correct, p_explanation:$('q_expl').value.trim()||null, p_sort_order:100 });
+  if(error){ $('q_msg').textContent='Error: '+error.message; return; }
+  $('q_msg').textContent='Added ✓'; $('q_stem').value=''; $('q_expl').value=''; buildOptionInputs();
+  loadQuestions(state.editing.versionId);
+};
+
+// ---- Shared: module selects (published only for assign; all for manual) ----
+function fillModuleSelects(){
+  const pubOpts = state.modules.filter(m=>m.current_version_id).map(m=>`<option value="${m.id}">${esc(m.title)}</option>`).join('');
+  const allOpts = state.modules.map(m=>`<option value="${m.id}">${esc(m.title)}</option>`).join('');
+  if($('as_module')) $('as_module').innerHTML = pubOpts || '<option value="">— no published modules —</option>';
+  if($('mn_module')) $('mn_module').innerHTML = allOpts || '<option value="">— none —</option>';
+}
+
+// ---- Candidate search (shared by assign + manual) ----
+async function searchCandidates(term, into, onPick){
+  const q=term.trim(); if(q.length<2){ into.innerHTML=''; return; }
+  const { data } = await sb.from('candidates').select('id,first_name,last_name,email').or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`).limit(8);
+  into.innerHTML=(data||[]).map(c=>`<button class="btn sm secondary" data-cid="${c.id}" style="display:block;width:100%;text-align:left;margin:3px 0;">${esc(c.first_name)} ${esc(c.last_name)} · <span class="muted">${esc(c.email)}</span></button>`).join('')||'<span class="muted">No matches.</span>';
+  into.querySelectorAll('[data-cid]').forEach(b=>b.onclick=()=>{ const c=(data||[]).find(x=>x.id===b.dataset.cid); onPick(c); });
+}
+
+// ---- Assign ----
+let asPicked=null;
+$('as_search').oninput=()=>{ clearTimeout(window._ast); window._ast=setTimeout(()=>searchCandidates($('as_search').value,$('as_results'),c=>{
+  asPicked=c; $('as_results').innerHTML=''; $('as_picked').classList.remove('hidden'); $('as_link').classList.add('hidden');
+  $('as_name').textContent=`${c.first_name} ${c.last_name} · ${c.email}`; $('as_msg').textContent='';
+}),250); };
+$('as_go').onclick=async()=>{
+  if(!asPicked) return; const moduleId=$('as_module').value; if(!moduleId){ $('as_msg').textContent='Pick a published module.'; return; }
+  $('as_msg').textContent='Creating…';
+  const { data, error } = await sb.rpc('assign_training',{ p_candidate_id:asPicked.id, p_module_id:moduleId });
+  if(error){ $('as_msg').textContent='Error: '+error.message; return; }
+  const url = location.origin.replace(/\/$/,'') + '/training.html?token=' + data;
+  $('as_url').value=url; $('as_link').classList.remove('hidden'); $('as_msg').textContent='Link created ✓';
+};
+$('as_copy').onclick=()=>{ $('as_url').select(); navigator.clipboard?.writeText($('as_url').value); };
+
+// ---- Manual entry ----
+let mnPicked=null, mnFile=null;
+$('mn_search').oninput=()=>{ clearTimeout(window._mnt); window._mnt=setTimeout(()=>searchCandidates($('mn_search').value,$('mn_results'),c=>{
+  mnPicked=c; $('mn_results').innerHTML=''; $('mn_form').classList.remove('hidden'); $('mn_name').textContent=`${c.first_name} ${c.last_name} · ${c.email}`; $('mn_msg').textContent='';
+}),250); };
+$('mn_drop').onclick=()=>$('mn_file').click();
+$('mn_file').onchange=()=>{ mnFile=$('mn_file').files[0]||null; $('mn_fileName').textContent=mnFile?('Selected: '+mnFile.name):''; };
+['dragover','dragleave','drop'].forEach(ev=>$('mn_drop').addEventListener(ev,e=>{e.preventDefault();}));
+$('mn_drop').addEventListener('drop',e=>{ mnFile=e.dataTransfer.files[0]||null; $('mn_fileName').textContent=mnFile?('Selected: '+mnFile.name):''; });
+$('mn_go').onclick=async()=>{
+  if(!mnPicked) return; const moduleId=$('mn_module').value, date=$('mn_date').value;
+  if(!moduleId||!date){ $('mn_msg').textContent='Module and completion date are required.'; return; }
+  $('mn_msg').textContent='Recording…';
+  let evidencePath=null;
+  if(mnFile){
+    const safe=mnFile.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    evidencePath=`${mnPicked.id}/training/${Date.now()}-${safe}`;
+    const { error:upErr } = await sb.storage.from('candidate-docs').upload(evidencePath,mnFile,{upsert:false});
+    if(upErr){ $('mn_msg').textContent='Upload error: '+upErr.message; return; }
+  }
+  const score=$('mn_score').value?Number($('mn_score').value):null;
+  const { data, error } = await sb.rpc('record_manual_training',{ p_candidate_id:mnPicked.id, p_module_id:moduleId, p_completion_date:date, p_score:score, p_provider:$('mn_provider').value.trim()||null, p_evidence_path:evidencePath });
+  if(error){ $('mn_msg').textContent='Error: '+error.message; return; }
+  const cert=(data&&data[0])?data[0].certificate_id:'';
+  $('mn_msg').textContent='Recorded ✓ certificate '+cert; mnFile=null; $('mn_file').value=''; $('mn_fileName').textContent='';
+};
+
+sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
+</script>
+</body>
+</html>

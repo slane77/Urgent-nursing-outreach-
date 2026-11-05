@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Admin — Day Webster</title>
+<title>Admin — Day Webster Compliance Portal</title>
 <link rel="stylesheet" href="dw-theme.css" />
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a>
-  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="rules.html">Rules</a><a class="here" href="admin.html">Admin</a></nav>
+  <a class="brand" href="dashboard.html"><img src="dw-logo.svg" alt="Day Webster Group" /></a><span class="wordmark">Compliance Portal</span>
+  <nav class="topnav"><a href="dashboard.html">Dashboard</a><a href="candidates.html">Candidates</a><a href="vacancies.html">Vacancies</a><a href="candidate-import.html">Import</a><a href="rules.html">Rules</a><a href="compliance.html">Compliance</a><a class="here" href="admin.html">Admin</a></nav>
 </header>
 
 <div class="loginwrap card hidden" id="login">
@@ -25,6 +25,7 @@
     <div class="tab active" data-v="people">People &amp; desks</div>
     <div class="tab" data-v="desks">Manage desks</div>
     <div class="tab" data-v="coverage">Routing rules</div>
+    <div class="tab" data-v="checklists">Checklist library</div>
   </div>
 
   <div id="peopleView" class="card" style="margin-top:14px;">
@@ -56,6 +57,46 @@
     </div>
     <table><thead><tr><th>Desk</th><th>Discipline</th><th>Specialty</th><th>Region</th><th></th></tr></thead><tbody id="covRows"></tbody></table>
   </div>
+
+  <div id="checklistsView" class="card hidden" style="margin-top:14px;">
+    <h3 style="margin-top:0">Checklist library</h3>
+    <p class="muted"><strong>AI onboard</strong> a client's own <code>.docx</code>: it detects the answer-blanks, suggests a Compliance Passport field for each, and you confirm — no <code>{tokens}</code> to type. Or take the <strong>manual</strong> path: upload a <code>.docx</code> that already contains <code>{tokens}</code> and map them below. Editing an active form makes a new version — existing sends keep the version they used.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px;">
+      <div><label>Client</label><input id="t_client" placeholder="St Elsewhere NHS"/></div>
+      <div><label>Form name</label><input id="t_name" placeholder="Agency Worker Checklist"/></div>
+      <div><label>Client .docx</label><input id="t_file" type="file" accept=".docx"/></div>
+      <button class="btn" id="onboardTemplate">Onboard with AI</button>
+      <button class="btn secondary" id="addTemplate" title="The file already contains {tokens}">Add pre-tokenized</button>
+    </div>
+    <div id="tplMsg" class="muted" style="margin-bottom:8px"></div>
+
+    <div id="onboardReview" class="hidden" style="margin:4px 0 16px;border:1px solid var(--hair);border-radius:10px;padding:12px;">
+      <h4 style="margin-top:0" id="obTitle">Mapping review</h4>
+      <p class="muted" id="obLead">Confirm the field each detected blank maps to. Leave one as <em>unmapped</em> to have the client fill it by hand.</p>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <label style="margin:0">Missing policy</label>
+        <select id="ob_policy"><option value="block">block — never send incomplete</option><option value="annotate">annotate — send with «outstanding» markers</option></select>
+        <button class="btn sm" id="saveOnboard">Save template</button>
+        <button class="btn sm secondary" id="cancelOnboard">Cancel</button>
+        <span class="muted" id="obMsg"></span>
+      </div>
+      <table><thead><tr><th>Detected blank</th><th>Passport field</th><th>Token</th><th>Transform</th><th>Req</th><th>Static</th></tr></thead><tbody id="obRows"></tbody></table>
+    </div>
+    <table><thead><tr><th>Client</th><th>Form</th><th>Ver</th><th>Status</th><th>Missing policy</th><th></th></tr></thead><tbody id="tplRows"></tbody></table>
+
+    <div id="mapEditor" class="hidden" style="margin-top:16px;border-top:1px solid var(--hair);padding-top:12px;">
+      <h4 id="mapTitle" style="margin-top:0">Field map</h4>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        <label style="margin:0">Missing policy</label>
+        <select id="m_policy"><option value="block">block — never send incomplete</option><option value="annotate">annotate — send with «outstanding» markers</option></select>
+        <button class="btn sm secondary" id="addRow">+ token row</button>
+        <button class="btn sm" id="saveMap">Save map</button>
+        <button class="btn sm secondary" id="newVersion">Save as new version</button>
+        <span class="muted" id="mapSaveMsg"></span>
+      </div>
+      <table><thead><tr><th>Token</th><th>Passport field</th><th>Transform</th><th>Required</th><th>Static</th><th></th></tr></thead><tbody id="mapRows"></tbody></table>
+    </div>
+  </div>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -75,7 +116,7 @@ $('password').addEventListener('keydown',ev=>{if(ev.key==='Enter')$('loginBtn').
 $('logoutBtn').onclick=()=>sb.auth.signOut();
 $('changePw').onclick=async()=>{const p=prompt('New password (min 6 characters):');if(!p)return;const {error}=await sb.auth.updateUser({password:p});alert(error?error.message:'Password updated — use it next time you sign in.');};
 
-$('tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{$('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');const v=t.dataset.v;$('peopleView').classList.toggle('hidden',v!=='people');$('desksView').classList.toggle('hidden',v!=='desks');$('coverageView').classList.toggle('hidden',v!=='coverage');});
+$('tabs').querySelectorAll('.tab').forEach(t=>t.onclick=()=>{$('tabs').querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');const v=t.dataset.v;$('peopleView').classList.toggle('hidden',v!=='people');$('desksView').classList.toggle('hidden',v!=='desks');$('coverageView').classList.toggle('hidden',v!=='coverage');$('checklistsView').classList.toggle('hidden',v!=='checklists');if(v==='checklists')loadTemplates();});
 
 let loaded=false;
 async function load(){ if(loaded)return; loaded=true; await reload(); }
@@ -138,6 +179,213 @@ $('addCov').onclick=async()=>{
   if(error){alert(error.message);return;}
   $('c_region').value=''; renderCoverage();
 };
+// ---- Checklist library ----
+// The Compliance Passport token vocabulary (design §1) — the closed target set a
+// token may map to. Generic item.<code>.* keys resolve for any seeded requirement.
+const PASSPORT_CATALOG = [
+  'identity.first_name','identity.last_name','identity.full_name','identity.known_as','identity.dob',
+  'identity.email','identity.phone','identity.town','identity.postcode','identity.region','identity.country',
+  'identity.address','identity.ni_number','identity.nationality','identity.gender','identity.place_of_birth',
+  'role.division','role.discipline','role.specialty','role.job_title',
+  'reg.body','reg.number','reg.expiry','reg.verified','reg.checked_at','reg.source_ref',
+  'dbs.number','dbs.level','dbs.issue_date','dbs.update_service','dbs.verified',
+  'rtw.status','rtw.share_code','rtw.method','rtw.expiry','rtw.verified',
+  'refs.covered','refs.years','refs.count','oh.status','oh.date','immun.status','immun.date',
+  'training.status','training.expiry','qual.name','qual.status','qual.cert_date',
+];
+const TRANSFORMS = ['','date_uk','yes_no','upper','title','with_provenance'];
+let templates=[], editingTpl=null;
+
+async function loadTemplates(){
+  const { data } = await sb.from('checklist_templates').select('*').order('client_name').order('name').order('version',{ascending:false});
+  templates = data||[];
+  $('tplRows').innerHTML = templates.map(t=>`<tr>
+    <td>${esc(t.client_name)}</td><td>${esc(t.name)}</td><td>v${t.version}</td>
+    <td><span class="pill">${t.status}</span></td><td class="muted">${t.missing_policy}</td>
+    <td style="white-space:nowrap">
+      <button class="btn sm secondary" data-edit="${t.id}">Map</button>
+      ${t.status!=='active'?`<button class="btn sm" data-activate="${t.id}">Activate</button>`:''}
+      ${t.status!=='retired'?`<button class="btn sm secondary" data-retire="${t.id}">Retire</button>`:''}
+    </td></tr>`).join('')||'<tr><td colspan="6" class="muted">No templates yet.</td></tr>';
+  $('tplRows').querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editTemplate(b.dataset.edit));
+  $('tplRows').querySelectorAll('[data-activate]').forEach(b=>b.onclick=()=>setTemplateStatus(b.dataset.activate,'active'));
+  $('tplRows').querySelectorAll('[data-retire]').forEach(b=>b.onclick=()=>setTemplateStatus(b.dataset.retire,'retired'));
+}
+
+async function setTemplateStatus(id,status){
+  const { error } = await sb.from('checklist_templates').update({ status }).eq('id',id);
+  if (error) { alert(status==='retired'?'Retire is admin-only: '+error.message:error.message); return; }
+  loadTemplates();
+}
+
+$('addTemplate').onclick = async ()=>{
+  const client=$('t_client').value.trim(), name=$('t_name').value.trim(), file=$('t_file').files[0];
+  if(!client||!name||!file){ $('tplMsg').textContent='Client, form name and a .docx are all required.'; return; }
+  if(!/\.docx$/i.test(file.name)){ $('tplMsg').textContent='Template must be a .docx.'; return; }
+  $('tplMsg').textContent='Uploading…';
+  const path = client.replace(/[^a-zA-Z0-9._-]/g,'_')+'/'+Date.now()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+  const { error:upErr } = await sb.storage.from('checklist-templates').upload(path,file,{upsert:false});
+  if(upErr){ $('tplMsg').textContent='Upload error: '+upErr.message; return; }
+  const { error } = await sb.from('checklist_templates').insert({ client_name:client, name, template_path:path, status:'draft' });
+  if(error){ $('tplMsg').textContent='Error: '+error.message; return; }
+  $('t_client').value=$('t_name').value=''; $('t_file').value=''; $('tplMsg').textContent='Added as draft ✓ — map the tokens below.'; loadTemplates();
+};
+
+// ---- AI-assisted onboarding (checklist-onboard: detect -> map -> save) ----
+const ONBOARD_FN = window.CONFIG.SUPABASE_URL + '/functions/v1/checklist-onboard';
+const TARGET_OPTS = ['unmapped','static',...PASSPORT_CATALOG];
+let obState = null;
+
+async function fnHeaders(){
+  const { data:{ session } } = await sb.auth.getSession();
+  return { 'Content-Type':'application/json', 'apikey':window.CONFIG.SUPABASE_ANON_KEY, 'Authorization':'Bearer '+(session?.access_token??'') };
+}
+
+$('onboardTemplate').onclick = async ()=>{
+  const client=$('t_client').value.trim(), name=$('t_name').value.trim(), file=$('t_file').files[0];
+  if(!client||!name||!file){ $('tplMsg').textContent='Client, form name and a .docx are all required.'; return; }
+  if(!/\.docx$/i.test(file.name)){ $('tplMsg').textContent='Template must be a .docx.'; return; }
+  $('tplMsg').textContent='Uploading original…';
+  const original_path = client.replace(/[^a-zA-Z0-9._-]/g,'_')+'/orig-'+Date.now()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+  const { error:upErr } = await sb.storage.from('checklist-templates').upload(original_path,file,{upsert:false});
+  if(upErr){ $('tplMsg').textContent='Upload error: '+upErr.message; return; }
+  try {
+    const headers = await fnHeaders();
+    $('tplMsg').textContent='Detecting answer-blanks…';
+    const dRes = await fetch(ONBOARD_FN,{ method:'POST', headers, body:JSON.stringify({ mode:'detect', template_path:original_path }) });
+    const det = await dRes.json();
+    if(det.error){ $('tplMsg').textContent='Detect error: '+det.error; return; }
+    const blanks = det.blanks||[];
+    if(!blanks.length){ $('tplMsg').textContent='No answer-blanks detected — use the manual token path instead.'; return; }
+    $('tplMsg').textContent='Mapping '+blanks.length+' blank(s) with AI…';
+    const mRes = await fetch(ONBOARD_FN,{ method:'POST', headers, body:JSON.stringify({ mode:'map', blanks }) });
+    const mp = await mRes.json();
+    if(mp.error){ $('tplMsg').textContent='Map error: '+mp.error; return; }
+    const byId = {}; (mp.mappings||[]).forEach(m=>byId[m.id]=m);
+    obState = { client, name, original_path, blanks };
+    renderOnboardRows(blanks, byId);
+    $('tplMsg').textContent='Detected '+blanks.length+' blank(s) — review the AI mapping below.';
+  } catch(e){ $('tplMsg').textContent='Onboarding error: '+e; }
+};
+
+function renderOnboardRows(blanks, byId){
+  $('obTitle').textContent = `Mapping review — ${obState.client} · ${obState.name}`;
+  $('obRows').innerHTML = blanks.map((b,i)=>{
+    const sug = byId[b.id]||{ target:'unmapped', transform:'', static_value:'' };
+    const fieldOpts = TARGET_OPTS.map(k=>{
+      const lbl = k==='unmapped'?'— unmapped (client fills) —':(k==='static'?'— static constant —':k);
+      return `<option value="${k}" ${k===sug.target?'selected':''}>${lbl}</option>`;
+    }).join('');
+    const trOpts = TRANSFORMS.map(x=>`<option value="${x}" ${x===(sug.transform||'')?'selected':''}>${x||'none'}</option>`).join('');
+    return `<tr data-idx="${i}">
+      <td><strong>${esc(b.label)||'<span class="muted">(no label)</span>'}</strong><br><span class="muted">${esc(b.kind)} · ${esc(b.suggested_token)}</span></td>
+      <td><select class="ob_field">${fieldOpts}</select></td>
+      <td><input class="ob_token" value="${esc(b.suggested_token)}" placeholder="token"/></td>
+      <td><select class="ob_transform">${trOpts}</select></td>
+      <td style="text-align:center"><input type="checkbox" class="ob_required"/></td>
+      <td><input class="ob_static" value="${esc(sug.static_value)}" placeholder="constant"/></td>
+    </tr>`;
+  }).join('');
+  $('obRows').querySelectorAll('tr').forEach(tr=>{
+    const mark=()=>{ const t=tr.querySelector('.ob_field').value, req=tr.querySelector('.ob_required').checked; tr.style.background=(req&&t==='unmapped')?'rgba(220,38,38,.12)':''; };
+    tr.querySelector('.ob_field').onchange=mark; tr.querySelector('.ob_required').onchange=mark; mark();
+  });
+  $('onboardReview').classList.remove('hidden');
+  $('obMsg').textContent='';
+  $('onboardReview').scrollIntoView({behavior:'smooth'});
+}
+
+function collectOnboardMappings(){
+  return [...$('obRows').querySelectorAll('tr')].map(tr=>{
+    const i=+tr.dataset.idx, b=obState.blanks[i];
+    const target=tr.querySelector('.ob_field').value;
+    const token=tr.querySelector('.ob_token').value.trim()||b.suggested_token;
+    const transform=tr.querySelector('.ob_transform').value||null;
+    return { token, target, transform, required:tr.querySelector('.ob_required').checked,
+      static:tr.querySelector('.ob_static').value, leave_blank:target==='unmapped', kind:b.kind, anchor:b.anchor };
+  });
+}
+
+$('cancelOnboard').onclick = ()=>{ $('onboardReview').classList.add('hidden'); obState=null; };
+
+$('saveOnboard').onclick = async ()=>{
+  if(!obState) return;
+  const reqUnmapped = collectOnboardMappings().filter(m=>m.required && m.leave_blank);
+  if(reqUnmapped.length && !confirm(reqUnmapped.length+' required blank(s) are still unmapped and will be left for the client to fill. Save anyway?')) return;
+  $('obMsg').textContent='Saving template…';
+  try {
+    const headers = await fnHeaders();
+    const res = await fetch(ONBOARD_FN,{ method:'POST', headers, body:JSON.stringify({
+      mode:'save', client_name:obState.client, name:obState.name, original_path:obState.original_path,
+      mappings:collectOnboardMappings(), missing_policy:$('ob_policy').value }) });
+    const out = await res.json();
+    if(out.error){ $('obMsg').textContent='Error: '+out.error; return; }
+    $('obMsg').textContent=`Saved as draft ✓ — ${out.tokens} token(s) written. Activate it below when ready.`;
+    $('t_client').value=$('t_name').value=''; $('t_file').value='';
+    $('onboardReview').classList.add('hidden'); obState=null;
+    loadTemplates();
+  } catch(e){ $('obMsg').textContent='Error: '+e; }
+};
+
+function editTemplate(id){
+  editingTpl = templates.find(t=>t.id===id); if(!editingTpl) return;
+  $('mapEditor').classList.remove('hidden');
+  $('mapTitle').textContent = `Field map — ${editingTpl.client_name} · ${editingTpl.name} (v${editingTpl.version}, ${editingTpl.status})`;
+  $('m_policy').value = editingTpl.missing_policy||'block';
+  const map = Array.isArray(editingTpl.field_map)?editingTpl.field_map:[];
+  $('mapRows').innerHTML=''; (map.length?map:[{token:'',field:''}]).forEach(addMapRow);
+  $('mapSaveMsg').textContent='';
+  $('mapEditor').scrollIntoView({behavior:'smooth'});
+}
+
+function addMapRow(entry){
+  entry = entry||{token:'',field:''};
+  const tr = document.createElement('tr');
+  const fieldOpts = '<option value="">— (static) —</option>'+PASSPORT_CATALOG.map(k=>`<option value="${k}" ${k===entry.field?'selected':''}>${k}</option>`).join('');
+  const trOpts = TRANSFORMS.map(x=>`<option value="${x}" ${x===(entry.transform||'')?'selected':''}>${x||'none'}</option>`).join('');
+  tr.innerHTML = `<td><input class="m_token" value="${esc(entry.token)}" placeholder="reg_number"/></td>
+    <td><select class="m_field">${fieldOpts}</select></td>
+    <td><select class="m_transform">${trOpts}</select></td>
+    <td style="text-align:center"><input type="checkbox" class="m_required" ${entry.required?'checked':''}/></td>
+    <td><input class="m_static" value="${esc(entry.static)}" placeholder="constant"/></td>
+    <td><button class="btn sm secondary m_del">✕</button></td>`;
+  tr.querySelector('.m_del').onclick=()=>tr.remove();
+  $('mapRows').appendChild(tr);
+}
+$('addRow').onclick = ()=>addMapRow();
+
+function collectMap(){
+  return [...$('mapRows').querySelectorAll('tr')].map(tr=>{
+    const token=tr.querySelector('.m_token').value.trim(); if(!token) return null;
+    const field=tr.querySelector('.m_field').value||null;
+    const stat=tr.querySelector('.m_static').value.trim();
+    const e={ token, required:tr.querySelector('.m_required').checked };
+    if(field){ e.field=field; const t=tr.querySelector('.m_transform').value; if(t) e.transform=t; }
+    else { e.field=null; e.static=stat; }
+    return e;
+  }).filter(Boolean);
+}
+
+$('saveMap').onclick = async ()=>{
+  if(!editingTpl) return;
+  const { error } = await sb.from('checklist_templates').update({ field_map:collectMap(), missing_policy:$('m_policy').value }).eq('id',editingTpl.id);
+  $('mapSaveMsg').textContent = error?('Error: '+error.message):'Saved ✓';
+  if(!error) loadTemplates();
+};
+
+$('newVersion').onclick = async ()=>{
+  if(!editingTpl) return;
+  const { error } = await sb.from('checklist_templates').insert({
+    client_name:editingTpl.client_name, client_ref:editingTpl.client_ref, name:editingTpl.name,
+    version:(editingTpl.version||1)+1, status:'draft', bucket:editingTpl.bucket,
+    template_path:editingTpl.template_path, original_path:editingTpl.original_path,
+    field_map:collectMap(), static_answers:editingTpl.static_answers, missing_policy:$('m_policy').value,
+    discipline_id:editingTpl.discipline_id,
+  });
+  $('mapSaveMsg').textContent = error?('Error: '+error.message):'New version created ✓';
+  if(!error) loadTemplates();
+};
+
 sb.auth.getSession().then(({data:{session}})=>refreshAuth(session));
 </script>
 </body>
