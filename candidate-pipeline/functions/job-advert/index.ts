@@ -15,25 +15,18 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { createClient } from "npm:@supabase/supabase-js";
 import { buildJobPosting, toHtml } from "../_shared/jobposting.ts";
+import { verifyStaff, unauthorized, CORS } from "../_shared/auth.ts";
 
 const MODEL = "claude-opus-4-8";
 const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")! });
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { db: { schema: "candidate" } });
-const ALLOWED = ["@daywebster.com","@daywebstergroup.com","@homecare-providers.com","@homecareproviders.co.uk"];
-const CORS = { "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type", "Content-Type":"application/json" };
 const CHANNELS = ["indeed","reed","cvlibrary"];
 
-function authorized(req: Request): boolean {
-  const t = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").split(".")[1];
-  if (!t) return false;
-  try { const e = (JSON.parse(atob(t.replace(/-/g,"+").replace(/_/g,"/"))).email ?? "").toLowerCase(); return ALLOWED.some(d=>e.endsWith(d)); }
-  catch { return false; }
-}
 function slugify(s: string){ return s.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,60); }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (!authorized(req)) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: CORS });
+  if (!(await verifyStaff(req))) return unauthorized();
   try {
     const b = await req.json();
 

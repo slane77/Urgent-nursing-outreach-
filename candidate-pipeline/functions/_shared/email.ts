@@ -17,12 +17,23 @@ export interface SendArgs {
   subject: string;
   html: string;
   replyTo?: string;
+  // One-click unsubscribe URL. When set, a List-Unsubscribe header +
+  // List-Unsubscribe-Post are added so mail clients expose a native opt-out
+  // (required for marketing/outreach sends — PECR reg. 22).
+  unsubscribeUrl?: string;
 }
 
 export async function sendBrevoEmail(a: SendArgs): Promise<{ ok: boolean; id?: string; error?: string }> {
   const key = Deno.env.get("BREVO_API_KEY");
   if (!key) return { ok: false, error: "BREVO_API_KEY not set" };
   if (!a.to) return { ok: false, error: "no recipient" };
+
+  const headers = a.unsubscribeUrl
+    ? {
+        "List-Unsubscribe": `<${a.unsubscribeUrl}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      }
+    : undefined;
 
   const res = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
@@ -36,6 +47,7 @@ export async function sendBrevoEmail(a: SendArgs): Promise<{ ok: boolean; id?: s
       replyTo: a.replyTo ? { email: a.replyTo } : undefined,
       subject: a.subject,
       htmlContent: a.html,
+      headers,
     }),
   });
   if (!res.ok) return { ok: false, error: `brevo ${res.status}: ${await res.text()}` };
@@ -55,8 +67,12 @@ export function replyToFor(token: string): string {
   return `${local}+${token}@${dom}`;
 }
 
-// Wrap body text in a minimal branded HTML shell.
-export function emailHtml(body: string): string {
+// Wrap body text in a minimal branded HTML shell. Pass `unsubscribeUrl` on
+// marketing/outreach sends to render a visible opt-out footer (PECR reg. 22).
+export function emailHtml(body: string, unsubscribeUrl?: string): string {
   const safe = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>");
-  return `<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;font-size:15px;color:#1f2937;line-height:1.5">${safe}<br><br><span style="color:#6b7280">Day Webster</span></div>`;
+  const footer = unsubscribeUrl
+    ? `<br><br><span style="color:#9ca3af;font-size:12px">Don't want these emails? <a href="${unsubscribeUrl}" style="color:#9ca3af">Unsubscribe</a>.</span>`
+    : "";
+  return `<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;font-size:15px;color:#1f2937;line-height:1.5">${safe}<br><br><span style="color:#6b7280">Day Webster</span>${footer}</div>`;
 }

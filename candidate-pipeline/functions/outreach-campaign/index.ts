@@ -16,22 +16,19 @@
 
 import { createClient } from "npm:@supabase/supabase-js";
 import { sendBrevoEmail, emailHtml } from "../_shared/email.ts";
+import { unsubscribeUrl } from "../_shared/unsubscribe.ts";
+import { verifyStaff, unauthorized, CORS } from "../_shared/auth.ts";
 
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { db: { schema: "candidate" } });
-const ALLOWED = ["@daywebster.com","@daywebstergroup.com","@homecare-providers.com","@homecareproviders.co.uk"];
-const CORS = { "Access-Control-Allow-Origin":"*", "Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type", "Content-Type":"application/json" };
 const SITE = (Deno.env.get("PUBLIC_SITE_URL") ?? "").replace(/\/$/, "");
 
-function authorized(req: Request): boolean {
-  const t = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").split(".")[1];
-  if (!t) return false;
-  try { const e = (JSON.parse(atob(t.replace(/-/g,"+").replace(/_/g,"/"))).email ?? "").toLowerCase(); return ALLOWED.some(d=>e.endsWith(d)); }
-  catch { return false; }
-}
+// Which consent purpose each motion needs. "Refer a friend, earn £250" is
+// marketing; re-engaging a dormant candidate about work is recruitment.
+const PURPOSE: Record<string, string> = { referral: "marketing", reengagement: "recruitment" };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (!authorized(req)) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: CORS });
+  if (!(await verifyStaff(req))) return unauthorized();
   try {
     const { kind, discipline_id = null, limit = 200, bounty = "£250", campaign_name } = await req.json();
     if (!["referral","reengagement"].includes(kind)) return new Response(JSON.stringify({ error: "kind must be 'referral' or 'reengagement'" }), { status: 400, headers: CORS });
@@ -44,27 +41,34 @@ Deno.serve(async (req) => {
     }).select("id").maybeSingle();
     const campaignId = camp?.id;
 
-    // Target the existing bench: must have email + a granted consent (PECR).
+    // Target the existing bench via the PECR-safe RPC: only candidates whose
+    // LATEST consent for this motion's purpose is granted, who have an email,
+    // are in the right status, and are NOT on the suppression list — one row
+    // per candidate (no duplicate/withdrawn sends). See sql/20_consent_suppression.
     const statuses = kind === "referral"
       ? ["engaged","qualified","compliance","ready","placed"]   // people who like us
       : ["sourced","contacted","dormant"];                       // gone quiet
-    let q = sb.from("candidates")
-      .select("id,first_name,email,consent!inner(granted)")
-      .not("email", "is", null)
-      .eq("consent.granted", true)
-      .in("status", statuses)
-      .limit(cap);
-    if (discipline_id) q = q.eq("discipline_id", discipline_id);
-    const { data: targets, error } = await q;
+    const { data: targets, error } = await sb.rpc("campaign_targets", {
+      p_purpose: PURPOSE[kind],
+      p_statuses: statuses,
+      p_discipline: discipline_id,
+      p_limit: cap,
+    });
     if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: CORS });
 
     const link = `${SITE}/intake.html?campaign=${campaignId}`;
     let sent = 0;
-    for (const c of targets ?? []) {
+    for (const c of (targets ?? []) as { id: string; first_name: string; email: string }[]) {
       const body = kind === "referral"
         ? `Hi ${c.first_name || "there"},\n\nKnow someone brilliant looking for work? Refer a friend to Day Webster and you could earn ${bounty} once they're placed.\n\nJust share this link with them: ${link}\n\nThank you!`
         : `Hi ${c.first_name || "there"},\n\nWe'd love to help you find your next role with Day Webster. If you're open to work, take a moment to update your details and we'll be in touch with suitable opportunities:\n\n${link}\n\nThank you!`;
-      const r = await sendBrevoEmail({ to: c.email, toName: c.first_name, subject: kind === "referral" ? `Refer a friend, earn ${bounty}` : "Still looking for work? We can help", html: emailHtml(body) });
+      const unsub = await unsubscribeUrl(c.email);
+      const r = await sendBrevoEmail({
+        to: c.email, toName: c.first_name,
+        subject: kind === "referral" ? `Refer a friend, earn ${bounty}` : "Still looking for work? We can help",
+        html: emailHtml(body, unsub ?? undefined),
+        unsubscribeUrl: unsub ?? undefined,
+      });
       if (r.ok) {
         sent++;
         await sb.from("messages").insert({ candidate_id: c.id, direction: "outbound", channel: "email", author: "system", subject: kind, body, status: "sent", external_ref: r.id ?? null });

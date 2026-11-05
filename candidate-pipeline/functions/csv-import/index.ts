@@ -25,6 +25,7 @@
 
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { createClient } from "npm:@supabase/supabase-js";
+import { verifyStaff, unauthorized, CORS } from "../_shared/auth.ts";
 
 const MODEL = "claude-opus-4-8";
 const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")! });
@@ -34,11 +35,6 @@ const sb = createClient(
   { db: { schema: "candidate" } },
 );
 
-const ALLOWED_DOMAINS = [
-  "@daywebster.com", "@daywebstergroup.com",
-  "@homecare-providers.com", "@homecareproviders.co.uk",
-];
-
 // Target fields the importer understands. Everything else is kept as provenance.
 const TARGET_FIELDS = [
   "first_name", "last_name", "full_name", "title", "email", "phone",
@@ -46,30 +42,6 @@ const TARGET_FIELDS = [
   "registration_body", "registration_number", "availability",
   "employer", "job_title", "notes", "ignore",
 ] as const;
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Content-Type": "application/json",
-};
-
-function emailFromJwt(req: Request): string | null {
-  const auth = req.headers.get("Authorization") ?? "";
-  const token = auth.replace(/^Bearer\s+/i, "");
-  const part = token.split(".")[1];
-  if (!part) return null;
-  try {
-    const json = JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/")));
-    return (json.email ?? "").toLowerCase() || null;
-  } catch {
-    return null;
-  }
-}
-
-function authorized(req: Request): boolean {
-  const email = emailFromJwt(req);
-  return !!email && ALLOWED_DOMAINS.some((d) => email.endsWith(d));
-}
 
 // ---- MAP: ask Claude to map this file's headers to schema fields -----------
 async function doMap(headers: string[], samples: Record<string, unknown>[]) {
@@ -203,7 +175,7 @@ async function doCommit(mapping: { source_header: string; target_field: string }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (!authorized(req)) return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: CORS });
+  if (!(await verifyStaff(req))) return unauthorized();
   try {
     const body = await req.json();
     if (body.mode === "map") {
