@@ -79,8 +79,10 @@ async function classify(subject: string, body: string, attachments: any[], reqCo
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
+  // Fail CLOSED: this endpoint is public (verify_jwt=false) and writes PII /
+  // uploads attachments / sends email. A missing secret must reject, not open.
   const need = Deno.env.get("INBOUND_SECRET");
-  if (need && url.searchParams.get("secret") !== need) return new Response("forbidden", { status: 403 });
+  if (!need || url.searchParams.get("secret") !== need) return new Response("forbidden", { status: 403 });
 
   try {
     const p = await req.json();
@@ -105,6 +107,34 @@ Deno.serve(async (req) => {
       candidateId = data?.id ?? null;
     }
     if (!candidateId) return new Response(JSON.stringify({ ok: true, matched: false }), { headers: { "Content-Type": "application/json" } });
+
+    // Inbound opt-out: honour a "STOP / unsubscribe" reply immediately (PECR).
+    // Suppress the address and record consent withdrawal before any other work.
+    // Unambiguous phrases always count; softer ones only when the whole message
+    // is short, so "please remove me from that shift" / "do not contact my
+    // current employer" don't trip a one-way suppression.
+    const t = body.trim();
+    const optOut =
+      /\bunsubscribe\b/i.test(t) ||
+      /\bopt[\s-]?out\b/i.test(t) ||
+      /\bstop emailing\b/i.test(t) ||
+      (t.length <= 40 && /\b(stop|remove me|please stop|no thanks)\b/i.test(t));
+    if (optOut) {
+      if (senderEmail) {
+        await sb.from("email_suppression").upsert(
+          { email: senderEmail, reason: "inbound opt-out" },
+          { onConflict: "email", ignoreDuplicates: true },
+        );
+      }
+      for (const purpose of ["marketing", "recruitment"]) {
+        await sb.from("consent").insert({ candidate_id: candidateId, purpose, granted: false, evidence: "inbound opt-out reply" });
+      }
+      await sb.from("messages").insert({
+        candidate_id: candidateId, direction: "inbound", channel: "email",
+        author: "candidate", subject, body: `[opt-out]\n\n${body.slice(0, 2000)}`, external_ref: from,
+      });
+      return new Response(JSON.stringify({ ok: true, matched: true, type: "unsubscribe" }), { headers: { "Content-Type": "application/json" } });
+    }
 
     // Load the candidate's applicable requirement codes for classification.
     const { data: cand } = await sb.from("candidates").select("discipline_id").eq("id", candidateId).maybeSingle();
