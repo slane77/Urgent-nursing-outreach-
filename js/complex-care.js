@@ -11,6 +11,27 @@
  $('radius-place').oninput=()=>{placeSequence++;origins=[];$('radius-origin').innerHTML='<option value="">Find this place first</option>';$('radius-message').textContent='';};
  async function findPlace(){const request=++placeSequence;$('radius-message').textContent='Finding places…';try{const found=await CC.findOrigins($('radius-place').value);if(request!==placeSequence)return;origins=found;$('radius-origin').innerHTML='<option value="">Choose the search centre</option>'+origins.map((o,i)=>`<option value="${i}">${esc(o.label)}</option>`).join('');if(origins.length===1)$('radius-origin').value='0';$('radius-message').textContent=origins.length?'Check the search centre, then search candidates.':'No place found. Try a full postcode.';}catch(e){if(request===placeSequence){origins=[];$('radius-message').textContent=e.message;}}}
  $('find-place').onclick=findPlace;
+ // Carry the current filtered audience into the outreach workspace.
+ // Pages the same RPC the page already uses, so the audience is exactly
+ // what was searched; sending still happens there, in reviewed batches.
+ $('cc-email').onclick=async()=>{
+  const btn=$('cc-email'),label=btn.textContent;
+  if(!total){fail(Error('Search for candidates first.'));return;}
+  btn.disabled=true;const ids=[];
+  try{
+   for(let off=0;;off+=50){
+    btn.textContent='Collecting '+ids.length+' of '+total+'…';
+    const {data,error}=await client.rpc('search_complex_care_bank',{...activeFilters,p_offset:off});
+    if(error)throw error;
+    const page=data.rows||[];
+    page.forEach(c=>{if(c.email&&!c.unsubscribed&&c.status!=='do_not_use')ids.push(c.id);});
+    if(page.length<50)break;
+   }
+   if(!ids.length)throw Error('No emailable candidates in this result.');
+   sessionStorage.setItem('cc_candidate_handoff',JSON.stringify({ids,at:Date.now()}));
+   location.href='index.html';
+  }catch(e){fail(e);btn.disabled=false;btn.textContent=label;}
+ };
  async function applySearch(){offset=0;const filters=readFilters();if($('radius-enabled').checked){if(!origins.length)await findPlace();const value=$('radius-origin').value,origin=value===''?null:origins[Number(value)];if(!origin){fail(Error('Choose the correct search centre before searching.'));return;}Object.assign(filters,{p_lat:origin.lat,p_lng:origin.lng,p_radius:Number($('radius-miles').value)});}activeFilters=filters;await search();}
  async function search(){
   const current=++sequence;$('message').className='';$('message').textContent='Searching…';$('prev').disabled=$('next').disabled=true;

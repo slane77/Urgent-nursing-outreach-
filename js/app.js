@@ -1024,6 +1024,21 @@ async function previewComposeCounts() {
 //  RENDER — top-level dispatch
 // ============================================================================
 
+// A Complex Care search hands its filtered audience over in sessionStorage.
+// Read once, and ignore anything stale so an old tab cannot resurrect a
+// selection the person has moved on from.
+function readComplexCareHandoff() {
+  try {
+    const raw = sessionStorage.getItem('cc_candidate_handoff');
+    if (!raw) return null;
+    sessionStorage.removeItem('cc_candidate_handoff');
+    const parsed = JSON.parse(raw);
+    const ids = Array.isArray(parsed?.ids) ? parsed.ids.filter(id => typeof id === 'string') : [];
+    if (!ids.length || Date.now() - Number(parsed.at || 0) > 600000) return null;
+    return { ids };
+  } catch (error) { return null; }
+}
+
 async function bootApp() {
   const userId = state.user?.id;
   if (!userId || authBootUserId === userId) return authBootPromise;
@@ -1036,7 +1051,18 @@ async function bootApp() {
       await withConnectionTimeout(Promise.all([loadStatusCounts(), loadSourceCounts(), loadSourceStatusCounts(), loadTemplates(), loadFilterOptions()]));
       await withConnectionTimeout(loadContactsPage());
       if (state.user?.id !== userId) return;
-      render();
+      const handoff = readComplexCareHandoff();
+      if (handoff) {
+        state.view = 'candidates';
+        render();
+        // loadCandidatesPage() clears the selection, so apply it afterwards.
+        await loadCandidatesView();
+        state.candSelected = new Set(handoff.ids);
+        render();
+        toast(handoff.ids.length.toLocaleString() + ' candidates carried over from Complex Care. Queue in batches of up to 500.');
+      } else {
+        render();
+      }
       loadDashboard();
       refreshMailshots();
     } catch (error) {
@@ -4315,6 +4341,7 @@ let mailshotError = false;
 let mailshotPoll = null;
 let mailshotSubmitting = false;
 let pendingMailshotRequest = null;
+let lastQueueSucceeded = false;
 
 async function queueMailshot(audience, template, ids, options) {
   if(mailshotSubmitting) return;
@@ -4325,6 +4352,7 @@ async function queueMailshot(audience, template, ids, options) {
     pendingMailshotRequest={fingerprint,id:crypto.randomUUID()};
   }
   mailshotSubmitting=true;
+  lastQueueSucceeded=false;
   try {
     const {data,error}=await sb.rpc('queue_outreach_mailshot',{
       p_id:pendingMailshotRequest.id,p_audience:audience,p_template:template.id,
@@ -4332,6 +4360,7 @@ async function queueMailshot(audience, template, ids, options) {
     });
     if(error) throw error;
     pendingMailshotRequest=null;
+    lastQueueSucceeded=true;
     toast('Mailshot queued. You can close the browser.');
     await refreshMailshots();
     return data;
@@ -5388,12 +5417,26 @@ async function buildCandidateSendIds() {
   return ids;
 }
 
+// A campaign is capped at 500 reviewed recipients. A larger selection is
+// queued one batch at a time: each batch is confirmed separately and the
+// rest stay selected, so the cap and its per-campaign review both stand.
+const CANDIDATE_BATCH_LIMIT = 500;
+
 async function startCandidateSend() {
-  const ids=state.candSendIds||[];
+  const all=state.candSendIds||[];
   const template=state.templates.find(t=>t.id===state.candTemplateId);
-  if(!template||!ids.length) return toast('Select a template and candidates');
-  if(!confirm('Queue "'+template.name+'" for '+ids.length+' candidates?\nFrom: '+(state.senderEmail||state.user.email)+'\nSending continues after you close the browser.')) return;
+  if(!template||!all.length) return toast('Select a template and candidates');
+  const ids=all.slice(0,CANDIDATE_BATCH_LIMIT);
+  const remaining=all.length-ids.length;
+  const batchNote=remaining?'\n\nThis batch is '+ids.length+' of '+all.length+' selected. The other '+remaining+' stay selected for the next batch.':'';
+  if(!confirm('Queue "'+template.name+'" for '+ids.length+' candidates?'+batchNote+'\nFrom: '+(state.senderEmail||state.user.email)+'\nSending continues after you close the browser.')) return;
   await queueMailshot('candidates',template,ids,{jobDetails:state.candSendJobDetails||null});
+  if(!lastQueueSucceeded) return;
+  if(state.candSelected) ids.forEach(id=>state.candSelected.delete(id));
+  state.candSendIds=all.slice(CANDIDATE_BATCH_LIMIT);
+  if(remaining) toast('Queued '+ids.length+'. '+remaining+' still selected — send again for the next batch.');
+  else { state.candSendMode=false; state.candSendIds=null; }
+  render();
 }
 
 async function updateCandidate(id, patch) {
