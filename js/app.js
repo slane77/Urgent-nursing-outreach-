@@ -1024,6 +1024,79 @@ async function previewComposeCounts() {
 //  RENDER — top-level dispatch
 // ============================================================================
 
+const CC_INTEREST = { now:'Interested now', later:'Interested later', discuss:'Wants a conversation', not_interested:'Not interested' };
+const CC_SKILL = { tracheostomy:'Tracheostomy', invasive_ventilation:'Invasive vent', noninvasive_ventilation:'Non-invasive vent', suction:'Suction', peg:'PEG', neurological:'Neuro', seizures:'Seizures', home_care:'Home care' };
+
+function ccFirstName() {
+  const n = (state.senderName || '').trim();
+  if (n) return n.split(/[\s\-]+/)[0];
+  const local = String((state.user && state.user.email) || '').split('@')[0].split('.')[0];
+  return local ? local.charAt(0).toUpperCase() + local.slice(1) : 'there';
+}
+function ccSeenAt() { try { return localStorage.getItem('cc_responses_seen_at') || ''; } catch (e) { return ''; } }
+window.ccMarkAllSeen = function () {
+  try { localStorage.setItem('cc_responses_seen_at', new Date().toISOString()); } catch (e) {}
+  render();
+};
+
+// Questionnaire responses nobody is told about otherwise: surfaced on the
+// dashboard so a new reply is seen without going to look for it.
+async function loadComplexCareInbox() {
+  try {
+    const { data, error } = await sb.from('candidate_complex_care')
+      .select('candidate_id,interest,experience,skills,population,availability,responded_at,candidates(first_name,last_name,town,county,email,phone)')
+      .order('responded_at', { ascending: false }).limit(12);
+    if (error) throw error;
+    state.ccInbox = data || [];
+    state.ccInboxError = null;
+  } catch (e) {
+    state.ccInbox = null;
+    state.ccInboxError = e.message || String(e);
+  }
+  render();
+}
+
+function renderWelcomePanel() {
+  const rows = state.ccInbox;
+  if (!rows && !state.ccInboxError) return '';
+  const seen = ccSeenAt();
+  const fresh = (rows || []).filter(r => r.responded_at && (!seen || r.responded_at > seen));
+  const headline = state.ccInboxError
+    ? 'Complex care responses could not be loaded.'
+    : fresh.length
+      ? fresh.length + (fresh.length === 1 ? ' new complex care response' : ' new complex care responses') + ' since you last looked.'
+      : (rows || []).length ? 'No new complex care responses since you last looked.' : 'No complex care responses yet.';
+
+  const card = (r, isNew) => {
+    const c = r.candidates || {};
+    const name = esc([c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unnamed candidate');
+    const where = esc([c.town, c.county].filter(Boolean).join(', '));
+    const skills = (Array.isArray(r.skills) ? r.skills : []).map(s => CC_SKILL[s] || s);
+    return '<div style="padding:10px 12px;border:1px solid ' + (isNew ? '#2E86C1' : '#E3EAEF') + ';border-radius:8px;background:' + (isNew ? '#F2F8FD' : '#fff') + ';margin-bottom:8px;">'
+      + '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
+      + '<strong>' + name + (isNew ? ' <span style="color:#2E86C1;font-size:11px;">NEW</span>' : '') + '</strong>'
+      + '<span class="muted" style="font-size:12px;">' + esc(String(r.responded_at || '').slice(0, 10)) + '</span></div>'
+      + '<div style="font-size:12px;margin-top:4px;">' + esc(CC_INTEREST[r.interest] || r.interest || '—')
+      + (where ? ' · ' + where : '')
+      + (r.population ? ' · ' + esc(r.population) : '') + '</div>'
+      + (skills.length ? '<div class="muted" style="font-size:12px;margin-top:3px;">' + esc(skills.join(' · ')) + '</div>' : '')
+      + (c.email || c.phone ? '<div class="muted" style="font-size:12px;margin-top:3px;">' + esc([c.email, c.phone].filter(Boolean).join(' · ')) + '</div>' : '')
+      + '</div>';
+  };
+
+  const list = fresh.length ? fresh : (rows || []).slice(0, 3);
+  return '<div class="card" style="margin-bottom:16px;border-left:4px solid #2E86C1;">'
+    + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;">'
+    + '<h3 style="margin:0;">Welcome back, ' + esc(ccFirstName()) + '</h3>'
+    + (fresh.length ? '<button class="btn small secondary" onclick="ccMarkAllSeen()">Mark as seen</button>' : '')
+    + '</div>'
+    + '<p style="margin:6px 0 10px;">' + esc(headline) + '</p>'
+    + list.map(r => card(r, fresh.indexOf(r) >= 0)).join('')
+    + '<p style="margin:4px 0 0;"><a href="complex-care.html">Open the complex care bank</a>'
+    + ' · <a href="complex-care.html#responders">See everyone who has responded</a></p>'
+    + '</div>';
+}
+
 // A Complex Care search hands its filtered audience over in sessionStorage.
 // Read once, and ignore anything stale so an old tab cannot resurrect a
 // selection the person has moved on from.
@@ -1068,6 +1141,7 @@ async function bootApp() {
         render();
       }
       loadDashboard();
+      loadComplexCareInbox();
       refreshMailshots();
     } catch (error) {
       authBootUserId = null;
@@ -1113,7 +1187,7 @@ function renderAppShell() {
       <div class="tab ${state.view === 'responses' ? 'active' : ''}" data-view="responses">&#x1F4EC; Responses</div>
     </div>
     <div class="main" id="main">
-      ${state.view === 'dashboard' ? renderDashboard() :
+      ${state.view === 'dashboard' ? renderWelcomePanel() + renderDashboard() :
         state.view === 'database' ? renderDatabase() :
         state.view === 'templates' ? renderTemplates() :
         state.view === 'compose' ? renderCompose() :

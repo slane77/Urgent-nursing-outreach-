@@ -84,7 +84,7 @@ test('Mailshot activity is fixed open and preserves every progress metric and ca
 });
 test('Only dashboard contains the mailshot panel',()=>{
   const state={view:'dashboard',user:{email:'test'},counts:{lead:1,live:0,unsubscribed:0}};
-  const ctx=context({state,esc:String,candidateAccess:()=>false,renderMailshotPanel:()=> 'activity',renderDashboard:()=> 'dashboard',renderDatabase:()=> 'database'});
+  const ctx=context({state,esc:String,candidateAccess:()=>false,renderMailshotPanel:()=> 'activity',renderWelcomePanel:()=> '',renderDashboard:()=> 'dashboard',renderDatabase:()=> 'database'});
   vm.runInContext(section('function renderAppShell()', 'function extractSpecialty('),ctx);
   assert.match(ctx.renderAppShell(),/id="mailshot-panel"/);
   state.view='database';assert.doesNotMatch(ctx.renderAppShell(),/mailshot-panel|activity/);
