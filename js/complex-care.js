@@ -28,7 +28,7 @@
     if(page.length<50)break;
    }
    if(!ids.length)throw Error('No emailable candidates in this result.');
-   sessionStorage.setItem('cc_candidate_handoff',JSON.stringify({ids,at:Date.now()}));
+   sessionStorage.setItem('cc_candidate_handoff',JSON.stringify({ids,at:Date.now(),label:'Complex Care skills search'}));
    location.href='index.html';
   }catch(e){fail(e);btn.disabled=false;btn.textContent=label;}
  };

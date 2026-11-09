@@ -1035,7 +1035,7 @@ function readComplexCareHandoff() {
     const parsed = JSON.parse(raw);
     const ids = Array.isArray(parsed?.ids) ? parsed.ids.filter(id => typeof id === 'string') : [];
     if (!ids.length || Date.now() - Number(parsed.at || 0) > 600000) return null;
-    return { ids };
+    return { ids, label: typeof parsed.label === 'string' ? parsed.label : null };
   } catch (error) { return null; }
 }
 
@@ -1058,6 +1058,7 @@ async function bootApp() {
         // loadCandidatesPage() clears the selection, so apply it afterwards.
         await loadCandidatesView();
         state.candSelected = new Set(handoff.ids);
+        state.candHandoff = { ids: new Set(handoff.ids), label: handoff.label };
         render();
         toast(handoff.ids.length.toLocaleString() + ' candidates carried over from Complex Care. Queue in batches of up to 500.');
       } else {
@@ -5871,7 +5872,10 @@ function bindCandidateEvents() {
     state.candSendIds = ids;
     state.candSendMode = true;
     state.candSendResult = null;
-    state.candSendSourceLabel = null;
+    // Name the real source of a carried-over audience, so the send screen never
+    // describes it as the whole sector. Any edit to the selection drops the label.
+    const ho = state.candHandoff;
+    state.candSendSourceLabel = (ho && ho.label && ids.length === ho.ids.size && ids.every(id => ho.ids.has(id))) ? ho.label : null;
     state.candSendJobDetails = null;
     render();
   };
