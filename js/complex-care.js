@@ -28,7 +28,23 @@
     if(page.length<50)break;
    }
    if(!ids.length)throw Error('No emailable candidates in this result.');
-   sessionStorage.setItem('cc_candidate_handoff',JSON.stringify({ids,at:Date.now(),label:'Complex Care skills search'}));
+   // Drop anyone already emailed recently. A campaign is sent in batches of
+   // 500, so the same search is run again for each batch; without this the
+   // earlier batches would be re-sent to every time.
+   btn.textContent='Checking who was emailed recently…';
+   const cutoff=new Date(Date.now()-14*864e5).toISOString(),fresh=[];
+   for(let i=0;i<ids.length;i+=300){
+    const slice=ids.slice(i,i+300);
+    const {data,error}=await client.from('candidates').select('id')
+     .in('id',slice).or('last_emailed_at.is.null,last_emailed_at.lt.'+cutoff);
+    if(error)throw error;
+    (data||[]).forEach(r=>fresh.push(r.id));
+   }
+   const skipped=ids.length-fresh.length;
+   if(!fresh.length)throw Error('All '+ids.length+' matching candidates were emailed in the last 14 days. Nothing to send.');
+   if(skipped&&!confirm(skipped+' of '+ids.length+' were emailed in the last 14 days and will be skipped.\n\nContinue with '+fresh.length+'?'))
+    {btn.disabled=false;btn.textContent=label;return;}
+   sessionStorage.setItem('cc_candidate_handoff',JSON.stringify({ids:fresh,at:Date.now(),skipped,label:'Complex Care skills search'}));
    location.href='index.html';
   }catch(e){fail(e);btn.disabled=false;btn.textContent=label;}
  };

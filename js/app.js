@@ -1035,7 +1035,8 @@ function readComplexCareHandoff() {
     const parsed = JSON.parse(raw);
     const ids = Array.isArray(parsed?.ids) ? parsed.ids.filter(id => typeof id === 'string') : [];
     if (!ids.length || Date.now() - Number(parsed.at || 0) > 600000) return null;
-    return { ids, label: typeof parsed.label === 'string' ? parsed.label : null };
+    return { ids, label: typeof parsed.label === 'string' ? parsed.label : null,
+             skipped: Number(parsed.skipped) || 0 };
   } catch (error) { return null; }
 }
 
@@ -1060,7 +1061,9 @@ async function bootApp() {
         state.candSelected = new Set(handoff.ids);
         state.candHandoff = { ids: new Set(handoff.ids), label: handoff.label };
         render();
-        toast(handoff.ids.length.toLocaleString() + ' candidates carried over from Complex Care. Queue in batches of up to 500.');
+        toast(handoff.ids.length.toLocaleString() + ' candidates carried over from Complex Care'
+          + (handoff.skipped ? ', ' + handoff.skipped.toLocaleString() + ' skipped as emailed in the last 14 days' : '')
+          + '. Queue in batches of up to 500.');
       } else {
         render();
       }
