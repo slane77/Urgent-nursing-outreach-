@@ -737,14 +737,10 @@ async function changeDatabaseSource(source) {
 }
 
 let contactsPageRequest = 0;
-async function loadContactsPage() {
-  const requestId = ++contactsPageRequest;
-  state.loadingPage = true;
-  state.selected = new Set();
-  const start = (state.page - 1) * state.pageSize;
-  const end = start + state.pageSize - 1;
-
-  let query = sb.from('contacts_with_last_email').select('*', { count: 'exact' });
+// The database list and "select all matching" must agree on what matches.
+// One filter builder, used by both, so a selection can never cover a
+// different set of contacts than the list the person is looking at.
+function applyContactFilters(query) {
   // Intake is a date-based view of every new record, including contacts already
   // emailed or unsubscribed. Their stored status and stage remain untouched.
   if (isRecentImportView(state.dbStage)) {
@@ -837,7 +833,17 @@ async function loadContactsPage() {
       `job_title.ilike.%${q}%,care_group.ilike.%${q}%`
     );
   }
+  return query;
+}
 
+async function loadContactsPage() {
+  const requestId = ++contactsPageRequest;
+  state.loadingPage = true;
+  state.selected = new Set();
+  const start = (state.page - 1) * state.pageSize;
+  const end = start + state.pageSize - 1;
+
+  let query = applyContactFilters(sb.from('contacts_with_last_email').select('*', { count: 'exact' }));
   query = query.order(state.sortKey, { ascending: state.sortDir === 'asc' }).order('id', { ascending: true }).range(start, end);
 
   const { data, error, count } = await query;
@@ -1361,7 +1367,7 @@ function renderDatabase() {
         <thead>
           <tr>
             <th style="width:36px;text-align:center">
-              ${intakeView ? 'Status / stage' : canSelectDatabasePage() ? `<label style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap" title="Select all contacts on this page"><input type="checkbox" id="select-all-cb" aria-label="Select all contacts on this page" ${allPageSel ? 'checked' : ''} ${state.currentRows.length ? '' : 'disabled'} />Select all</label>` : 'Select'}
+              ${intakeView ? 'Status / stage' : canSelectDatabasePage() ? `<label style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap" title="Select all contacts on this page"><input type="checkbox" id="select-all-cb" aria-label="Select all contacts on this page" ${allPageSel ? 'checked' : ''} ${state.currentRows.length ? '' : 'disabled'} />Select all</label>` + ` <button class="btn small secondary" id="db-select-matching" style="margin-left:6px;" ${state.currentRows.length ? '' : 'disabled'} title="Select every contact matching the current filters, up to the 500 campaign limit">Select all matching</button>` : 'Select'}
             </th>
             ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `<th data-sort="org">Surgery / Org</th><th data-sort="care_group">${state.sourceFilter==='hcp'?'Commissioning area':'Group'}</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
             ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
@@ -1509,6 +1515,23 @@ function hcpTabVisible() { return canSendContactSource(state.userProfile, 'hcp')
 
 function canSelectDatabasePage() {
   return !isRecentImportView(state.dbStage) && canSendContactSource(state.userProfile, state.sourceFilter);
+}
+
+// Selects across every page of the current filters, not just the page in
+// view. Capped at the same 500 a campaign allows, so the selection can
+// always actually be sent.
+async function selectAllMatchingContacts() {
+  const { count } = await applyContactFilters(sb.from('contacts_with_last_email').select('id', { count: 'exact', head: true }));
+  const { data, error } = await applyContactFilters(sb.from('contacts_with_last_email').select('id'))
+    .order('id', { ascending: true }).limit(500);
+  if (error) { toast('Could not select: ' + error.message, 'error'); return; }
+  const ids = (data || []).map(r => r.id);
+  state.selected = new Set(ids);
+  const total = Number.isInteger(count) ? count : ids.length;
+  toast(total > ids.length
+    ? 'Selected ' + ids.length.toLocaleString() + ' of ' + total.toLocaleString() + ' matching. A campaign takes 500 at a time — send these, then select again for the next batch.'
+    : 'Selected all ' + ids.length.toLocaleString() + ' matching contacts.');
+  render();
 }
 
 function setDatabasePageSelection(checked) {
@@ -3726,6 +3749,15 @@ function bindEvents() {
   });
 
   // Select-all checkbox
+  const selectMatching = document.getElementById('db-select-matching');
+  if (selectMatching) selectMatching.onclick = async () => {
+    selectMatching.disabled = true;
+    const label = selectMatching.textContent;
+    selectMatching.textContent = 'Selecting…';
+    try { await selectAllMatchingContacts(); }
+    finally { selectMatching.disabled = false; selectMatching.textContent = label; }
+  };
+
   const selectAllCb = document.getElementById('select-all-cb');
   if (selectAllCb) {
     const allPageSel = state.currentRows.length > 0 && state.currentRows.every(c => state.selected.has(c.id));
