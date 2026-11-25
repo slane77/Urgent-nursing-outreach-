@@ -69,3 +69,5 @@
 .db-notes{white-space:pre-wrap;overflow-wrap:anywhere;color:#617b8d}
 @media(max-width:1150px){.db-switchbar{flex-wrap:wrap}.db-switchbar .db-field{flex:1 1 200px}.db-filter-panel{grid-template-columns:1fr 1fr}.db-table{min-width:900px}}
 @media(max-width:700px){.db-heading{align-items:flex-start}.db-heading h2{font-size:23px}.db-switchbar{padding:12px}.db-more-list{margin-left:0}.db-searchbar{flex-wrap:wrap}.db-searchbar .search{flex-basis:100%}.db-filter-panel{grid-template-columns:1fr}.db-bulk{flex-wrap:wrap;top:0}.db-footer{flex-wrap:wrap}.db-detail-grid{grid-template-columns:1fr}.db-drawer-body{padding:18px}}
+
+.db-table.db-intake-table th:first-child{width:7%}.db-table.db-intake-table th:nth-child(2){width:23%}
