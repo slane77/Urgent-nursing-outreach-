@@ -53,3 +53,11 @@ test('Drawer response does not reopen a contact closed while history was loading
  const pending=ctx.openDbContact('contact');ctx.state.dbDrawer=null;finish({data:[]});await pending;
  assert.equal(ctx.state.dbDrawer,null);
 });
+
+test('A failed load cannot be mistaken for an empty database or offer stale selections',()=>{
+ const ctx=harness({contactsError:'canceling statement due to statement timeout',totalRows:0,currentRows:[{id:'stale',email:'stale@example.invalid',status:'lead'}]});
+ const html=ctx.renderContactWorkspace();
+ assert.match(html,/Contact count unavailable/);assert.match(html,/Try again/);
+ assert.match(html,/Your contacts have not been removed/);
+ assert.doesNotMatch(html,/0 matching contacts|No contacts match this view|Select all matching|stale@example/);
+});
