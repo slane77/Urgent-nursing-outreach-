@@ -928,6 +928,7 @@ async function logEmailSend(contactId, templateId, batchId, status, notes) {
     template_id: templateId,
     batch_id: batchId,
     status: status || 'sent',
+    sent_by: state.user?.id,
     notes: notes || null
   }]);
   if (error) console.error('Send log failed:', error);
@@ -939,7 +940,8 @@ async function logBatchSends(contactIds, templateId, batchId) {
     contact_id: id,
     template_id: templateId,
     batch_id: batchId,
-    status: 'sent'
+    status: 'sent',
+    sent_by: state.user?.id
   }));
   // Insert in chunks of 500 to stay well under request size limits
   const CHUNK = 500;
@@ -2764,13 +2766,49 @@ async function loadDashboard() {
   state.dashboardData = null;
   render();
   try {
-    const [dashboard] = await Promise.all([callCM('dashboard'), loadSourceCounts(), loadStatusCounts()]);
+    const [dashboard] = await Promise.all([callCM('dashboard'), loadSourceCounts(), loadStatusCounts(), loadUserActivity(false)]);
     state.dashboardData = dashboard;
   } catch(e) {
     state.dashboardData = { error: e.message };
   }
   state.dashboardLoading = false;
   render();
+}
+
+let userActivityRequest=0;
+async function loadUserActivity(redraw=true) {
+  const request=++userActivityRequest;
+  if(state.userProfile?.role!=='admin'){state.userActivity=null;state.userActivityLoading=false;return;}
+  const userId=state.user?.id;
+  const audience=state.userActivityAudience||'all';
+  state.userActivityLoading=true;state.userActivityError=null;
+  if(redraw)render();
+  try {
+    const {data,error}=await sb.rpc('dashboard_user_activity',{p_audience:audience});
+    if(request!==userActivityRequest||state.user?.id!==userId)return;
+    if(error)throw error;
+    if(!data||!Array.isArray(data.rows))throw new Error('Activity totals were not returned.');
+    state.userActivity=data;
+  } catch(error) {
+    if(request!==userActivityRequest||state.user?.id!==userId)return;
+    state.userActivity=null;state.userActivityError=error.message||'Unable to load activity.';
+  } finally {
+    if(request===userActivityRequest&&state.user?.id===userId){state.userActivityLoading=false;if(redraw)render();}
+  }
+}
+function renderUserActivity() {
+  if(state.userProfile?.role!=='admin')return '';
+  const report=state.userActivity;
+  const format=n=>Number(n||0).toLocaleString('en-GB');
+  const date=s=>s?new Date(s).toLocaleString('en-GB',{timeZone:'Europe/London',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'No recorded sends';
+  return `<section class="dash-card user-activity" aria-labelledby="user-activity-heading">
+    <div class="user-activity-heading"><div><h2 id="user-activity-heading">Team email activity</h2><p>Emails recorded as sent, attributed to the account that sent or logged them.</p></div>
+      <div class="user-activity-controls"><label for="user-activity-audience">Email audience</label><select id="user-activity-audience" class="select">${[['all','All outreach'],['contacts','Client / contact outreach'],['candidates','Candidate outreach']].map(([k,l])=>`<option value="${k}" ${(state.userActivityAudience||'all')===k?'selected':''}>${l}</option>`).join('')}</select><button class="btn" id="refresh-user-activity" ${state.userActivityLoading?'disabled':''}>Refresh</button></div></div>
+    ${state.userActivityLoading?'<p class="muted" role="status">Loading user activity…</p>':state.userActivityError?`<p class="dash-error" role="alert">Could not load user activity: ${esc(state.userActivityError)}</p>`:!report?'<p class="muted">Use Refresh to load user activity.</p>':`
+    <div class="user-activity-table"><table class="table"><thead><tr><th scope="col">User</th><th scope="col">Today</th><th scope="col">This week</th><th scope="col">This month</th><th scope="col">All time</th><th scope="col">Latest recorded send</th></tr></thead><tbody>
+      ${report.rows.map(r=>`<tr class="${r.unattributed?'activity-unattributed':''}"><td><strong>${esc(r.name)}</strong>${r.email?`<span class="muted activity-email">${esc(r.email)}</span>`:''}</td><td>${format(r.today)}</td><td>${format(r.this_week)}</td><td><strong>${format(r.this_month)}</strong></td><td>${format(r.all_time)}</td><td>${esc(date(r.last_sent_at))}</td></tr>`).join('')}
+    </tbody></table></div><p class="muted activity-footnote">UK calendar dates; week starts Monday. Updated ${esc(date(report.asOf))}. Includes historical entries marked as sent; excludes failed, bounced and queued records. These are app records, not confirmed delivery or a count of emails sent directly from Outlook. Unattributed records are kept separate.</p>`}
+  </section>`;
 }
 
 function renderDashboard() {
@@ -2827,6 +2865,7 @@ function renderDashboard() {
         </div>
       </div>
 
+      ${renderUserActivity()}
       <div class="dash-cols">
         <div class="dash-col-main">
 
@@ -3658,6 +3697,10 @@ function renderModal() {
 // ============================================================================
 
 function bindEvents() {
+  const activityAudience=document.getElementById('user-activity-audience');
+  if(activityAudience)activityAudience.onchange=e=>{state.userActivityAudience=e.target.value;loadUserActivity();};
+  const activityRefresh=document.getElementById('refresh-user-activity');
+  if(activityRefresh)activityRefresh.onclick=()=>loadUserActivity();
   document.querySelectorAll('[data-import-workspace]').forEach(btn=>{
     btn.onclick=()=>{state.importWorkspace=btn.dataset.importWorkspace;render();};
   });
