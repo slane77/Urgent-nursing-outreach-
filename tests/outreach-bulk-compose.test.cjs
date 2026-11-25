@@ -50,10 +50,16 @@ test('duplicate mailbox addresses are removed regardless of casing and whitespac
  const rows=contacts(3);rows[1].email=' CONTACT0@EXAMPLE.INVALID ';rows[2].email='invalid';
  const h=harness(rows);await h.ctx.sendFilteredViaBrevo();assert.equal(h.calls[0][1].length,1);
 });
-test('selected batch size and absolute 500 limit are respected',async()=>{
- for(const [size,expected] of [[250,250],[500,500],[2000,500],[-1,1]]){
-  const h=harness(contacts(700));h.state.composeBatchSize=size;await h.ctx.sendFilteredViaBrevo();assert.equal(h.calls[0][1].length,expected);assert.equal(h.queries[0].range[1],expected-1);
+test('optional limits work and all contacts can exceed 1000 recipients',async()=>{
+ for(const [size,expected] of [[250,250],[500,500],[2000,2000],[null,2301]]){
+  const h=harness(contacts(2301));h.state.composeBatchSize=size;await h.ctx.sendFilteredViaBrevo();assert.equal(h.calls[0][1].length,expected);
  }
+});
+
+test('an error after the first 1000 recipients cannot produce a partial review',async()=>{
+ let pages=0;
+ const h=harness(contacts(2301),r=>Promise.resolve(++pages===3?{error:{message:'Connection failed'}}:r));h.state.composeBatchSize=null;
+ await h.ctx.sendFilteredViaBrevo();assert.equal(h.calls.length,0);assert.match(h.messages[0],/No emails queued/);
 });
 test('all-source and unassigned database requests are blocked before fetching recipients',async()=>{
  for(const source of ['all','hcp']){const h=harness(contacts(2));h.state.composeSourceFilter=source;h.state.userProfile={role:'user',allowed_sources:['ahp']};await h.ctx.sendFilteredViaBrevo();assert.equal(h.reads(),0);assert.equal(h.calls.length,0);assert.equal(h.messages.length,1);}

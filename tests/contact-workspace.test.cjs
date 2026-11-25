@@ -33,14 +33,14 @@ test('Contact content is escaped and external source links only accept HTTP or H
 });
 test('Owner and band filters apply to the same builder used for listing and selecting all matches',()=>{
  const ctx=harness({sourceFilter:'all',subTab:'lead',dbOwnerFilter:'mine',dbBandFilter:'6'});
- vm.runInContext(part('function applyContactFilters(', 'async function loadContactsPage()'),ctx);
+ vm.runInContext(part('function applyContactFilters(', 'async function loadContactsPage('),ctx);
  const calls=[];const q={eq(k,v){calls.push([k,v]);return this;},is(k,v){calls.push([k,v]);return this;}};
  ctx.applyContactFilters(q);assert.ok(calls.some(([k,v])=>k==='owner_user_id'&&v==='one'));assert.ok(calls.some(([k,v])=>k==='band_requested'&&v==='6'));
  calls.length=0;ctx.state.dbOwnerFilter='unassigned';ctx.applyContactFilters(q);assert.ok(calls.some(([k,v])=>k==='owner_user_id'&&v===null));
 });
 test('Select-all response is discarded if the user changes owner filters while it loads',async()=>{
  const ctx=harness();let finish;
- ctx.sb={from:()=>({select(){return this;},order(){return this;},limit(){return new Promise(r=>finish=r);}})};
+ ctx.sb={from:()=>({select(){return this;},order(){return this;},range(){return new Promise(r=>finish=r);}})};
  ctx.applyContactFilters=q=>q;
  vm.runInContext(part('async function selectAllMatchingContacts()', 'function setDatabasePageSelection('),ctx);
  const pending=ctx.selectAllMatchingContacts();ctx.state.dbOwnerFilter='mine';finish({data:[{id:'wrong-person'}],count:1});await pending;

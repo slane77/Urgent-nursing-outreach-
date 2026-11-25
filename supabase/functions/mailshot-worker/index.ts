@@ -63,3 +63,4 @@ Deno.serve(async (req: Request) => {
   if(untouched.length) await admin.from('outreach_mailshot_items').update({status:'queued',claimed_at:null}).in('id',untouched).eq('status','processing');
   return Response.json({processed});
 });
+

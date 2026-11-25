@@ -45,7 +45,7 @@ const state = {
   composeRegionFilter: '',
   composeCountryFilter: '',
   composeTownFilter: '',
-  composeBatchSize: 250,
+  composeBatchSize: null,
   composeQueue: null,
   composeBatchId: null,
   composeIndex: 0,
@@ -856,10 +856,10 @@ function applyContactFilters(query) {
   return query;
 }
 
-async function loadContactsPage() {
+async function loadContactsPage(preserveSelection = false) {
   const requestId = ++contactsPageRequest;
   state.loadingPage = true;
-  state.selected = new Set();
+  if(!preserveSelection)state.selected = new Set();
   if(state.view==='database' && typeof renderContactWorkspace==='function')render();
   const start = (state.page - 1) * state.pageSize;
   const end = start + state.pageSize - 1;
@@ -1026,7 +1026,7 @@ async function buildComposeQueueFromDb() {
     if (state.composeUncontactedOnly) query = query.is('last_emailed_at', null);
 
   // Sort and limit to batch size + small buffer for invalid emails
-  query = query.order('updated_at', { ascending: true }).limit(state.composeBatchSize * 2);
+  query = query.order('updated_at', { ascending: true }).limit((state.composeBatchSize || 250) * 2);
 
   const { data, error } = await query;
   if (error) {
@@ -1034,7 +1034,7 @@ async function buildComposeQueueFromDb() {
     return [];
   }
   // Filter to those with a valid email and take batch size
-  return (data || []).filter(c => c.email && c.email.includes('@')).slice(0, state.composeBatchSize);
+  return (data || []).filter(c => c.email && c.email.includes('@')).slice(0, state.composeBatchSize || 250);
 }
 
 async function previewComposeCounts() {
@@ -1325,53 +1325,68 @@ function canSelectDatabasePage() {
   return !isRecentImportView(state.dbStage) && canSendContactSource(state.userProfile, state.sourceFilter);
 }
 
-// Selects across every page of the current filters, not just the page in
-// view. Capped at the same 500 a campaign allows, so the selection can
-// always actually be sent.
+// Select every matching contact; retrieval pages are not campaign limits.
 async function selectAllMatchingContacts() {
-  if(!canSelectDatabasePage()||state.loadingPage)return;
+  if(!canSelectDatabasePage()||state.loadingPage||state.selectingAll)return;
   const fingerprint=()=>JSON.stringify([state.user?.id,state.view,state.sourceFilter,state.subTab,state.dbStage,state.search,state.regionFilter,state.countryFilter,state.ahpSpecialtyFilter,state.hcpAreaFilter,state.hcpAudienceFilter,state.hcpCommissioningFilter,state.hcpReadyOnly,state.dbOwnerFilter,state.dbBandFilter]);
-  const requested=fingerprint();
-  const { data, error, count } = await applyContactFilters(sb.from('contacts_with_last_email').select('id', {count:'exact'}))
-    .order('id', { ascending: true }).limit(500);
-  if(requested!==fingerprint())return;
-  if (error) { toast('Could not select: ' + error.message, 'error'); return; }
-  const ids = (data || []).map(r => r.id);
-  state.selected = new Set(ids);
-  const total = Number.isInteger(count) ? count : ids.length;
-  toast(total > ids.length
-    ? 'Selected ' + ids.length.toLocaleString() + ' of ' + total.toLocaleString() + ' matching. A campaign takes 500 at a time — send these, then select again for the next batch.'
-    : 'Selected all ' + ids.length.toLocaleString() + ' matching contacts.');
-  render();
+  const requested=fingerprint(), ids=new Set();
+  state.selectingAll=true;
+  try {
+    let offset=0, expected=null;
+    for(;;){
+      const {data,error,count}=await applyContactFilters(sb.from('contacts_with_last_email').select('id',{count:'exact'})).order('id',{ascending:true}).range(offset,offset+499);
+      if(requested!==fingerprint())return;
+      if(error||!Array.isArray(data))throw new Error(error?.message||'The contact list was not returned.');
+      if(expected===null)expected=count;
+      if(Number.isInteger(expected)&&count!==expected)throw new Error('The list changed. Please select all again.');
+      data.forEach(c=>ids.add(c.id));offset+=data.length;
+      if(!data.length||Number.isInteger(expected)&&offset>=expected)break;
+      if(!Number.isInteger(expected)&&data.length<500)break;
+    }
+    if(Number.isInteger(expected)&&ids.size!==expected)throw new Error('The complete list could not be loaded. Please try again.');
+    state.selected=ids;
+    toast('Selected all '+ids.size.toLocaleString()+' matching contacts across all pages.');
+  }catch(error){toast('Could not select all: '+error.message,'error');}
+  finally{state.selectingAll=false;render();}
 }
 
 function setDatabasePageSelection(checked) {
-  if (!canSelectDatabasePage()) return;
-  const next = new Set(state.selected);
-  state.currentRows.forEach(c => checked ? next.add(c.id) : next.delete(c.id));
-  if (checked && next.size > 500) {
-    toast('Select no more than 500 recipients per reviewed campaign.', 'error');
-    return;
-  }
-  state.selected = next;
+  if(!canSelectDatabasePage())return;
+  if(checked)return selectAllMatchingContacts();
+  state.selected=new Set();render();
 }
 
 function contactSendError(template, count, options) {
-  if(!Number.isInteger(count)||count<1||count>500) return 'Choose 1–500 recipients. Larger campaigns must be split into reviewed selections.';
+  if(!Number.isSafeInteger(count)||count<1) return 'Choose at least one recipient.';
   if(!options?.source || options.source==='all' || !COMPOSE_SRC_LABELS[options.source]) return 'Choose one specific source before sending. All-source mailshots are disabled.';
   if(!canSendContactSource(state.userProfile,options.source)) return 'You do not have sending access to this database.';
   if(/^GP Surgery\b/i.test(template.name||'') && options.source!=='gp_surgery') return 'GP Surgery templates can only target GP Surgeries.';
   return null;
 }
 async function reviewContactMailshot(template, ids, options, contacts) {
+  const reviewUser=state.user?.id;
+  const reviewSource=state.composeSourceFilter;
+  const reviewTemplate=state.composeTemplateId;
   const error=contactSendError(template,ids.length,options);
   if(error) return toast(error,'error');
   if(!contacts) {
-    const result=await sb.from('contacts').select('id,first_name,last_name,email,org,notes,department,status,hcp_outreach_status').in('id',ids);
-    if(result.error || result.data?.length!==ids.length) return toast('Could not verify every selected recipient. No mailshot queued.','error');
-    contacts=result.data;
+    contacts=[];
+    for(let offset=0;offset<ids.length;offset+=100){
+      const chunk=ids.slice(offset,offset+100);
+      const result=await sb.from('contacts').select('id,first_name,last_name,email,org,notes,department,status,hcp_outreach_status').in('id',chunk);
+      if(result.error||result.data?.length!==chunk.length)return toast('Could not verify every selected recipient. No mailshot queued.','error');
+      contacts.push(...result.data);
+    }
   }
-  if (options.source === 'hcp' && contacts.some(c => !hcpCampaignEligible(c))) return toast('This selection contains contacts on hold or needing qualification. Choose a relevant HCP campaign group. No emails queued.', 'error');
+  if(state.user?.id!==reviewUser||state.composeSourceFilter!==reviewSource||state.composeTemplateId!==reviewTemplate||state.view!=='compose')return toast('Your selection changed. Review it again.','error');
+  const seen=new Set();
+  contacts=contacts.filter(c=>{
+    const email=String(c.email||'').trim().toLowerCase();
+    if(!['lead','live'].includes(c.status)||!email.includes('@')||seen.has(email)||(options.source==='hcp'&&!hcpCampaignEligible(c)))return false;
+    seen.add(email);return true;
+  });
+  if(!contacts.length)return toast('No eligible email addresses remain in this selection.','error');
+  ids=contacts.map(c=>c.id);
   state.modal={type:'mailshot-review',template,ids:[...ids],options:{...options},contacts};
   renderModal();
 }
@@ -1404,7 +1419,8 @@ async function sendFilteredViaBrevo() {
 }
 
 function composeReviewLimit(selection = state) {
-  return Math.min(500, Math.max(1, Math.trunc(Number(selection.composeBatchSize) || 250)));
+  const value=Number(selection.composeBatchSize);
+  return Number.isFinite(value)&&value>0?Math.max(1,Math.trunc(value)):Infinity;
 }
 
 function composeReviewKey(selection) {
@@ -1416,46 +1432,30 @@ function composeReviewKey(selection) {
 }
 
 async function buildComposeReviewContacts(selection) {
-  let query = applyContactStatusFilter(sb.from(selection.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*'), selection.composeListFilter, selection.composeSourceFilter);
-  query = applyComposeSourceFilter(query, selection.composeSourceFilter);
-  query = applyComposeSubFilter(query, selection);
-  if (selection.composeRegionFilter) query = query.eq('region', selection.composeRegionFilter);
-  if (selection.composeCountryFilter) query = query.eq('country', selection.composeCountryFilter);
-  if (selection.composeTownFilter) query = query.ilike('town', `%${selection.composeTownFilter}%`);
-  if (selection.composeUncontactedOnly) query = query.is('last_emailed_at', null);
-  query = query.ilike('email', '%@%').order('updated_at', {ascending: true}).order('id', {ascending: true}).range(0, composeReviewLimit(selection) - 1);
-  const {data, error} = await query;
-  if (error || !Array.isArray(data)) throw new Error(error?.message || 'The recipient list was not returned.');
-  const seen = new Set();
-  return data.filter(c => {
-    const email = String(c.email || '').trim().toLowerCase();
-    if (!c.id || !['lead', 'live'].includes(c.status) || !email.includes('@') || seen.has(email)) return false;
-    seen.add(email);
-    return true;
-  });
+  const seen=new Set(),out=[],limit=composeReviewLimit(selection);
+  for(let offset=0;;){
+    let query=applyContactStatusFilter(sb.from(selection.composeUncontactedOnly?'contacts_with_last_email':'contacts').select('*'),selection.composeListFilter,selection.composeSourceFilter);
+    query=applyComposeSubFilter(applyComposeSourceFilter(query,selection.composeSourceFilter),selection);
+    if(selection.composeRegionFilter)query=query.eq('region',selection.composeRegionFilter);
+    if(selection.composeCountryFilter)query=query.eq('country',selection.composeCountryFilter);
+    if(selection.composeTownFilter)query=query.ilike('town',`%${selection.composeTownFilter}%`);
+    if(selection.composeUncontactedOnly)query=query.is('last_emailed_at',null);
+    const size=Math.min(500,limit-out.length);
+    const {data,error}=await query.ilike('email','%@%').order('id',{ascending:true}).range(offset,offset+size-1);
+    if(error||!Array.isArray(data))throw new Error(error?.message||'The recipient list was not returned.');
+    for(const c of data){
+      const email=String(c.email||'').trim().toLowerCase();
+      if(!c.id||!['lead','live'].includes(c.status)||!email.includes('@')||seen.has(email))continue;
+      seen.add(email);out.push(c);
+    }
+    offset+=data.length;
+    if(data.length<size||out.length>=limit)break;
+  }
+  return out;
 }
 
 async function buildAllComposeContactsFromDb() {
-  const selection={...state};
-  const PAGE = 501;
-  const out = [];
-  for (let from = 0; ; from += PAGE) {
-    let query = applyContactStatusFilter(sb.from(selection.composeUncontactedOnly ? 'contacts_with_last_email' : 'contacts').select('*'), selection.composeListFilter, selection.composeSourceFilter);
-    query = applyComposeSourceFilter(query, selection.composeSourceFilter);
-    query = applyComposeSubFilter(query, selection);
-    if (selection.composeRegionFilter) query = query.eq('region', selection.composeRegionFilter);
-    if (selection.composeCountryFilter) query = query.eq('country', selection.composeCountryFilter);
-    if (selection.composeTownFilter) query = query.ilike('town', `%${selection.composeTownFilter}%`);
-    if (selection.composeUncontactedOnly) query = query.is('last_emailed_at', null);
-    query = query.order('updated_at', { ascending: true }).range(from, from + PAGE - 1);
-    const { data, error } = await query;
-    if (error) throw new Error('Could not load the complete contact list: ' + error.message);
-    if (!data || !data.length) break;
-    out.push(...data);
-    if(out.length>500) throw new Error('More than 500 contacts match. Narrow the source, specialty or location before sending.');
-    if (data.length < PAGE) break;
-  }
-  return out.filter(c => c.email && c.email.includes('@'));
+  return buildComposeReviewContacts({...state,composeBatchSize:null});
 }
 
 async function sendSelectedViaBrevo() {
@@ -1581,13 +1581,13 @@ function renderCompose() {
       </div>
       ${state.composeSourceFilter==='hcp' ? renderHcpTargeting('compose-hcp', state.composeHcpAudienceFilter, state.composeHcpCommissioningFilter) : ''}
       <div class="field">
-        <label>Maximum recipients in this batch (up to 500)</label>
-        <input class="select" type="number" id="compose-batch" value="${reviewLimit}" min="1" max="500" />
+        <label>Optional recipient limit (leave blank for all matching contacts)</label>
+        <input class="select" type="number" id="compose-batch" value="${Number.isFinite(reviewLimit)?reviewLimit:''}" min="1" placeholder="All matching contacts" />
       </div>
     </div>
 
     <div class="compose-step">
-      <h3>3. Preview audience</h3><p class="muted">Choose one source. Maximum 500 emails per campaign. A two-minute cancellation window applies before sending starts.</p>
+      <h3>3. Preview audience</h3><p class="muted">Choose one source. All matching contacts can be included in one campaign. A two-minute cancellation window applies before sending starts.</p>
       <div class="stat-row">
         <div class="stat"><div class="label">Total in list</div><div class="value">${sourceCount}</div></div>
         <div class="stat"><div class="label">Match filter</div><div class="value" style="color:var(--orange-dark);">${previewMatch === null ? '?' : previewMatch}</div></div>
@@ -1646,7 +1646,7 @@ function renderBrevoSend() {
       <div class="brevo-panel-header">
         <div>
           <h3 style="margin:0 0 4px;">✉ Review Send — ${ids.length} contacts selected</h3>
-          <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Source: ${esc(composeSourceLabel())}. Choose a specific source in Database before selecting recipients. Maximum 500 per campaign.</p>
+          <p class="muted" style="margin:0;font-size:12px;">Contacts pre-selected from Database. Source: ${esc(composeSourceLabel())}. Choose a specific source in Database before selecting recipients. All selected contacts will be reviewed together.</p>
         </div>
         <button class="btn small" id="clear-selected-send">✕ Clear selection</button>
       </div>
@@ -3657,8 +3657,9 @@ function bindEvents() {
     const allPageSel = state.currentRows.length > 0 && state.currentRows.every(c => state.selected.has(c.id));
     const somePageSel = state.currentRows.some(c => state.selected.has(c.id)) && !allPageSel;
     selectAllCb.indeterminate = somePageSel;
-    selectAllCb.onchange = () => {
-      setDatabasePageSelection(selectAllCb.checked);
+    selectAllCb.onchange = async () => {
+      selectAllCb.disabled=true;
+      await setDatabasePageSelection(selectAllCb.checked);
       render();
     };
   }
@@ -3827,7 +3828,7 @@ function bindEvents() {
   document.querySelectorAll('.page-btn').forEach(b => {
     b.onclick = async () => {
       state.page = parseInt(b.dataset.page);
-      await loadContactsPage();
+      await loadContactsPage(true);
       render();
     };
   });
@@ -3876,7 +3877,7 @@ function bindEvents() {
   const composeTown = $('#compose-town');
   if (composeTown) composeTown.oninput = (e) => { state.composeTownFilter = e.target.value; state.composePreviewCounts = null; };
   const composeBatch = $('#compose-batch');
-  if (composeBatch) composeBatch.onchange = (e) => { state.composeBatchSize = composeReviewLimit({composeBatchSize:e.target.value}); render(); };
+  if (composeBatch) composeBatch.onchange = (e) => { state.composeBatchSize = e.target.value ? composeReviewLimit({composeBatchSize:e.target.value}) : null; render(); };
   const refreshPreview = $('#refresh-preview');
   if (refreshPreview) refreshPreview.onclick = async () => {
     state.composePreviewCounts = await previewComposeCounts();
@@ -4351,7 +4352,7 @@ let lastQueueSucceeded = false;
 
 async function queueMailshot(audience, template, ids, options) {
   if(mailshotSubmitting) return;
-  if(!ids?.length || ids.length>500) return toast('Maximum 500 recipients per reviewed campaign.','error');
+  if(!ids?.length) return toast('Choose at least one recipient.','error');
   if(audience==='contacts') {const error=contactSendError(template,ids.length,options); if(error) return toast(error,'error');}
   const fingerprint=JSON.stringify([state.user.id,audience,template.id,ids,options]);
   if(!pendingMailshotRequest || pendingMailshotRequest.fingerprint!==fingerprint) {

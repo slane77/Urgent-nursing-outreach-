@@ -13,3 +13,4 @@ export async function createComplexCareLink(admin, candidate, senderId) {
  if(insertError)throw Error('Unable to create personal questionnaire link');
  return 'https://urgent-nursing-outreach.vercel.app/complex-care-interest.html#invite='+token;
 }
+

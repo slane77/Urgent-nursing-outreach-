@@ -1,19 +1,18 @@
 export const STOPPED_MAILSHOTS = new Set(['93c3ea54-e62d-4705-b95d-3e47e7f8c060']);
 export const CANCEL_DETAIL = 'Cancellation requested before dispatch';
-export const MAX_RECIPIENTS = 500;
 export const SOURCE_TAGS = {
   children_homes:'Ofsted Register', agency:'Source: Agency Outreach',
   ahp:'Source: NHS Jobs AHP', nhs_scotland:'Source: NHS Scotland', hse:'Source: HSE',
   private_theatre:'Source: Theatres', care_home:'Source: Care Home',
   bms:'Source: BMS Outreach', sterile:'Source: Sterile Services',
   nhs_staffbank:'Source: NHS Staff Bank', camhs:'Source: CAMHS',
-  anp:'Source: ANP', enp:'Source: ENP', foi:'Source: FOI'
+  anp:'Source: ANP', enp:'Source: ENP', foi:'Source: FOI', hcp:'Source: HCP Complex Care'
 };
 
 export function campaignSafetyError(job, total) {
   if (job.payload?.cancelled || STOPPED_MAILSHOTS.has(job.id)) return 'Stopped at account owner request';
-  if (!Number.isInteger(total) || total < 1 || total > MAX_RECIPIENTS)
-    return 'Campaign blocked: maximum 500 recipients; create a smaller reviewed selection';
+  if (!Number.isSafeInteger(total) || total < 1)
+    return 'Campaign blocked: a valid recipient count is required';
   if (job.audience === 'contacts') {
     const source=job.payload?.source;
     if (source !== 'gp_surgery' && !Object.hasOwn(SOURCE_TAGS,source))
@@ -52,3 +51,4 @@ export function hasContactSourceAccess(profile, source) {
   if(!profile || (source!=='gp_surgery' && !Object.hasOwn(SOURCE_TAGS,source))) return false;
   return profile.role==='admin' || (Array.isArray(profile.allowed_sources) && profile.allowed_sources.includes(source));
 }
+
