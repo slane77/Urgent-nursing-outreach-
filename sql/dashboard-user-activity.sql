@@ -1,4 +1,7 @@
 -- Aggregate recorded sends without exposing recipient records or changing table access.
+-- Reporting status only; account access is managed separately.
+alter table public.user_profiles add column if not exists activity_archived boolean not null default false;
+
 create or replace function public.dashboard_user_activity(p_audience text default 'all')
 returns jsonb
 language plpgsql
@@ -39,7 +42,7 @@ begin
     select coalesce(p.user_id,a.sent_by) as user_id,
       coalesce(nullif(trim(p.full_name),''),nullif(p.email,''),
         case when a.sent_by is null then 'Unattributed historical sends' else 'Former or unavailable user' end) as name,
-      p.email,coalesce(a.today,0) as today,coalesce(a.this_week,0) as this_week,
+      p.email,coalesce(p.activity_archived,false) as archived,coalesce(a.today,0) as today,coalesce(a.this_week,0) as this_week,
       coalesce(a.this_month,0) as this_month,coalesce(a.all_time,0) as all_time,a.last_sent_at,
       p.user_id is null as unattributed
     from public.user_profiles p full join activity a on a.sent_by=p.user_id
