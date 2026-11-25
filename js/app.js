@@ -175,9 +175,9 @@ const state = {
   sourceStatusCounts: { lead: null, live: null, unsubscribed: null },
   ahpSpecialtyFilter: 'all',
   hcpAreaFilter: 'all',
-  hcpAudienceFilter: 'complex_care',
+  hcpAudienceFilter: 'all',
   hcpCommissioningFilter: 'all',
-  composeHcpAudienceFilter: 'complex_care',
+  composeHcpAudienceFilter: 'all',
   composeHcpCommissioningFilter: 'all',
   composeAreaFilter: 'all',
   // Multi-select
@@ -221,12 +221,11 @@ const HCP_SEGMENT_OPTIONS = [
   {k:'mental_health',l:'2. MH community packages / discharge funding / Section 117'},
   {k:'cqc_hold',l:'CQC inspection / rating — re-engagement list'},
   {k:'procurement_hold',l:'Framework / onboarding — waiting list'},
-  {k:'needs_review',l:'Needs qualification / clinical introductions'},
   {k:'not_relevant',l:'Other / retired / duplicate routes — excluded'}
 ];
 const HCP_READINESS_LABELS = {
-  ready:'Relevant outreach route', cqc_hold:'CQC inspection / rating hold',
-  procurement_hold:'Framework / onboarding hold', needs_review:'Needs qualification',
+  ready:'Lead — available for outreach', cqc_hold:'CQC inspection / rating hold',
+  procurement_hold:'Framework / onboarding hold',
   not_relevant:'Excluded from this campaign'
 };
 const HCP_CASE_AUDIENCES = [
@@ -243,9 +242,7 @@ function hcpCampaignEligible(c) {
 }
 function hcpQualificationError(previous, next) {
   if (next.hcp_outreach_status !== 'ready') return null;
-  if (!['complex_care','mental_health','both'].includes(next.hcp_pathway)) return 'Choose a service pathway before making this an outreach contact.';
-  if (!next.hcp_qualification_notes?.trim()) return 'Record the evidence for this contact’s role and suitability.';
-  if (['cqc_hold','procurement_hold'].includes(previous.hcp_outreach_status) && next.hcp_qualification_notes.trim() === (previous.hcp_qualification_notes || '').trim()) return 'Record the published CQC outcome or changed onboarding requirement before releasing this hold.';
+  if (['cqc_hold','procurement_hold'].includes(previous.hcp_outreach_status) && (!next.hcp_qualification_notes?.trim() || next.hcp_qualification_notes.trim() === (previous.hcp_qualification_notes || '').trim())) return 'Record the published CQC outcome or changed onboarding requirement before releasing this hold.';
   return null;
 }
 const HCP_AUDIENCES = [
@@ -344,8 +341,8 @@ function renderHcpTargeting(prefix, audience, area) {
     <div class="field"><label for="${prefix}-audience">Referral audience</label>
       <select class="select" id="${prefix}-audience">
         <optgroup label="Care-package commissioning">${HCP_SEGMENT_OPTIONS.slice(0,2).map(option).join('')}</optgroup>
-        <optgroup label="Case management">${[{k:'cm_all',l:'All case managers — including review / holds'},...HCP_CASE_AUDIENCES].map(option).join('')}</optgroup>
-        <optgroup label="Review and re-engagement">${HCP_SEGMENT_OPTIONS.slice(2).map(option).join('')}</optgroup>
+        <optgroup label="Case management">${[{k:'cm_all',l:'All case managers'},...HCP_CASE_AUDIENCES].map(option).join('')}</optgroup>
+        <optgroup label="Re-engagement">${HCP_SEGMENT_OPTIONS.slice(2).map(option).join('')}</optgroup>
         <optgroup label="Previous campaign groups">${[...HCP_AUDIENCES,{k:'reviewed',l:'Previous reviewed referral groups'}].map(option).join('')}</optgroup>
         ${option({k:'all',l:'All HCP records (including holds)'})}
       </select>
@@ -356,7 +353,7 @@ function renderHcpTargeting(prefix, audience, area) {
         ${HCP_COMMISSIONING_AREAS.map(a => `<option value="${esc(a)}" ${area===a?'selected':''}>${esc(a)}</option>`).join('')}
       </select>
     </div>
-  </div><p class="muted">${audience.startsWith('cm_') ? 'Match the message to the case manager’s service. Use the HCP – Case managers templates; use the supplier-partnership template for rehabilitation networks. ' : ''}Sending includes only relevant routes with an active email status. Review named contacts and shared inboxes together.</p><details class="hcp-help"><summary>What the lists mean</summary><p>Relevant outreach routes are not confirmation of provider approval or live demand. Case-management lists show review and held records too; Compose excludes these from sending. CQC and framework holds stay available for re-engagement. Published email addresses are not a deliverability guarantee.</p></details>`;}
+  </div><p class="muted">${audience.startsWith('cm_') ? 'Match the message to the case manager’s service. Use the HCP – Case managers templates; use the supplier-partnership template for rehabilitation networks. ' : ''}Sending includes only relevant routes with an active email status. Review named contacts and shared inboxes together.</p><details class="hcp-help"><summary>What the lists mean</summary><p>Relevant outreach routes are not confirmation of provider approval or live demand. Case-management lists show held records too; Compose excludes these from sending. CQC and framework holds stay available for re-engagement. Published email addresses are not a deliverability guarantee.</p></details>`;}
 
 const MODAL_SOURCE_OPTIONS = [
   { k: 'gp_surgery',      l: 'GP Surgery' },
@@ -734,7 +731,7 @@ async function openDatabaseView(stage = 'all', source = 'all') {
   Object.assign(state, {
     view: 'database', subTab: isRecentImportView(stage) ? 'all' : stage === 'live' ? 'live' : source === 'hcp' && stage === 'all' ? 'eligible' : 'lead',
     dbStage: stage === 'live' ? 'all' : stage, sourceFilter: source,
-    search: '', regionFilter: '', countryFilter: '', ahpSpecialtyFilter: 'all',
+    search: '', regionFilter: '', countryFilter: '', dbOwnerFilter:'all', dbBandFilter:'', hcpAudienceFilter:'all', hcpAreaFilter:'all', hcpCommissioningFilter:'all', hcpReadyOnly:false, ahpSpecialtyFilter: 'all',
     page: 1, selected: new Set()
   });
   if(isRecentImportView(stage)) {state.recentImportPeriod=stage==='added_today'?'today':'7';state.recentImportUncontactedOnly=false;}
@@ -749,8 +746,8 @@ async function openDatabaseView(stage = 'all', source = 'all') {
 async function changeDatabaseSource(source) {
   const keepIntake=isRecentImportView(state.dbStage);
   Object.assign(state,{sourceFilter:source,subTab:keepIntake?'all':source==='hcp'?'eligible':'lead',
-    dbStage:keepIntake?state.dbStage:'all',ahpSpecialtyFilter:'all',hcpAreaFilter:'all',hcpAudienceFilter:'complex_care',hcpCommissioningFilter:'all',selected:new Set(),
-    page:1,search:'',regionFilter:'',countryFilter:''});
+    dbStage:keepIntake?state.dbStage:'all',ahpSpecialtyFilter:'all',hcpAreaFilter:'all',hcpAudienceFilter:'all',hcpCommissioningFilter:'all',selected:new Set(),
+    page:1,search:'',regionFilter:'',countryFilter:'',dbBandFilter:'',hcpReadyOnly:false,dbDrawer:null});
   await Promise.all([loadSourceStatusCounts(),loadContactsPage()]);render();
 }
 
@@ -841,6 +838,10 @@ function applyContactFilters(query) {
   // sf === 'all' — no filter applied
   // ──────────────────────────────────────────────────────────────────────────
 
+  if(state.dbOwnerFilter==='mine') query=query.eq('owner_user_id',state.user.id);
+  else if(state.dbOwnerFilter==='unassigned') query=query.is('owner_user_id',null);
+  else if(state.dbOwnerFilter && state.dbOwnerFilter!=='all') query=query.eq('owner_user_id',state.dbOwnerFilter);
+  if(state.dbBandFilter) query=query.eq('band_requested',state.dbBandFilter);
   if (state.regionFilter) query = query.eq('region', state.regionFilter);
   if (state.countryFilter) query = query.eq('country', state.countryFilter);
 
@@ -865,8 +866,9 @@ async function loadContactsPage() {
   let query = applyContactFilters(sb.from('contacts_with_last_email').select('*', { count: 'exact' }));
   query = query.order(state.sortKey, { ascending: state.sortDir === 'asc' }).order('id', { ascending: true }).range(start, end);
 
-  const { data, error, count } = await query;
+  const [{data,error,count}]=await Promise.all([query,typeof loadDbDirectory==='function'?loadDbDirectory():Promise.resolve()]);
   if (requestId !== contactsPageRequest) return;
+  state.contactsError=error?.message||null;
   state.loadingPage = false;
 
   if (error) {
@@ -1240,222 +1242,7 @@ function renderFollowUpDate(d) {
 }
 
 function renderDatabase() {
-  const SOURCES = [
-    { key: 'all',             label: 'All Sources'       },
-    { key: 'gp_surgery',      label: 'GP Surgeries'      },
-    { key: 'children_homes',  label: "Children's Homes"  },
-    { key: 'agency',          label: 'Agency Outreach'   },
-    { key: 'ahp',             label: 'NHS Jobs AHP'      },
-    { key: 'nhs_scotland',    label: 'NHS Scotland'     },
-    { key: 'hse',             label: 'HSE (Ireland)'    },
-    { key: 'anp',             label: 'ANP'               },
-    { key: 'enp',             label: 'ENP'               },
-    { key: 'care_home',       label: 'Care Homes'        },
-    { key: 'private_theatre', label: 'Theatres'  },
-    { key: 'foi',             label: 'FOI – NHS Trusts' },
-    { key: 'hcp',             label: 'Homecare Providers' },
-  ].filter(s => s.key !== 'hcp' || hcpTabVisible());
-
-  const intakeView = isRecentImportView(state.dbStage);
-  const total = state.totalRows;
-  const start = (state.page - 1) * state.pageSize;
-  const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
-  const selN = state.selected.size;
-  const allPageSel = state.currentRows.length > 0 && state.currentRows.every(c => state.selected.has(c.id));
-
-  return `
-    ${state.sourceFilter==='hcp' ? '<details class="hcp-source-switch"><summary>Homecare Providers · switch database</summary>' : ''}
-    <div class="source-tabs">
-      ${SOURCES.map(s => {
-        const cnt = state.sourceCounts[s.key];
-        const isEmpty = cnt === 0;
-        const isActive = state.sourceFilter === s.key;
-        return `<div class="source-tab-group"><button class="source-tab${isActive ? ' active' : ''}${isEmpty ? ' source-empty' : ''}" data-source="${s.key}">
-          ${esc(s.label)}
-          ${cnt != null ? `<span class="source-count${isEmpty ? ' zero' : ''}">${Number(cnt).toLocaleString()}</span>` : ''}
-          ${s.key === 'children_homes' && cnt > 0 ? '<span class="source-warn" title="Most have placeholder emails — run enrichment from Import tab">⚠</span>' : ''}
-        </button>
-        ${state.newTodayCounts && state.newTodayCounts[s.key] > 0 ? `<button class="btn small source-new" data-new-source="${s.key}" aria-label="View ${esc(s.label)} records added today">+${state.newTodayCounts[s.key]} added today</button>` : ''}</div>`;
-      }).join('')}
-    </div>
-    ${state.sourceFilter==='hcp' ? '</details><section class="hcp-workspace"><div><span class="hcp-eyebrow">HOMECARE PROVIDERS</span><h2>Referral partnerships</h2><p>Choose an audience, review the contacts, then use a matching email template.</p></div><button class="btn secondary" id="hcp-reset-filters">Reset HCP filters</button></section><nav class="hcp-quickviews" aria-label="HCP work lists">'+[
-      ['complex_care','Complex-care buyers'],['mental_health','Mental-health buyers'],['cm_all','Case managers'],['needs_review','Needs review'],['cqc_hold','CQC re-engagement'],['procurement_hold','Framework / onboarding']
-    ].map(([k,l])=>'<button class="btn '+(state.hcpAudienceFilter===k?'primary':'secondary')+'" data-hcp-view="'+k+'">'+l+'</button>').join('')+'</nav><label class="hcp-ready-toggle"><input type="checkbox" id="hcp-ready-only" '+(state.hcpReadyOnly?'checked':'')+' /> Show outreach-ready contacts only</label>' : ''}
-
-    ${selN > 0 ? `
-    <div class="batch-bar">
-      <span class="batch-count">${selN} selected</span>
-
-      ${state.subTab === 'lead' ? `
-        <button class="btn small batch-btn live-btn" data-bulk="move-to-live">→ Mark as Live</button>
-        <button class="btn small batch-btn" data-bulk="unsubscribe">⊘ Unsubscribe</button>
-        <div class="batch-sep"></div>
-        <button class="btn small batch-btn stage-btn" data-bulk="stage-responded">✓ Responded</button>
-        <button class="btn small batch-btn stage-btn" data-bulk="stage-meeting">📅 Meeting</button>
-        <button class="btn small batch-btn compose-btn" data-bulk="send-compose">✉ Send via Brevo (${selN})</button>
-      ` : (state.subTab === 'live' || state.subTab === 'eligible') ? `
-        <button class="btn small batch-btn" data-bulk="restore">→ Move to Leads</button>
-        <button class="btn small batch-btn" data-bulk="unsubscribe">⊘ Unsubscribe</button>
-        <button class="btn small batch-btn compose-btn" data-bulk="send-compose">✉ Send via Brevo (${selN})</button>
-      ` : `
-        <button class="btn small batch-btn" data-bulk="restore">↺ Restore to Leads</button>
-        <button class="btn small batch-btn live-btn" data-bulk="move-to-live">→ Mark as Live</button>
-      `}
-
-      <button class="btn small batch-btn danger" data-bulk="delete">✕ Delete</button>
-      <button class="btn small batch-btn secondary" data-bulk="clear">Clear</button>
-    </div>` : ''}
-
-    ${state.sourceFilter === 'ahp' ? `
-    <div class="specialty-tabs">
-      ${[
-        {k:'all',              l:'All Specialties'},
-        {k:'physiotherapy',    l:'Physiotherapy'},
-        {k:'occupational_therapy', l:'OT'},
-        {k:'radiography',      l:'Radiography'},
-        {k:'speech_language',  l:'Speech & Language'},
-        {k:'dietetics',        l:'Dietetics'},
-        {k:'podiatry',         l:'Podiatry'},
-        {k:'orthoptics',       l:'Orthoptics'},
-        {k:'art_therapy',      l:'Arts Therapies'},
-        {k:'paramedic',        l:'Paramedic'},
-        {k:'prosthetics',      l:'Prosthetics'},
-        {k:'pharmacy',         l:'Pharmacy (NHS)'},
-        {k:'biomedical_science', l:'BMS'},
-        {k:'sterile_services', l:'Sterile Services'},
-        {k:'mental_health', l:'Mental Health'},
-        {k:'camhs', l:'CAMHS'},
-        {k:'operating_theatres', l:'Theatres'},
-        {k:'audiology', l:'Audiology'},
-        {k:'gp_surgery',      l:'GP Surgeries'},
-      ].map(s => `<button class="stage-tab${state.ahpSpecialtyFilter===s.k?' active':''}" data-specialty="${s.k}">${s.l}</button>`).join('')}
-    </div>` : ''}
-
-    ${state.sourceFilter === 'hcp' ? `
-    <div class="stage-tabs">
-      ${[{k:'all', l:'All team types'}, ...HCP_AREAS].map(s => `<button class="stage-tab${state.hcpAreaFilter===s.k?' active':''}" data-area="${s.k}">${s.l}</button>`).join('')}
-    </div>
-    ${renderHcpTargeting('db-hcp', state.hcpAudienceFilter, state.hcpCommissioningFilter)}` : ''}
-
-    ${state.subTab === 'lead' || (state.sourceFilter==='hcp' && state.subTab==='eligible') || intakeView ? `
-    <div class="stage-tabs">
-      ${[
-        {k:'all',       l:'All'},
-        {k:'recent', l:'Recently added'},
-        {k:'new',       l:'Uncontacted'},
-        {k:'contacted', l:'Contacted'},
-        {k:'responded', l:'Responded'},
-        {k:'meeting',   l:'Meeting'},
-        {k:'followup',  l:'Follow-up Due'},
-      ].map(s => `<button class="stage-tab${(state.dbStage===s.k||(s.k==='recent'&&intakeView))?' active':''}" data-dstage="${s.k}">${s.l}</button>`).join('')}
-    </div>` : ''}
-    ${intakeView ? `<div class="toolbar"><label for="recent-import-period">Added</label><select class="select" id="recent-import-period">${[['today','Today'],['yesterday','Yesterday'],['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days']].map(([value,label])=>'<option value="'+value+'" '+((state.dbStage==='added_today'?'today':state.recentImportPeriod||'7')===value?'selected':'')+'>'+label+'</option>').join('')}</select><label><input type="checkbox" id="recent-import-uncontacted" ${state.recentImportUncontactedOnly?'checked':''} /> Uncontacted only</label></div><p class="muted">UK calendar dates include overnight and weekend imports. Recently added includes all statuses; Uncontacted only excludes recorded email history and contacts already progressed.</p>` : ''}
-    <div class="subtabs">
-      ${state.sourceFilter === 'hcp' && !intakeView ? `<div class="subtab ${state.subTab==='eligible'?'active':''}" data-subtab="eligible">Leads + Live</div>` : ''}
-      ${intakeView ? '<div class="subtab active">'+(state.recentImportUncontactedOnly?'Uncontacted leads':'All statuses')+'</div>' : ''}
-      <div class="subtab ${state.subTab === 'lead' ? 'active' : ''}" data-subtab="lead">
-        Leads
-        <span class="count">${state.sourceStatusCounts.lead !== null ? state.sourceStatusCounts.lead.toLocaleString() : state.counts.lead.toLocaleString()}</span>
-      </div>
-      <div class="subtab ${state.subTab === 'live' ? 'active' : ''}" data-subtab="live">
-        Live
-        <span class="count">${state.sourceStatusCounts.live !== null ? state.sourceStatusCounts.live.toLocaleString() : state.counts.live.toLocaleString()}</span>
-      </div>
-      <div class="subtab ${state.subTab === 'unsubscribed' ? 'active' : ''}" data-subtab="unsubscribed">
-        Unsubscribes
-        <span class="count">${state.sourceStatusCounts.unsubscribed !== null ? state.sourceStatusCounts.unsubscribed.toLocaleString() : state.counts.unsubscribed.toLocaleString()}</span>
-      </div>
-    </div>
-    <div class="toolbar">
-      <input class="search" id="search-input" placeholder="Search by name, org, group, job title, email, town, postcode..." value="${esc(state.search)}" />
-      <select class="select" id="region-filter">
-        <option value="">All regions</option>
-        ${state.regions.map(r => `<option value="${esc(r)}" ${state.regionFilter===r?'selected':''}>${esc(r)}</option>`).join('')}
-      </select>
-      <select class="select" id="country-filter">
-        <option value="">All countries</option>
-        ${state.countries.map(c => `<option value="${esc(c)}" ${state.countryFilter===c?'selected':''}>${esc(c)}</option>`).join('')}
-      </select>
-      <button class="btn primary" id="add-contact-btn">+ Add Contact</button>
-    </div>
-    <div class="muted" style="margin-bottom:8px;">
-      ${state.loadingPage ? 'Loading...' : `Showing ${total === 0 ? 0 : start + 1}–${Math.min(start + state.pageSize, total)} of ${total}`}
-    </div>
-    <div class="table-wrap">
-      ${total === 0 && !state.loadingPage ? '<div class="empty">No contacts match your filters.</div>' : `
-      <table class="table">
-        <thead>
-          <tr>
-            <th style="width:36px;text-align:center">
-              ${intakeView ? 'Status / stage' : canSelectDatabasePage() ? `<label style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap" title="Select all contacts on this page"><input type="checkbox" id="select-all-cb" aria-label="Select all contacts on this page" ${allPageSel ? 'checked' : ''} ${state.currentRows.length ? '' : 'disabled'} />Select all</label>` + ` <button class="btn small secondary" id="db-select-matching" style="margin-left:6px;" ${state.currentRows.length ? '' : 'disabled'} title="Select every contact matching the current filters, up to the 500 campaign limit">Select all matching</button>` : 'Select'}
-            </th>
-            ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `<th data-sort="org">${state.sourceFilter==='hcp'?'Organisation':'Surgery / Org'}</th><th data-sort="care_group">${state.sourceFilter==='hcp'?'Audience / readiness':'Group'}</th><th data-sort="first_name" class="hide-sm">Contact</th><th>Phone</th><th data-sort="email">Email</th><th data-sort="town" class="hide-sm">Town / Address</th><th data-sort="region">Region</th>` : ''}
-            ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
-              <th>Contact Name</th>
-              <th>Job Title</th><th class="hide-sm">Vacancy</th>
-              <th>Email</th>
-              <th class="hide-sm">Phone</th>
-              <th class="hide-sm">NHS Trust</th>
-              <th class="hide-sm">Specialty</th>
-              <th>Last Emailed</th>
-              <th>Band</th>
-              <th>Date Added</th>
-              <th>NHS Jobs</th>` : `
-              <th data-sort="last_emailed_at">Last Emailed</th>
-              <th data-sort="follow_up_date">Follow-up</th>`}
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${state.currentRows.map(c => `
-            <tr class="${state.selected.has(c.id) ? 'row-selected' : ''}">
-              <td style="width:36px;text-align:center">
-                ${intakeView ? esc(c.status) + ' / ' + esc(effectiveContactStage(c)) : `<input type="checkbox" class="row-cb" data-id="${c.id}" ${state.selected.has(c.id) ? 'checked' : ''} />`}
-              </td>
-              ${!['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter) ? `
-              <td class="ellipsis" title="${esc(c.org)}">${esc(c.org)}</td>
-              <td>${esc(c.care_group) || '<span class="muted">—</span>'}${state.sourceFilter==='hcp' ? '<div class="muted" style="font-size:11px;" title="'+esc(c.hcp_qualification_notes || '')+'">'+esc(HCP_READINESS_LABELS[c.hcp_outreach_status] || 'Needs qualification')+'</div>' : ''}${state.sourceFilter==='hcp' && c.group_name ? '<div class="muted" style="font-size:11px;">'+esc(c.group_name.replace(/^HCP - /,''))+'</div>' : ''}</td>
-              <td class="hide-sm">${esc([c.title, c.first_name, c.last_name].filter(Boolean).join(' ')) || '<span class="muted">—</span>'}${state.sourceFilter==='hcp' && c.job_title ? '<div class="muted" style="font-size:11px;">'+esc(c.job_title)+'</div>' : ''}</td>
-              <td>${esc(c.phone) || '<span class="muted">—</span>'}</td>
-              <td class="ellipsis" title="${esc(c.email)}">${esc(c.email)}</td>
-              <td class="hide-sm">${esc(c.town || c.add1) || '<span class="muted">—</span>'}</td>
-              <td>${esc(c.region) || '<span class="muted">—</span>'}</td>` : ''}
-              ${['ahp','anp','enp','nhs_scotland','hse'].includes(state.sourceFilter)
-                ? `<td>${esc(([c.first_name,c.last_name].filter(Boolean).join(' ')) || '—')}</td>
-                   <td>${esc(c.job_title || '—')}</td><td class="hide-sm">${esc(c.vacancy_title || '—')}</td>
-                   <td class="ellipsis" title="${esc(c.email)}">${esc(c.email || '—')}</td>
-                   <td class="hide-sm">${esc(c.phone || '—')}</td>
-                   <td class="ellipsis hide-sm" title="${esc(c.org)}">${esc(c.org || '—')}</td>
-                   <td class="hide-sm">${esc(extractSpecialty(c.notes))}</td>
-                   <td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
-                   <td>${esc(c.band_requested || '—')}</td>
-                   <td>${c.created_at ? esc(c.created_at.slice(0,10)) : '—'}</td>
-                   <td>${c.source_url ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener" class="nhs-jobs-link" title="View advert">${state.sourceFilter === 'hse' ? '🔗 HSE' : '🔗 NHS Jobs'}</a>` : '<span class="muted">—</span>'}</td>`
-                : `<td>${c.last_emailed_at ? esc(c.last_emailed_at.slice(0, 10)) : '<span class="muted">—</span>'}</td>
-                <td>${renderFollowUpDate(c.follow_up_date)}</td>`}
-              <td class="actions">
-                <button class="btn small" data-action="edit" data-id="${c.id}">Edit</button>
-                ${c.status !== 'lead' ? `<button class="btn small" data-action="move-lead" data-id="${c.id}">→ Leads</button>` : ''}
-                ${c.status !== 'live' ? `<button class="btn small" data-action="move-live" data-id="${c.id}">→ Live</button>` : ''}
-                ${c.status !== 'unsubscribed' ? `<button class="btn small" data-action="move-unsub" data-id="${c.id}">→ Unsubs</button>` : ''}
-                <button class="btn small danger" data-action="delete" data-id="${c.id}">Delete</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-      <div class="pagination">
-        <div>Page ${state.page} of ${totalPages}</div>
-        <div class="pages">
-          <button class="page-btn" data-page="1" ${state.page === 1 ? 'disabled' : ''}>‹‹</button>
-          <button class="page-btn" data-page="${state.page - 1}" ${state.page === 1 ? 'disabled' : ''}>‹ Prev</button>
-          <button class="page-btn" data-page="${state.page + 1}" ${state.page === totalPages ? 'disabled' : ''}>Next ›</button>
-          <button class="page-btn" data-page="${totalPages}" ${state.page === totalPages ? 'disabled' : ''}>››</button>
-        </div>
-      </div>
-      `}
-    </div>
-  `;
+  return renderContactWorkspace();
 }
 
 function renderTemplates() {
@@ -1541,9 +1328,12 @@ function canSelectDatabasePage() {
 // view. Capped at the same 500 a campaign allows, so the selection can
 // always actually be sent.
 async function selectAllMatchingContacts() {
-  const { count } = await applyContactFilters(sb.from('contacts_with_last_email').select('id', { count: 'exact', head: true }));
-  const { data, error } = await applyContactFilters(sb.from('contacts_with_last_email').select('id'))
+  if(!canSelectDatabasePage()||state.loadingPage)return;
+  const fingerprint=()=>JSON.stringify([state.user?.id,state.view,state.sourceFilter,state.subTab,state.dbStage,state.search,state.regionFilter,state.countryFilter,state.ahpSpecialtyFilter,state.hcpAreaFilter,state.hcpAudienceFilter,state.hcpCommissioningFilter,state.hcpReadyOnly,state.dbOwnerFilter,state.dbBandFilter]);
+  const requested=fingerprint();
+  const { data, error, count } = await applyContactFilters(sb.from('contacts_with_last_email').select('id', {count:'exact'}))
     .order('id', { ascending: true }).limit(500);
+  if(requested!==fingerprint())return;
   if (error) { toast('Could not select: ' + error.message, 'error'); return; }
   const ids = (data || []).map(r => r.id);
   state.selected = new Set(ids);
@@ -3632,7 +3422,7 @@ function renderModal() {
             <option value="bounced" ${c.status==='bounced'?'selected':''}>Bounced</option>
           </select>
         </div>` : ''}
-      ${currentSource === 'hcp' ? `<div class="field-row"><div class="field"><label for="m-hcp-pathway">HCP service pathway</label><select id="m-hcp-pathway">${[['complex_care','Adult / children’s complex-care packages'],['mental_health','MH community / discharge / Section 117'],['both','Both pathways'],['needs_review','Needs qualification'],['other','Other / excluded']].map(([k,l])=>`<option value="${k}" ${c.hcp_pathway===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div><div class="field"><label for="m-hcp-readiness">Outreach / re-engagement status</label><select id="m-hcp-readiness">${Object.entries(HCP_READINESS_LABELS).map(([k,l])=>`<option value="${k}" ${(c.hcp_outreach_status||'needs_review')===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div></div><div class="field"><label for="m-hcp-evidence">Role evidence / hold reason / re-engagement trigger</label><textarea id="m-hcp-evidence">${esc(c.hcp_qualification_notes||'')}</textarea><p class="muted">Before releasing a CQC or framework hold, record the published outcome or changed requirement. This does not change an unsubscribe or bounced status.</p></div>` : ''}
+      ${currentSource === 'hcp' ? `<div class="field-row"><div class="field"><label for="m-hcp-pathway">HCP service pathway</label><select id="m-hcp-pathway">${[['complex_care','Adult / children’s complex-care packages'],['mental_health','MH community / discharge / Section 117'],['both','Both pathways'],['needs_review','General HCP / service not specified'],['other','Other / excluded']].map(([k,l])=>`<option value="${k}" ${c.hcp_pathway===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div><div class="field"><label for="m-hcp-readiness">Outreach / re-engagement status</label><select id="m-hcp-readiness">${Object.entries(HCP_READINESS_LABELS).map(([k,l])=>`<option value="${k}" ${(c.hcp_outreach_status||'ready')===k?'selected':''}>${esc(l)}</option>`).join('')}</select></div></div><div class="field"><label for="m-hcp-evidence">Role evidence / hold reason / re-engagement trigger</label><textarea id="m-hcp-evidence">${esc(c.hcp_qualification_notes||'')}</textarea><p class="muted">Before releasing a CQC or framework hold, record the published outcome or changed requirement. This does not change an unsubscribe or bounced status.</p></div>` : ''}
       ${currentSource==='hcp' && c.department==='case_management' ? `<div class="field"><label for="m-case-type">Case-management service</label><select id="m-case-type">${HCP_CASE_AUDIENCES.map(a=>`<option value="${esc(a.value)}" ${c.group_name===a.value?'selected':''}>${esc(a.l)}</option>`).join('')}</select></div>` : ''}
       <div class="field"><label>Notes</label><textarea id="m-notes" placeholder="Optional notes (the Source above is stored automatically — you don't need to type it here)">${esc(userNotes)}</textarea></div>
       <div class="modal-actions">
@@ -3699,6 +3489,7 @@ function renderModal() {
 // ============================================================================
 
 function bindEvents() {
+  if(typeof bindContactWorkspace==='function')bindContactWorkspace();
   const activityTeam=document.getElementById('user-activity-team');
   if(activityTeam)activityTeam.onchange=e=>{state.userActivityTeam=e.target.value;render();};
   const activityAudience=document.getElementById('user-activity-audience');
@@ -3717,6 +3508,7 @@ function bindEvents() {
 
   document.querySelectorAll('.tab').forEach(t => {
     t.onclick = async () => {
+      state.dbDrawer=null;
       state.view = t.dataset.view;
       state.page = 1;
       if (state.view === 'dashboard') { loadDashboard(); return; }
@@ -3746,7 +3538,7 @@ function bindEvents() {
 
   for (const [id, key] of [['db-hcp-audience','hcpAudienceFilter'],['db-hcp-commissioning','hcpCommissioningFilter']]) {
     const el=document.getElementById(id);
-    if(el) el.onchange=async e=>{state[key]=e.target.value;if(key==='hcpAudienceFilter'){if(e.target.value.startsWith('cm_'))state.hcpAreaFilter='case_management';if(['cqc_hold','procurement_hold','needs_review','not_relevant','all'].includes(e.target.value))state.hcpReadyOnly=false;}state.page=1;await loadContactsPage();render();};
+    if(el) el.onchange=async e=>{state[key]=e.target.value;if(key==='hcpAudienceFilter'){state.hcpAreaFilter=e.target.value.startsWith('cm_')?'case_management':'all';if(['cqc_hold','procurement_hold','needs_review','not_relevant','all'].includes(e.target.value))state.hcpReadyOnly=false;}state.page=1;await loadContactsPage();render();};
   }
   document.querySelectorAll('[data-hcp-view]').forEach(btn => {
     btn.onclick=async()=>{
@@ -4012,7 +3804,7 @@ function bindEvents() {
     search.oninput = (e) => {
       clearTimeout(timer);
       state.search = e.target.value;
-      timer = setTimeout(async () => { state.page = 1; await loadContactsPage(); render(); search.focus(); }, 400);
+      timer = setTimeout(async () => { state.page = 1; await loadContactsPage(); render(); const field=document.getElementById('search-input'); if(field){field.focus();field.setSelectionRange(field.value.length,field.value.length);} }, 400);
     };
   }
 
@@ -4064,13 +3856,13 @@ function bindEvents() {
   if (composeTemplate) composeTemplate.onchange = (e) => { state.composeTemplateId = e.target.value; render(); };
   const composeList = $('#compose-list');
   const composeSource = $('#compose-source');
-  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composeSpecialtyFilter = 'all'; state.composeAreaFilter = 'all'; state.composeHcpAudienceFilter='complex_care'; state.composeHcpCommissioningFilter='all'; state.composeListFilter=state.composeSourceFilter==='hcp'?'eligible':'lead'; state.composePreviewCounts = null; render(); };
+  if (composeSource) composeSource.onchange = (e) => { state.composeSourceFilter = e.target.value; state.composeSpecialtyFilter = 'all'; state.composeAreaFilter = 'all'; state.composeHcpAudienceFilter='all'; state.composeHcpCommissioningFilter='all'; state.composeListFilter=state.composeSourceFilter==='hcp'?'eligible':'lead'; state.composePreviewCounts = null; render(); };
   for (const [id,key] of [['compose-hcp-audience','composeHcpAudienceFilter'],['compose-hcp-commissioning','composeHcpCommissioningFilter']]) {
     const el=document.getElementById(id);
     if(el) el.onchange=e=>{state[key]=e.target.value;if(key==='composeHcpAudienceFilter' && e.target.value.startsWith('cm_'))state.composeAreaFilter='case_management';state.composePreviewCounts=null;render();};
   }
   const composeArea = $('#compose-area');
-  if (composeArea) composeArea.onchange = (e) => { state.composeAreaFilter = e.target.value;if(e.target.value==='case_management')state.composeHcpAudienceFilter='cm_all';else if(state.composeHcpAudienceFilter.startsWith('cm_'))state.composeHcpAudienceFilter='complex_care'; state.composePreviewCounts = null; render(); };
+  if (composeArea) composeArea.onchange = (e) => { state.composeAreaFilter = e.target.value;if(e.target.value==='case_management')state.composeHcpAudienceFilter='cm_all';else if(state.composeHcpAudienceFilter.startsWith('cm_'))state.composeHcpAudienceFilter='all'; state.composePreviewCounts = null; render(); };
   const composeSpecialty = $('#compose-specialty');
   if (composeSpecialty) composeSpecialty.onchange = (e) => { state.composeSpecialtyFilter = e.target.value; state.composePreviewCounts = null; render(); };
   if (composeList) composeList.onchange = (e) => { state.composeListFilter = e.target.value; state.composePreviewCounts = null; render(); };
