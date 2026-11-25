@@ -747,7 +747,7 @@ async function changeDatabaseSource(source) {
   const keepIntake=isRecentImportView(state.dbStage);
   Object.assign(state,{sourceFilter:source,subTab:keepIntake?'all':source==='hcp'?'eligible':'lead',
     dbStage:keepIntake?state.dbStage:'all',ahpSpecialtyFilter:'all',hcpAreaFilter:'all',hcpAudienceFilter:'all',hcpCommissioningFilter:'all',selected:new Set(),
-    page:1,search:'',regionFilter:'',countryFilter:'',dbBandFilter:'',hcpReadyOnly:false,dbDrawer:null});
+    page:1,search:'',regionFilter:'',countryFilter:'',dbBandFilter:'',hcpReadyOnly:source==='hcp',dbDrawer:null});
   await Promise.all([loadSourceStatusCounts(),loadContactsPage()]);render();
 }
 
@@ -860,6 +860,7 @@ async function loadContactsPage() {
   const requestId = ++contactsPageRequest;
   state.loadingPage = true;
   state.selected = new Set();
+  if(state.view==='database' && typeof renderContactWorkspace==='function')render();
   const start = (state.page - 1) * state.pageSize;
   const end = start + state.pageSize - 1;
 
