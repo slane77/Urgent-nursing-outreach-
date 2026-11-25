@@ -27,9 +27,15 @@ function harness(rows=[],delay){
  vm.runInContext(section('const HCP_AREAS =','const MODAL_SOURCE_OPTIONS =')+section('function applyComposeSourceFilter(','async function buildComposeQueueFromDb()')+section('function contactSendError(','async function reviewContactMailshot(')+section('async function sendFilteredViaBrevo()','async function buildAllComposeContactsFromDb()'),ctx);
  return {ctx,state,template,calls,messages,queries,reads:()=>reads};
 }
-function contacts(n){return Array.from({length:n},(_,i)=>({id:String(i),email:`contact${i}@example.invalid`,org:`Organisation ${i}`,notes:'Source: HCP Complex Care',status:'lead',group_name:"HCP - Priority children's complex care",care_group:'Lewisham',region:'London',country:'England',town:'Lewisham',department:'icb'}));}
+function contacts(n){return Array.from({length:n},(_,i)=>({id:String(i),email:`contact${i}@example.invalid`,org:`Organisation ${i}`,notes:'Source: HCP Complex Care',hcp_outreach_status:'ready',hcp_pathway:'complex_care',status:'lead',group_name:"HCP - Priority children's complex care",care_group:'Lewisham',region:'London',country:'England',town:'Lewisham',department:'icb'}));}
 test('197 matching contacts reach one review without queuing any emails',async()=>{
  const h=harness(contacts(197));await h.ctx.sendFilteredViaBrevo();assert.equal(h.calls.length,1);assert.equal(h.calls[0][1].length,197);assert.equal(h.calls[0][2].source,'hcp');assert.equal(h.state.composeReviewLoading,false);
+});
+test('case-management review carries the service segment and excludes held records',async()=>{
+ const rows=contacts(4).map(r=>({...r,department:'case_management',group_name:'HCP - Case management - Children & young people'}));
+ rows[1].hcp_outreach_status='cqc_hold';rows[2].status='unsubscribed';rows[3].group_name='HCP - Case management - Adult injury & rehabilitation';
+ const h=harness(rows);h.state.composeAreaFilter='case_management';h.state.composeHcpAudienceFilter='cm_cyp';
+ await h.ctx.sendFilteredViaBrevo();assert.equal(h.calls.length,1);assert.deepEqual(Array.from(h.calls[0][1]),['0']);
 });
 test('source, status, HCP audience, commissioning area and location filters all apply',async()=>{
  const base=contacts(1)[0],rows=[base,...[

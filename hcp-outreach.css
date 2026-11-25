@@ -1,0 +1,32 @@
+.hcp-source-switch{margin-bottom:16px;border:1px solid #dce5ec;border-radius:12px;background:white;overflow:hidden}
+.hcp-source-switch>summary{padding:12px 18px;cursor:pointer;color:#426075;font-size:13px;font-weight:600}
+.hcp-workspace{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:24px 28px;background:linear-gradient(110deg,#123f53,#16778a);color:white;border-radius:16px 16px 0 0}
+.hcp-eyebrow{font-size:11px;letter-spacing:.15em;font-weight:700;color:#b3e8e4}
+.hcp-workspace h2{margin:7px 0;font-size:28px;letter-spacing:-.02em}
+.hcp-workspace p{margin:0;color:#d8eeef;font-size:14px}
+.hcp-workspace .btn{flex-shrink:0;background:#fff;color:#164957;border:0}
+.hcp-quickviews{display:flex;gap:8px;flex-wrap:wrap;padding:16px 20px;margin-bottom:18px;background:#fff;border:1px solid #dae5ea;border-top:0;border-radius:0 0 16px 16px}
+.hcp-quickviews .btn{border-radius:20px;font-size:13px;padding:9px 15px}
+.hcp-help{font-size:12px;color:#62778b;margin:0 0 16px}
+.hcp-help summary{cursor:pointer}
+.hcp-ready-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:#274d60;margin-bottom:14px}
+.hcp-help p{max-width:960px;line-height:1.6}
+@media(max-width:700px){.hcp-workspace{padding:20px;align-items:flex-start;flex-direction:column}.hcp-workspace h2{font-size:24px}.hcp-quickviews{padding:12px}}
+.tabs.workspace-nav{position:fixed;top:68px;bottom:0;left:0;width:205px;display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:26px 14px;background:#fff;border-right:1px solid #dce5ec;border-bottom:0;overflow:auto;z-index:8}
+.workspace-nav .tab{display:block;width:100%;text-align:left;font-family:inherit;background:transparent;border:0;border-radius:9px;padding:12px 16px;font-size:14px;color:#546a7e}
+.workspace-nav .tab.active{background:#eaf3fb;color:#14689d;box-shadow:inset 3px 0 #207eb0;font-weight:700}
+.workspace-nav .tab:hover{background:#f0f6fa}
+.workspace-nav-label{font-size:10px;letter-spacing:.16em;font-weight:700;color:#8a9cab;padding:0 16px 12px}
+.workspace-nav-note{font-size:12px;line-height:1.8;color:#8a9cab;padding:24px 16px;margin-top:auto}
+.main.workspace-main{margin-left:205px;max-width:none;width:calc(100% - 205px);padding:28px 32px}
+.workspace-page-heading{margin-bottom:22px}
+.workspace-page-heading .hcp-eyebrow{color:#2479a4}
+.workspace-page-heading h2{font-size:28px;color:#193c53;margin:8px 0}
+.workspace-page-heading p{font-size:14px;color:#6c8092;line-height:1.6}
+.workspace-import.import-wrap{max-width:1100px}
+.import-source-picker{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}
+.import-source-picker .btn{padding:12px 18px}
+.import-review-strip{display:flex;gap:18px;align-items:center;justify-content:space-between;background:#eaf3fb;border:1px solid #d4e5f0;border-radius:12px;padding:18px 20px;margin-bottom:20px;font-size:14px;color:#284c65}
+.import-review-strip p{font-size:12px;margin-top:5px;color:#5e788d}
+.workspace-import[data-import-active="nhs"] [data-import-group]:not([data-import-group="nhs"]),.workspace-import[data-import-active="scotland"] [data-import-group]:not([data-import-group="scotland"]),.workspace-import[data-import-active="ireland"] [data-import-group]:not([data-import-group="ireland"]),.workspace-import[data-import-active="csv"] [data-import-group]:not([data-import-group="csv"]){display:none}
+@media(max-width:1000px){.tabs.workspace-nav{position:relative;top:auto;bottom:auto;left:auto;width:auto;flex-direction:row;flex-wrap:wrap;padding:10px 14px;gap:4px}.workspace-nav .tab{width:auto;padding:10px 12px}.workspace-nav-label,.workspace-nav-note{display:none}.main.workspace-main{margin-left:0;width:100%;padding:20px}.import-review-strip{align-items:flex-start;flex-direction:column}.header .badge{display:none}}
